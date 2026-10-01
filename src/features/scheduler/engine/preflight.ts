@@ -18,6 +18,11 @@ export type SlotCapacity = {
   difference: number;
 };
 
+export type SchedulerBuildForecast =
+  | "COMPLETE_EXPECTED"
+  | "PARTIAL_EXPECTED"
+  | "NO_CLIENTS";
+
 export type SchedulerReadiness = {
   staffCount: number;
   clientCount: number;
@@ -30,6 +35,9 @@ export type SchedulerReadiness = {
   surplusCoverageHours: number;
   peakConcurrentClients: number;
   peakAvailableStaff: number;
+  maximumConcurrentStaffShortage: number;
+  estimatedAdditionalStaffNeeded: number;
+  buildForecast: SchedulerBuildForecast;
   shortageSlots: SlotCapacity[];
   slotCapacity: SlotCapacity[];
   breakWindowStart: string;
@@ -71,6 +79,25 @@ function collectTimeSlots(
   }
 
   return [...slots].sort();
+}
+
+function calculateBuildForecast(
+  clientCount: number,
+  shortageSlots: SlotCapacity[],
+  additionalLaborHoursNeeded: number
+): SchedulerBuildForecast {
+  if (clientCount === 0) {
+    return "NO_CLIENTS";
+  }
+
+  if (
+    shortageSlots.length > 0 ||
+    additionalLaborHoursNeeded > 0
+  ) {
+    return "PARTIAL_EXPECTED";
+  }
+
+  return "COMPLETE_EXPECTED";
 }
 
 export function calculateSchedulerReadiness(
@@ -139,6 +166,20 @@ export function calculateSchedulerReadiness(
     (peak, slot) => Math.max(peak, slot.staffAvailable),
     0
   );
+  const maximumConcurrentStaffShortage = shortageSlots.reduce(
+    (largestShortage, slot) =>
+      Math.max(largestShortage, Math.abs(slot.difference)),
+    0
+  );
+  const estimatedAdditionalStaffNeeded = Math.max(
+    maximumConcurrentStaffShortage,
+    additionalLaborHoursNeeded > 0 ? 1 : 0
+  );
+  const buildForecast = calculateBuildForecast(
+    attendingClients.length,
+    shortageSlots,
+    additionalLaborHoursNeeded
+  );
 
   const warnings: string[] = [];
 
@@ -153,6 +194,14 @@ export function calculateSchedulerReadiness(
   if (shortageSlots.length > 0) {
     warnings.push(
       `${shortageSlots.length} time slot(s) have more clients requiring 1:1 coverage than available staff.`
+    );
+  }
+
+  if (maximumConcurrentStaffShortage > 0) {
+    warnings.push(
+      `The largest simultaneous staffing gap is ${maximumConcurrentStaffShortage} staff member${
+        maximumConcurrentStaffShortage === 1 ? "" : "s"
+      }.`
     );
   }
 
@@ -176,6 +225,9 @@ export function calculateSchedulerReadiness(
     surplusCoverageHours,
     peakConcurrentClients,
     peakAvailableStaff,
+    maximumConcurrentStaffShortage,
+    estimatedAdditionalStaffNeeded,
+    buildForecast,
     shortageSlots,
     slotCapacity,
     breakWindowStart: readinessRules.breakWindowStart,
