@@ -31,6 +31,11 @@ type DateRangeCounts = {
   totalRecords: number;
 };
 
+type LocationLeanRecord = {
+  name?: string;
+  code?: string;
+};
+
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const DELETE_CONFIRMATION = "DELETE";
 
@@ -39,8 +44,30 @@ function dateIsValid(value: string): boolean {
     return false;
   }
 
-  const parsed = new Date(`${value}T12:00:00`);
-  return !Number.isNaN(parsed.getTime());
+  const [yearText, monthText, dayText] = value.split("-");
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+
+  if (
+    !Number.isInteger(year) ||
+    !Number.isInteger(month) ||
+    !Number.isInteger(day) ||
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > 31
+  ) {
+    return false;
+  }
+
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+
+  return (
+    parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === month - 1 &&
+    parsed.getUTCDate() === day
+  );
 }
 
 function validateRequest(body: DateRangeRequest): {
@@ -65,6 +92,20 @@ function validateRequest(body: DateRangeRequest): {
     startDate,
     endDate,
   };
+}
+
+async function loadLocation(
+  locationId: string
+): Promise<LocationLeanRecord | null> {
+  const record = await Location.findById(locationId)
+    .select("name code")
+    .lean();
+
+  if (!record || Array.isArray(record)) {
+    return null;
+  }
+
+  return record as unknown as LocationLeanRecord;
 }
 
 async function countDateRangeRecords(
@@ -158,9 +199,7 @@ export async function POST(request: Request) {
 
     await connectToDatabase();
 
-    const location = await Location.findById(validated.locationId)
-      .select("name code")
-      .lean();
+    const location = await loadLocation(validated.locationId);
 
     if (!location) {
       return NextResponse.json(
@@ -252,10 +291,7 @@ export async function DELETE(request: Request) {
     }
 
     const database = await connectToDatabase();
-
-    const location = await Location.findById(validated.locationId)
-      .select("name code")
-      .lean();
+    const location = await loadLocation(validated.locationId);
 
     if (!location) {
       return NextResponse.json(
