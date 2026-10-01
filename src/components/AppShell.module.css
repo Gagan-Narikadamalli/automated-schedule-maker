@@ -110,8 +110,27 @@
 
 .sidebarNavigation {
   display: grid;
-  gap: 6px;
-  padding: 14px 12px 18px;
+  gap: 18px;
+  padding: 14px 12px 20px;
+}
+
+.navigationGroup {
+  display: grid;
+  gap: 7px;
+}
+
+.navigationGroupLabel {
+  padding: 0 9px;
+  color: #9fc7d9;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.navigationGroupItems {
+  display: grid;
+  gap: 5px;
 }
 
 .sidebarLink {
