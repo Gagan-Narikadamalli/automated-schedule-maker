@@ -1,1 +1,32 @@
-import{Schema,model,models}from"mongoose";const s=new Schema({name:{type:String,required:true},code:{type:String,required:true,unique:true},active:{type:Boolean,default:true}},{timestamps:true});export const Location=models.Location||model("Location",s);
+import { model, models, Schema } from "mongoose";
+
+const LocationSchema = new Schema(
+  {
+    name: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    code: {
+      type: String,
+      required: true,
+      unique: true,
+      uppercase: true,
+      trim: true,
+    },
+    timezone: {
+      type: String,
+      default: "America/New_York",
+    },
+    active: {
+      type: Boolean,
+      default: true,
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+export const Location =
+  models.Location ?? model("Location", LocationSchema);
