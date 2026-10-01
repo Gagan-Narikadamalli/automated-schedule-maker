@@ -1,4 +1,9 @@
+import {
+  getHistoricalExactSlotScore,
+  getHistoricalPairingScore,
+} from "./historicalPatterns";
 import type {
+  HistoricalPatternScores,
   SchedulerAssignment,
   SchedulerClient,
   SchedulerRules,
@@ -11,6 +16,7 @@ export type CandidateScoreContext = {
   startTime: string;
   assignments: SchedulerAssignment[];
   referenceAssignments: SchedulerAssignment[];
+  historicalPatterns?: HistoricalPatternScores;
   rules: SchedulerRules;
 };
 
@@ -136,6 +142,44 @@ function getReferenceHistoryScore(
   return score;
 }
 
+function getImportedHistoricalPatternScore(
+  staffId: string,
+  clientId: string,
+  startTime: string,
+  historicalPatterns: HistoricalPatternScores | undefined,
+  rules: SchedulerRules,
+  isRotationClient: boolean
+): number {
+  if (
+    rules.autoUseHistoricalPatterns === false ||
+    !historicalPatterns ||
+    historicalPatterns.scheduleDayCount <= 0
+  ) {
+    return 0;
+  }
+
+  const pairingPriority = rules.historicalPairingPriority ?? 0;
+  const exactSlotPriority = rules.historicalSlotPriority ?? 0;
+  const pairingFrequency = getHistoricalPairingScore(
+    historicalPatterns,
+    staffId,
+    clientId
+  );
+  const exactSlotFrequency = getHistoricalExactSlotScore(
+    historicalPatterns,
+    staffId,
+    clientId,
+    startTime
+  );
+  const rotationMultiplier = isRotationClient ? 0.25 : 1;
+
+  return (
+    (pairingFrequency * pairingPriority +
+      exactSlotFrequency * exactSlotPriority) *
+    rotationMultiplier
+  );
+}
+
 export function getRoleCoveragePriority(
   staffMember: SchedulerStaff,
   rules: SchedulerRules
@@ -174,10 +218,8 @@ function getWeeklyHoursScore(
     60;
   const previouslyScheduledHours =
     staffMember.scheduledWeeklyClientHoursBeforeDate ?? 0;
-  const projectedHours =
-    previouslyScheduledHours + assignedTodayHours;
-  const hoursToTarget =
-    staffMember.targetWeeklyHours - projectedHours;
+  const projectedHours = previouslyScheduledHours + assignedTodayHours;
+  const hoursToTarget = staffMember.targetWeeklyHours - projectedHours;
 
   if (hoursToTarget > 0) {
     return Math.min(hoursToTarget, 8) * weeklyHoursPriority;
@@ -192,12 +234,13 @@ export function scoreCandidate({
   startTime,
   assignments,
   referenceAssignments,
+  historicalPatterns,
   rules,
 }: CandidateScoreContext): number {
   let score = 0;
 
   // Role points remain visible in diagnostics and tie-breaking. The generator
-  // also enforces the clinic role tier before comparing soft preferences.
+  // separately enforces the clinic role tier before comparing soft preferences.
   score += getRoleCoveragePriority(staffMember, rules);
 
   const relationship =
@@ -229,6 +272,15 @@ export function scoreCandidate({
     client.id,
     startTime,
     referenceAssignments,
+    rules,
+    isRotationClient
+  );
+
+  score += getImportedHistoricalPatternScore(
+    staffMember.id,
+    client.id,
+    startTime,
+    historicalPatterns,
     rules,
     isRotationClient
   );
@@ -266,10 +318,7 @@ export function scoreCandidate({
   }
 
   if (isRotationClient) {
-    const clientStaffIds = getClientStaffIds(
-      client.id,
-      assignments
-    );
+    const clientStaffIds = getClientStaffIds(client.id, assignments);
     const desiredDifferentStaff = Math.max(
       client.desiredDifferentStaffPerDay ??
         (client.supportLevel === "HIGH_SUPPORT" ? 3 : 2),
@@ -281,13 +330,9 @@ export function scoreCandidate({
       !clientStaffIds.has(staffMember.id)
     ) {
       const highSupportMultiplier =
-        client.supportLevel === "HIGH_SUPPORT"
-          ? 1.25
-          : 1;
+        client.supportLevel === "HIGH_SUPPORT" ? 1.25 : 1;
 
-      score +=
-        rules.rotationPriority *
-        highSupportMultiplier;
+      score += rules.rotationPriority * highSupportMultiplier;
     }
 
     if (clientStaffIds.has(staffMember.id)) {
@@ -310,6 +355,7 @@ export function scoreCandidate({
     staffMember.id,
     assignments
   );
+
   score -=
     staffAssignedSlots *
     Math.max(rules.workloadBalancePriority / 10, 0);
