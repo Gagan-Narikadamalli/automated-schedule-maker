@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 
 import { getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
 import { generateSchedule } from "@/features/scheduler/engine/generateSchedule";
-import { reserveStaffBreaks } from "@/features/scheduler/engine/reserveBreaks";
+import {
+  enrichBreakAssignmentsWithFixedEvents,
+  reserveStaffBreaks,
+} from "@/features/scheduler/engine/reserveBreaks";
 import type { SchedulerAssignment } from "@/features/scheduler/engine/types";
 import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySchedulerInput";
 import {
@@ -33,7 +36,10 @@ function shouldKeepExistingAssignment(
   );
 }
 
-function enumerateDates(startDate: string, endDate: string): string[] {
+function enumerateDates(
+  startDate: string,
+  endDate: string
+): string[] {
   const start = new Date(`${startDate}T12:00:00`);
   const end = new Date(`${endDate}T12:00:00`);
   const dates: string[] = [];
@@ -68,8 +74,12 @@ export async function POST(request: Request) {
 
     if (!locationId || !startDate || !endDate) {
       return NextResponse.json(
-        { error: "Location, start date, and end date are required." },
-        { status: 400 }
+        {
+          error: "Location, start date, and end date are required.",
+        },
+        {
+          status: 400,
+        }
       );
     }
 
@@ -78,8 +88,12 @@ export async function POST(request: Request) {
       !/^\d{4}-\d{2}-\d{2}$/.test(endDate)
     ) {
       return NextResponse.json(
-        { error: "Dates must use YYYY-MM-DD format." },
-        { status: 400 }
+        {
+          error: "Dates must use YYYY-MM-DD format.",
+        },
+        {
+          status: 400,
+        }
       );
     }
 
@@ -87,13 +101,19 @@ export async function POST(request: Request) {
 
     if (dates.length === 0 || dates.length > 14) {
       return NextResponse.json(
-        { error: "Generate a range between 1 and 14 calendar days." },
-        { status: 400 }
+        {
+          error: "Generate a range between 1 and 14 calendar days.",
+        },
+        {
+          status: 400,
+        }
       );
     }
 
     if (!sessionCanAccessLocation(auth.session, locationId)) {
-      return forbiddenResponse("You do not have access to this location.");
+      return forbiddenResponse(
+        "You do not have access to this location."
+      );
     }
 
     await connectToDatabase();
@@ -112,14 +132,19 @@ export async function POST(request: Request) {
         continue;
       }
 
-      const dayData = await buildDaySchedulerInput(locationId, date);
-      const protectedAssignments = dayData.input.existingAssignments.filter(
-        shouldKeepExistingAssignment
+      const dayData = await buildDaySchedulerInput(
+        locationId,
+        date
       );
+      const protectedAssignments =
+        dayData.input.existingAssignments.filter(
+          shouldKeepExistingAssignment
+        );
       const reservedBreaks = reserveStaffBreaks({
         staff: dayData.staff,
         clients: dayData.clients,
         existingAssignments: protectedAssignments,
+        referenceAssignments: dayData.input.referenceAssignments,
         callOutStaffIds: dayData.input.callOutStaffIds,
         rules: dayData.extendedRules,
       });
@@ -130,15 +155,25 @@ export async function POST(request: Request) {
           ...reservedBreaks,
         ],
       });
+      const enrichedAssignments =
+        enrichBreakAssignmentsWithFixedEvents(
+          result.assignments,
+          dayData.clients,
+          dayData.extendedRules.slotLengthMinutes
+        );
 
       await ScheduleAssignment.deleteMany({
         locationId,
         date,
-        manuallyOverridden: { $ne: true },
-        source: { $in: ["AUTO", "TEMPLATE", "COPIED"] },
+        manuallyOverridden: {
+          $ne: true,
+        },
+        source: {
+          $in: ["AUTO", "TEMPLATE", "COPIED"],
+        },
       });
 
-      const autoAssignments = result.assignments.filter(
+      const autoAssignments = enrichedAssignments.filter(
         (assignment) => assignment.source === "AUTO"
       );
 
@@ -148,7 +183,9 @@ export async function POST(request: Request) {
             locationId,
             date,
             startTime: assignment.startTime,
-            endTime: getEndTimeForSlot(assignment.startTime),
+            endTime: getEndTimeForSlot(
+              assignment.startTime
+            ),
             staffId: assignment.staffId,
             clientId: assignment.clientId || null,
             assignmentType: assignment.assignmentType,
@@ -160,12 +197,22 @@ export async function POST(request: Request) {
         );
       }
 
+      const completeCoverage =
+        result.metrics.uncoveredClientSlots === 0;
+
       results.push({
         date,
         skipped: false,
+        completeCoverage,
+        partialBuild: !completeCoverage,
         metrics: result.metrics,
         warningCount: result.warnings.length,
+        uncoveredCount:
+          result.uncoveredRequirements.length,
         reservedBreakCount: reservedBreaks.length,
+        autoTemplateName: dayData.autoTemplateName,
+        previousReferenceDate:
+          dayData.previousReferenceDate,
       });
     }
 
@@ -175,8 +222,10 @@ export async function POST(request: Request) {
       action: "GENERATE_RANGE",
       entityType: "SCHEDULE_RANGE",
       entityId: `${startDate}:${endDate}`,
-      summary: `Generated schedule range ${startDate} through ${endDate}.`,
-      after: { results },
+      summary: `Generated schedule range ${startDate} through ${endDate}. Partial days were retained for manager completion instead of being discarded.`,
+      after: {
+        results,
+      },
     });
 
     return NextResponse.json({
@@ -186,11 +235,18 @@ export async function POST(request: Request) {
       results,
     });
   } catch (error) {
-    console.error("Schedule range generation failed:", error);
+    console.error(
+      "Schedule range generation failed:",
+      error
+    );
 
     return NextResponse.json(
-      { error: "The schedule range could not be generated." },
-      { status: 500 }
+      {
+        error: "The schedule range could not be generated.",
+      },
+      {
+        status: 500,
+      }
     );
   }
 }
