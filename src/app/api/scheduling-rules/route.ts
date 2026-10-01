@@ -44,7 +44,7 @@ function defaultRules(locationId: string) {
     breakWindowStart: "11:00",
     breakWindowEnd: "13:30",
     scheduleStartTime: "08:00",
-    scheduleEndTime: "18:00",
+    scheduleEndTime: "20:00",
     slotLengthMinutes: 30,
     preferSameTeam: true,
     preferStaffContinuity: true,
