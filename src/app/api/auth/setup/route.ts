@@ -25,6 +25,18 @@ function setupKeyMatches(providedKey: string, expectedKey: string): boolean {
   return timingSafeEqual(providedBuffer, expectedBuffer);
 }
 
+function isMongoConnectionError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return (
+    error.name === "MongooseServerSelectionError" ||
+    error.message.includes("Could not connect to any servers") ||
+    error.message.includes("ReplicaSetNoPrimary")
+  );
+}
+
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as SetupRequest;
@@ -92,6 +104,16 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     console.error("Initial setup failed:", error);
+
+    if (isMongoConnectionError(error)) {
+      return NextResponse.json(
+        {
+          error:
+            "The scheduler cannot reach MongoDB Atlas. In MongoDB Atlas, allow network access for the deployed Vercel application, then try setup again.",
+        },
+        { status: 503 }
+      );
+    }
 
     return NextResponse.json(
       { error: "Initial setup could not be completed." },
