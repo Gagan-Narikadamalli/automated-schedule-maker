@@ -186,6 +186,72 @@ function findProtectedConflicts(
   return messages;
 }
 
+function countReservedBreakSlots(assignments: SchedulerAssignment[]): number {
+  return assignments.filter(
+    (assignment) =>
+      assignment.assignmentType === "BREAK" ||
+      assignment.assignmentType === "BREAK_NAP" ||
+      assignment.assignmentType === "BREAK_SPEECH"
+  ).length;
+}
+
+function calculateCapacityMetrics(
+  input: SchedulerInput,
+  assignments: SchedulerAssignment[],
+  requiredClientSlots: number,
+  coveredClientSlots: number,
+  uncoveredClientSlots: number
+): SchedulerResult["metrics"] {
+  const slotHours = input.rules.slotLengthMinutes / 60;
+  const callOutStaffIds = new Set(input.callOutStaffIds);
+  const workingStaff = input.staff.filter(
+    (staffMember) =>
+      !callOutStaffIds.has(staffMember.id) && staffMember.availableSlots.length > 0
+  );
+  const activeClients = input.clients.filter(
+    (client) => client.requiredSlots.length > 0
+  );
+  const staffAvailableSlots = workingStaff.reduce(
+    (total, staffMember) => total + staffMember.availableSlots.length,
+    0
+  );
+  const breakSlots = countReservedBreakSlots(assignments);
+
+  const requiredClientHours = requiredClientSlots * slotHours;
+  const coveredClientHours = coveredClientSlots * slotHours;
+  const uncoveredClientHours = uncoveredClientSlots * slotHours;
+  const staffAvailableHours = staffAvailableSlots * slotHours;
+  const breakHoursReserved = breakSlots * slotHours;
+  const netStaffCoverageHours = Math.max(
+    staffAvailableHours - breakHoursReserved,
+    0
+  );
+  const additionalLaborHoursNeeded = Math.max(
+    requiredClientHours - netStaffCoverageHours,
+    0
+  );
+  const coveragePercent =
+    requiredClientSlots === 0
+      ? 100
+      : (coveredClientSlots / requiredClientSlots) * 100;
+
+  return {
+    staffCount: workingStaff.length,
+    clientCount: activeClients.length,
+    requiredClientSlots,
+    coveredClientSlots,
+    uncoveredClientSlots,
+    coveragePercent,
+    requiredClientHours,
+    coveredClientHours,
+    uncoveredClientHours,
+    staffAvailableHours,
+    breakHoursReserved,
+    netStaffCoverageHours,
+    additionalLaborHoursNeeded,
+  };
+}
+
 export function generateSchedule(input: SchedulerInput): SchedulerResult {
   const callOutStaffIds = new Set(input.callOutStaffIds);
 
@@ -242,28 +308,33 @@ export function generateSchedule(input: SchedulerInput): SchedulerResult {
       continue;
     }
 
-    assignments.push(
-      createAutoAssignment(bestStaffMember, requirement)
-    );
+    assignments.push(createAutoAssignment(bestStaffMember, requirement));
   }
 
   const requiredClientSlots = allRequirements.length;
   const uncoveredClientSlots = uncoveredRequirements.length;
   const coveredClientSlots = requiredClientSlots - uncoveredClientSlots;
-  const coveragePercent =
-    requiredClientSlots === 0
-      ? 100
-      : (coveredClientSlots / requiredClientSlots) * 100;
+  const metrics = calculateCapacityMetrics(
+    input,
+    assignments,
+    requiredClientSlots,
+    coveredClientSlots,
+    uncoveredClientSlots
+  );
+
+  if (metrics.additionalLaborHoursNeeded > 0) {
+    warnings.push({
+      code: "CAPACITY_SHORTAGE",
+      message: `Daily client demand exceeds net staff capacity by ${metrics.additionalLaborHoursNeeded.toFixed(
+        1
+      )} hours after reserved breaks.`,
+    });
+  }
 
   return {
     assignments,
     uncoveredRequirements,
     warnings,
-    metrics: {
-      requiredClientSlots,
-      coveredClientSlots,
-      uncoveredClientSlots,
-      coveragePercent,
-    },
+    metrics,
   };
 }
