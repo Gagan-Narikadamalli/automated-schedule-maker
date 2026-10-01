@@ -1,60 +1,67 @@
 import { NextResponse } from "next/server";
 
-import {
-  getCurrentSession,
-  type SessionPayload,
-  type SessionRole,
-} from "@/lib/auth/session";
+export type SessionRole =
+  | "ADMIN"
+  | "CLINIC_MANAGER"
+  | "SCHEDULER"
+  | "BCBA"
+  | "READ_ONLY";
 
-export type ApiAuthResult =
-  | {
-      session: SessionPayload;
-      error: null;
-    }
-  | {
-      session: null;
-      error: NextResponse;
-    };
+export type OpenAccessSession = {
+  userId: string;
+  username: string;
+  email: string;
+  role: SessionRole;
+  locationIds: string[];
+};
 
+export type ApiAuthResult = {
+  session: OpenAccessSession;
+  error: null;
+};
+
+const OPEN_ACCESS_SESSION: OpenAccessSession = {
+  userId: "schedule-builder",
+  username: "Schedule Builder",
+  email: "",
+  role: "ADMIN",
+  locationIds: [],
+};
+
+/**
+ * Authentication is intentionally disabled while the scheduling product is
+ * being built and tested. API routes still receive a stable actor identity so
+ * audit records can be written without changing every scheduling endpoint.
+ */
 export async function requireApiSession(): Promise<ApiAuthResult> {
-  const session = await getCurrentSession();
-
-  if (!session) {
-    return {
-      session: null,
-      error: NextResponse.json(
-        { error: "Authentication is required." },
-        { status: 401 }
-      ),
-    };
-  }
-
   return {
-    session,
+    session: OPEN_ACCESS_SESSION,
     error: null,
   };
 }
 
+/**
+ * Open builder mode allows access to every configured clinic location.
+ */
 export function sessionCanAccessLocation(
-  session: SessionPayload,
-  locationId: string
+  _session: OpenAccessSession,
+  _locationId: string
 ): boolean {
-  if (session.role === "ADMIN") {
-    return true;
-  }
-
-  return session.locationIds.includes(locationId);
+  return true;
 }
 
+/**
+ * Role restrictions are disabled together with authentication for now.
+ */
 export function sessionHasAnyRole(
-  session: SessionPayload,
-  allowedRoles: SessionRole[]
+  _session: OpenAccessSession,
+  _allowedRoles: SessionRole[]
 ): boolean {
-  return allowedRoles.includes(session.role);
+  return true;
 }
 
 export function forbiddenResponse(
-  message = "You do not have permission to perform this action."
+  message = "This action is not available."
 ): NextResponse {
   return NextResponse.json(
     { error: message },
