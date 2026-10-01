@@ -1,0 +1,48 @@
+import { model, models, Schema } from "mongoose";
+
+const SpeechSessionSchema = new Schema(
+  {
+    locationId: {
+      type: Schema.Types.ObjectId,
+      ref: "Location",
+      required: true,
+      index: true,
+    },
+    clientId: {
+      type: Schema.Types.ObjectId,
+      ref: "Client",
+      required: true,
+      index: true,
+    },
+    date: {
+      type: String,
+      required: true,
+      index: true,
+    },
+    startTime: {
+      type: String,
+      required: true,
+    },
+    endTime: {
+      type: String,
+      required: true,
+    },
+    recurringSeriesId: {
+      type: String,
+      default: "",
+    },
+    note: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+SpeechSessionSchema.index({ locationId: 1, date: 1, clientId: 1 });
+
+export const SpeechSession =
+  models.SpeechSession ?? model("SpeechSession", SpeechSessionSchema);
