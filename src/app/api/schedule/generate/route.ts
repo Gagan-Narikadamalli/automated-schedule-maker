@@ -12,6 +12,7 @@ import type {
   SchedulerStaff,
 } from "@/features/scheduler/engine/types";
 import { applyHistoricalTraining } from "@/features/scheduler/server/applyHistoricalTraining";
+import { applyLivingstonWorkbookTrial } from "@/features/scheduler/server/applyLivingstonWorkbookTrial";
 import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySchedulerInput";
 import { writeAuditLog } from "@/lib/api/audit";
 import { connectToDatabase } from "@/lib/db";
@@ -89,12 +90,19 @@ export async function POST(request: Request) {
       locationId,
       date
     );
-    const trainingResult = await applyHistoricalTraining(
+
+    const workbookTraining = await applyLivingstonWorkbookTrial(
       locationId,
-      date,
       dayData.input
     );
-    const schedulerInput = trainingResult.input;
+
+    const historicalTraining = await applyHistoricalTraining(
+      locationId,
+      date,
+      workbookTraining.input
+    );
+
+    const schedulerInput = historicalTraining.input;
     const readiness = calculateSchedulerReadiness(
       schedulerInput,
       dayData.extendedRules
@@ -197,10 +205,19 @@ export async function POST(request: Request) {
         autoTemplateName: dayData.autoTemplateName,
         previousReferenceDate:
           dayData.previousReferenceDate,
+        workbookTrainingApplied: workbookTraining.applied,
+        workbookTrainingReferences:
+          workbookTraining.referenceCount,
+        workbookTrainingSourceWeek: workbookTraining.applied
+          ? {
+              start: workbookTraining.sourceWeekStart,
+              end: workbookTraining.sourceWeekEnd,
+            }
+          : null,
         importedTrainingScheduleDays:
-          trainingResult.matchedScheduleDayCount,
+          historicalTraining.matchedScheduleDayCount,
         importedTrainingRecords:
-          trainingResult.matchedRecordCount,
+          historicalTraining.matchedRecordCount,
       },
     });
 
@@ -223,10 +240,19 @@ export async function POST(request: Request) {
       autoTemplateName: dayData.autoTemplateName,
       previousReferenceDate:
         dayData.previousReferenceDate,
+      workbookTrainingApplied: workbookTraining.applied,
+      workbookTrainingReferences:
+        workbookTraining.referenceCount,
+      workbookTrainingSourceWeek: workbookTraining.applied
+        ? {
+            start: workbookTraining.sourceWeekStart,
+            end: workbookTraining.sourceWeekEnd,
+          }
+        : null,
       importedTrainingScheduleDays:
-        trainingResult.matchedScheduleDayCount,
+        historicalTraining.matchedScheduleDayCount,
       importedTrainingRecords:
-        trainingResult.matchedRecordCount,
+        historicalTraining.matchedRecordCount,
     });
   } catch (error) {
     console.error(
