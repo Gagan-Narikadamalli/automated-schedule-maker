@@ -9,6 +9,7 @@ import type { SchedulerAssignment } from "@/features/scheduler/engine/types";
 import { applyHistoricalTraining } from "@/features/scheduler/server/applyHistoricalTraining";
 import { applyLivingstonWorkbookTrial } from "@/features/scheduler/server/applyLivingstonWorkbookTrial";
 import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySchedulerInput";
+import { syncAutoUnplacedGaps } from "@/features/scheduler/server/syncAutoUnplacedGaps";
 import {
   forbiddenResponse,
   requireApiSession,
@@ -187,6 +188,12 @@ export async function POST(request: Request) {
       );
     }
 
+    const managerGapCount = await syncAutoUnplacedGaps(
+      locationId,
+      date,
+      result.uncoveredRequirements
+    );
+
     await writeAuditLog({
       locationId,
       userId: auth.session.userId,
@@ -199,6 +206,7 @@ export async function POST(request: Request) {
         affectedSlots,
         removedAssignmentCount: removedOriginalIds.length,
         addedAssignmentCount: newAssignments.length,
+        managerGapCount,
         metrics: result.metrics,
         uncoveredRequirements: result.uncoveredRequirements,
         warningCount: result.warnings.length,
@@ -216,6 +224,7 @@ export async function POST(request: Request) {
       affectedSlots,
       removedAssignmentCount: removedOriginalIds.length,
       addedAssignmentCount: newAssignments.length,
+      managerGapCount,
       metrics: result.metrics,
       warnings: result.warnings,
       uncoveredRequirements: result.uncoveredRequirements,
