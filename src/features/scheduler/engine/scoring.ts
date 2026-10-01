@@ -94,6 +94,49 @@ function findReferenceAssignment(
   );
 }
 
+function getRoleCoveragePriority(
+  staffMember: SchedulerStaff,
+  rules: SchedulerRules
+): number {
+  switch (staffMember.role) {
+    case "BT":
+    case "RBT":
+      return rules.btCoveragePriority;
+    case "INTERN":
+      return rules.internCoveragePriority;
+    case "OFFICE_MANAGER":
+      return rules.managerCoveragePriority;
+    case "BCBA":
+      return rules.bcbaCoveragePriority;
+    default:
+      return rules.otherCoveragePriority;
+  }
+}
+
+function getWeeklyHoursScore(
+  staffMember: SchedulerStaff,
+  assignments: SchedulerAssignment[],
+  slotLengthMinutes: number,
+  weeklyHoursPriority: number
+): number {
+  if (weeklyHoursPriority <= 0 || staffMember.targetWeeklyHours === undefined) {
+    return 0;
+  }
+
+  const assignedTodayHours =
+    (countStaffClientSlots(staffMember.id, assignments) * slotLengthMinutes) / 60;
+  const previouslyScheduledHours =
+    staffMember.scheduledWeeklyClientHoursBeforeDate ?? 0;
+  const projectedHours = previouslyScheduledHours + assignedTodayHours;
+  const hoursToTarget = staffMember.targetWeeklyHours - projectedHours;
+
+  if (hoursToTarget > 0) {
+    return Math.min(hoursToTarget, 8) * weeklyHoursPriority;
+  }
+
+  return Math.max(hoursToTarget, -8) * weeklyHoursPriority;
+}
+
 export function scoreCandidate({
   staffMember,
   client,
@@ -103,6 +146,11 @@ export function scoreCandidate({
   rules,
 }: CandidateScoreContext): number {
   let score = 0;
+
+  // Coverage role hierarchy requested by the clinic:
+  // BT/RBT first, then interns, then office managers as relief coverage,
+  // and BCBAs only when the lower tiers cannot cover the client.
+  score += getRoleCoveragePriority(staffMember, rules);
 
   const relationship = client.staffRelationships[staffMember.id] ?? "ALLOWED";
 
@@ -193,6 +241,13 @@ export function scoreCandidate({
       );
     }
   }
+
+  score += getWeeklyHoursScore(
+    staffMember,
+    assignments,
+    rules.slotLengthMinutes,
+    rules.weeklyHoursPriority
+  );
 
   const staffAssignedSlots = countStaffClientSlots(staffMember.id, assignments);
   score -=
