@@ -63,7 +63,7 @@ const SchedulingRulesSchema = new Schema(
     },
     scheduleEndTime: {
       type: String,
-      default: "18:00",
+      default: "20:00",
     },
     slotLengthMinutes: {
       type: Number,
