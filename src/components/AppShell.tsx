@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import styles from "./AppShell.module.css";
 
@@ -93,6 +93,12 @@ export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
+  const activeNavigationHref = useMemo(() => {
+    return navigationItems
+      .filter((item) => pathMatchesNavigationItem(pathname, item.href))
+      .sort((left, right) => right.href.length - left.href.length)[0]?.href;
+  }, [pathname]);
+
   useEffect(() => {
     const storedValue = window.localStorage.getItem(SIDEBAR_STORAGE_KEY);
 
@@ -152,7 +158,7 @@ export function AppShell({ children }: AppShellProps) {
 
         <nav className={styles.sidebarNavigation} aria-label="Primary navigation">
           {navigationItems.map((item) => {
-            const active = pathMatchesNavigationItem(pathname, item.href);
+            const active = item.href === activeNavigationHref;
 
             return (
               <Link
@@ -212,7 +218,7 @@ export function AppShell({ children }: AppShellProps) {
 
           <div className={styles.topBarStatus}>
             <span className={styles.statusDot} aria-hidden="true" />
-            Scheduler workspace
+            Auto scheduler workspace
           </div>
         </header>
 
