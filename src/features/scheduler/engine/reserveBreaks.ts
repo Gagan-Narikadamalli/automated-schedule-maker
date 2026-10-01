@@ -11,6 +11,7 @@ export type BreakReservationRules = {
   defaultBreakMinutes: number;
   breakEligibilityHours: number;
   slotLengthMinutes: number;
+  historicalBreakPriority?: number;
 };
 
 type BreakReservationInput = {
@@ -113,7 +114,8 @@ function calculateBreakSlotScore(
   callOutStaffIds: Set<string>,
   startTime: string,
   assignments: SchedulerAssignment[],
-  referenceAssignments: SchedulerAssignment[]
+  referenceAssignments: SchedulerAssignment[],
+  historicalBreakPriority: number
 ): number {
   const uncoveredDemand = countUncoveredClientDemand(
     clients,
@@ -133,13 +135,15 @@ function calculateBreakSlotScore(
     referenceAssignments
   );
 
-  // Repeated prior break placement is stronger evidence than a one-off match.
-  // Cap the effect so capacity safety still determines whether a break is valid.
+  // Repeated break placement from templates, recent schedules, and workbook
+  // observations is useful evidence, but it can only rank slots that have
+  // already passed the capacity-safety check below.
   const historicalBreakBonus =
-    -250 * Math.min(historicalBreakCount, 4);
+    -Math.min(historicalBreakCount, 4) *
+    Math.max(historicalBreakPriority, 0);
 
-  // Lower is better. Historical/template break placement is preferred first,
-  // then slots with the most spare coverage and the least client demand.
+  // Lower is better. Capacity remains the main guardrail; historical guidance
+  // only helps choose between break slots that are already safe.
   return (
     historicalBreakBonus +
     uncoveredDemand * 10 -
@@ -273,6 +277,8 @@ export function reserveStaffBreaks({
 
   const callOutSet = new Set(callOutStaffIds);
   const reservedAssignments: SchedulerAssignment[] = [];
+  const historicalBreakPriority =
+    rules.historicalBreakPriority ?? 80;
 
   const staffByBreakPriority = [...staff].sort((left, right) => {
     const roleDifference =
@@ -339,7 +345,8 @@ export function reserveStaffBreaks({
           callOutSet,
           startTime,
           currentAssignments,
-          referenceAssignments
+          referenceAssignments,
+          historicalBreakPriority
         ),
       }))
       .sort((left, right) => {
