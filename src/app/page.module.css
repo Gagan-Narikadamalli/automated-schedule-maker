@@ -211,12 +211,23 @@
 
 .page :global(.schedule-page .page-subtitle)::after {
   content: "Excel-style 30-minute scheduling from 8:00 AM to 8:00 PM";
-  font-size: 14px;
+  font-size: 12px;
 }
 
 .page :global(.schedule-page > .page-header) {
-  padding-top: 17px;
-  padding-bottom: 17px;
+  align-items: center;
+  padding: 12px 14px;
+  border-radius: 12px;
+  box-shadow: 0 3px 12px rgba(18, 59, 93, 0.045);
+}
+
+.page :global(.schedule-page > .page-header .page-eyebrow) {
+  display: none;
+}
+
+.page :global(.schedule-page > .page-header h1) {
+  margin-top: 0;
+  font-size: clamp(20px, 2vw, 26px);
 }
 
 .page :global(.schedule-context-controls) {
@@ -225,6 +236,11 @@
 
 .page :global(.schedule-context-controls .field-label) {
   min-width: 180px;
+}
+
+.page :global(.schedule-context-controls .field-label select),
+.page :global(.schedule-context-controls .field-label input) {
+  min-height: 38px;
 }
 
 .page :global(.toolbar-card) {
@@ -278,5 +294,9 @@
   .workflowCard {
     grid-template-columns: 38px minmax(0, 1fr);
     padding: 11px;
+  }
+
+  .page :global(.schedule-page > .page-header) {
+    align-items: stretch;
   }
 }
