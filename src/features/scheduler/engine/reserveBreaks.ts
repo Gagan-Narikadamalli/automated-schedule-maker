@@ -54,7 +54,8 @@ function staffAlreadyOccupied(
 ): boolean {
   return assignments.some(
     (assignment) =>
-      assignment.staffId === staffId && assignment.startTime === startTime
+      assignment.staffId === staffId &&
+      assignment.startTime === startTime
   );
 }
 
@@ -90,19 +91,19 @@ function roleBreakOrder(role: StaffRole): number {
   }
 }
 
-function hasReferenceBreak(
+function countReferenceBreaks(
   staffId: string,
   startTime: string,
   referenceAssignments: SchedulerAssignment[]
-): boolean {
-  return referenceAssignments.some(
+): number {
+  return referenceAssignments.filter(
     (assignment) =>
       assignment.staffId === staffId &&
       assignment.startTime === startTime &&
       (assignment.assignmentType === "BREAK" ||
         assignment.assignmentType === "BREAK_NAP" ||
         assignment.assignmentType === "BREAK_SPEECH")
-  );
+  ).length;
 }
 
 function calculateBreakSlotScore(
@@ -126,17 +127,24 @@ function calculateBreakSlotScore(
     assignments
   );
   const spareStaff = freeStaff - uncoveredDemand;
-  const referenceBonus = hasReferenceBreak(
+  const historicalBreakCount = countReferenceBreaks(
     staffId,
     startTime,
     referenceAssignments
-  )
-    ? -1000
-    : 0;
+  );
+
+  // Repeated prior break placement is stronger evidence than a one-off match.
+  // Cap the effect so capacity safety still determines whether a break is valid.
+  const historicalBreakBonus =
+    -250 * Math.min(historicalBreakCount, 4);
 
   // Lower is better. Historical/template break placement is preferred first,
   // then slots with the most spare coverage and the least client demand.
-  return referenceBonus + uncoveredDemand * 10 - spareStaff * 25;
+  return (
+    historicalBreakBonus +
+    uncoveredDemand * 10 -
+    spareStaff * 25
+  );
 }
 
 function slotCanSafelyAbsorbBreak(
@@ -205,19 +213,20 @@ function findSupervisedFixedEventClient(
     (assignment) =>
       assignment.staffId === breakAssignment.staffId &&
       assignment.assignmentType === "CLIENT_1_TO_1" &&
-      (assignment.startTime === previousTime || assignment.startTime === nextTime) &&
+      (assignment.startTime === previousTime ||
+        assignment.startTime === nextTime) &&
       Boolean(assignment.clientId)
   );
 
   const adjacentClientIds = adjacentAssignments.map(
     (assignment) => assignment.clientId as string
   );
-  const orderedClientIds = [
-    ...new Set(adjacentClientIds),
-  ];
+  const orderedClientIds = [...new Set(adjacentClientIds)];
 
   for (const clientId of orderedClientIds) {
-    const client = clients.find((candidate) => candidate.id === clientId);
+    const client = clients.find(
+      (candidate) => candidate.id === clientId
+    );
 
     if (!client) {
       continue;
@@ -267,7 +276,8 @@ export function reserveStaffBreaks({
 
   const staffByBreakPriority = [...staff].sort((left, right) => {
     const roleDifference =
-      roleBreakOrder(left.role) - roleBreakOrder(right.role);
+      roleBreakOrder(left.role) -
+      roleBreakOrder(right.role);
 
     if (roleDifference !== 0) {
       return roleDifference;
