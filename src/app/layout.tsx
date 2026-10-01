@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import "./globals.css";
 import "./management.css";
 import "./auth.css";
+import "./navigation.css";
 
 export const metadata: Metadata = {
   title: "SOS Automated Schedule Maker",
