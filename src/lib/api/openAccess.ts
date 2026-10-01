@@ -29,14 +29,23 @@ const schedulerSession: SessionPayload = {
 };
 
 export async function requireApiSession(): Promise<ApiAuthResult> {
-  return { session: schedulerSession, error: null };
+  return {
+    session: schedulerSession,
+    error: null,
+  };
 }
 
-export function sessionCanAccessLocation(): boolean {
+export function sessionCanAccessLocation(
+  _session: SessionPayload,
+  _locationId: string
+): boolean {
   return true;
 }
 
-export function sessionHasAnyRole(): boolean {
+export function sessionHasAnyRole(
+  _session: SessionPayload,
+  _allowedRoles: SessionRole[]
+): boolean {
   return true;
 }
 
