@@ -54,6 +54,21 @@ function normalizeCounts(
   );
 }
 
+function mergeScoreMaps(
+  left: Record<string, number>,
+  right: Record<string, number>
+): Record<string, number> {
+  const result: Record<string, number> = {
+    ...left,
+  };
+
+  for (const [key, value] of Object.entries(right)) {
+    result[key] = Math.max(result[key] ?? 0, value);
+  }
+
+  return result;
+}
+
 export function buildHistoricalPatternScores(
   records: HistoricalPatternRecord[]
 ): HistoricalPatternScores {
@@ -104,6 +119,42 @@ export function buildHistoricalPatternScores(
     pairingScores: normalizeCounts(pairingCounts, scheduleDayCount),
     exactSlotScores: normalizeCounts(exactSlotCounts, scheduleDayCount),
     breakSlotScores: normalizeCounts(breakSlotCounts, scheduleDayCount),
+  };
+}
+
+/**
+ * Combines independent pattern sources without double-counting the same signal.
+ * For a staff/client/time key, the strongest observed normalized frequency wins.
+ * This lets workbook trial observations and newer MongoDB history complement each
+ * other while keeping every pattern score inside the expected 0..1 range.
+ */
+export function mergeHistoricalPatternScores(
+  left: HistoricalPatternScores | undefined,
+  right: HistoricalPatternScores | undefined
+): HistoricalPatternScores | undefined {
+  if (!left) {
+    return right;
+  }
+
+  if (!right) {
+    return left;
+  }
+
+  return {
+    sampleCount: left.sampleCount + right.sampleCount,
+    scheduleDayCount: left.scheduleDayCount + right.scheduleDayCount,
+    pairingScores: mergeScoreMaps(
+      left.pairingScores,
+      right.pairingScores
+    ),
+    exactSlotScores: mergeScoreMaps(
+      left.exactSlotScores,
+      right.exactSlotScores
+    ),
+    breakSlotScores: mergeScoreMaps(
+      left.breakSlotScores,
+      right.breakSlotScores
+    ),
   };
 }
 
