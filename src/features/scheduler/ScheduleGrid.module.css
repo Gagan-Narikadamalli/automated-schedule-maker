@@ -1,0 +1,36 @@
+.scrollWindow {
+  max-height: calc(100vh - 245px);
+  min-height: 360px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable both-edges;
+}
+
+.scratchHeader {
+  background: #eef2f4 !important;
+  color: #52636d !important;
+  border-left: 2px dashed #9eabb2 !important;
+  text-align: center !important;
+  font-style: italic;
+}
+
+.scratchCell {
+  background-image:
+    linear-gradient(45deg, rgba(18, 59, 93, 0.025) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(18, 59, 93, 0.025) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(18, 59, 93, 0.025) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(18, 59, 93, 0.025) 75%);
+  background-size: 12px 12px;
+  background-position: 0 0, 0 6px, 6px -6px, -6px 0;
+  border-left: 1px dashed #aeb9bf !important;
+}
+
+.scratchDivider {
+  border-left: 2px dashed #82939d !important;
+}
+
+@media (max-width: 800px) {
+  .scrollWindow {
+    max-height: calc(100vh - 210px);
+  }
+}
