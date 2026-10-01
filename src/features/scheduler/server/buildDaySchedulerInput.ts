@@ -18,60 +18,12 @@ import { SchedulingRules } from "@/models/SchedulingRules";
 import { SpeechSession } from "@/models/SpeechSession";
 import { Staff } from "@/models/Staff";
 
-type PatternRecord = {
-  days?: string[];
-  startTime?: string;
-  endTime?: string;
-};
-
-type RelationshipRecord = {
-  staffId?: unknown;
-  relationship?: StaffRelationship;
-};
-
-type LeanStaff = {
-  _id: unknown;
-  teamId?: unknown;
-  fullName: string;
-  startDate: Date;
-  endDate?: Date | null;
-  shiftPatterns?: PatternRecord[];
-};
-
-type LeanClient = {
-  _id: unknown;
-  teamId?: unknown;
-  displayCode: string;
-  startDate: Date;
-  endDate?: Date | null;
-  attendancePatterns?: PatternRecord[];
-  napPatterns?: PatternRecord[];
-  staffRelationships?: RelationshipRecord[];
-};
-
-type LeanCallOut = {
-  staffId: unknown;
-  startTime: string;
-  endTime: string;
-};
-
-type LeanSpeechSession = {
-  clientId: unknown;
-  startTime: string;
-  endTime: string;
-};
-
-type LeanAssignment = {
-  _id: unknown;
-  staffId: unknown;
-  clientId?: unknown;
-  startTime: string;
-  assignmentType: SchedulerAssignment["assignmentType"];
-  source: SchedulerAssignment["source"];
-  locked: boolean;
-  manuallyOverridden?: boolean;
-  note?: string;
-};
+/*
+ * The scheduling engine should not know anything about Mongoose documents.
+ * This file converts MongoDB records into small plain objects first, then hands
+ * those plain objects to the scheduling engine.
+ */
+type DatabaseRecord = Record<string, any>;
 
 type ExtendedSchedulerRules = SchedulerRules & {
   breakWindowStart: string;
@@ -79,51 +31,69 @@ type ExtendedSchedulerRules = SchedulerRules & {
   defaultBreakMinutes: number;
 };
 
-function dateIsWithinRecordRange(
-  date: string,
-  startDate: Date,
-  endDate?: Date | null
-): boolean {
-  const requestedDate = new Date(`${date}T12:00:00`);
-  const normalizedStart = new Date(startDate);
-  const normalizedEnd = endDate ? new Date(endDate) : null;
+export type DaySchedulerData = {
+  input: SchedulerInput;
+  extendedRules: ExtendedSchedulerRules;
+  staff: SchedulerStaff[];
+  clients: SchedulerClient[];
+  partialCallOuts: Array<{
+    staffId: string;
+    startTime: string;
+    endTime: string;
+  }>;
+};
 
-  if (Number.isNaN(requestedDate.getTime())) {
+function isDateInsideActiveRange(
+  requestedDateText: string,
+  startDateValue: unknown,
+  endDateValue: unknown
+): boolean {
+  const requestedDate = new Date(`${requestedDateText}T12:00:00`);
+  const startDate = new Date(String(startDateValue));
+  const endDate = endDateValue ? new Date(String(endDateValue)) : null;
+
+  if (
+    Number.isNaN(requestedDate.getTime()) ||
+    Number.isNaN(startDate.getTime())
+  ) {
     return false;
   }
 
-  normalizedStart.setHours(0, 0, 0, 0);
+  startDate.setHours(0, 0, 0, 0);
 
-  if (normalizedEnd) {
-    normalizedEnd.setHours(23, 59, 59, 999);
+  if (endDate) {
+    endDate.setHours(23, 59, 59, 999);
   }
 
-  const requestedTime = requestedDate.getTime();
-  const startTime = normalizedStart.getTime();
-  const endTime = normalizedEnd?.getTime() ?? Number.POSITIVE_INFINITY;
-
-  return requestedTime >= startTime && requestedTime <= endTime;
+  return (
+    requestedDate.getTime() >= startDate.getTime() &&
+    requestedDate.getTime() <=
+      (endDate?.getTime() ?? Number.POSITIVE_INFINITY)
+  );
 }
 
-function slotsForPatterns(
-  patterns: PatternRecord[] | undefined,
+function getPatternSlots(
+  patterns: DatabaseRecord[] | undefined,
   date: string
 ): string[] {
   const slots = new Set<string>();
 
   for (const pattern of patterns ?? []) {
+    const days = Array.isArray(pattern.days)
+      ? pattern.days.map((day: unknown) => String(day))
+      : [];
+    const startTime = String(pattern.startTime ?? "");
+    const endTime = String(pattern.endTime ?? "");
+
     if (
-      !pattern.startTime ||
-      !pattern.endTime ||
-      !patternMatchesDate(pattern.days, date)
+      !startTime ||
+      !endTime ||
+      !patternMatchesDate(days, date)
     ) {
       continue;
     }
 
-    for (const slot of getSlotsInsideTimeRange(
-      pattern.startTime,
-      pattern.endTime
-    )) {
+    for (const slot of getSlotsInsideTimeRange(startTime, endTime)) {
       slots.add(slot);
     }
   }
@@ -131,16 +101,15 @@ function slotsForPatterns(
   return [...slots].sort();
 }
 
-function removeSlotsInsideRanges(
+function removeBlockedSlots(
   slots: string[],
   ranges: Array<{ startTime: string; endTime: string }>
 ): string[] {
-  return slots.filter(
-    (slot) =>
-      !ranges.some(
-        (range) => slot >= range.startTime && slot < range.endTime
-      )
-  );
+  return slots.filter((slot) => {
+    return !ranges.some((range) => {
+      return slot >= range.startTime && slot < range.endTime;
+    });
+  });
 }
 
 function getDefaultRules(): ExtendedSchedulerRules {
@@ -156,106 +125,126 @@ function getDefaultRules(): ExtendedSchedulerRules {
   };
 }
 
-export type DaySchedulerData = {
-  input: SchedulerInput;
-  extendedRules: ExtendedSchedulerRules;
-  staff: SchedulerStaff[];
-  clients: SchedulerClient[];
-  partialCallOuts: LeanCallOut[];
-};
+function mapRules(document: DatabaseRecord | null): ExtendedSchedulerRules {
+  const defaults = getDefaultRules();
 
-export async function buildDaySchedulerInput(
-  locationId: string,
+  if (!document) {
+    return defaults;
+  }
+
+  return {
+    maximumClientsPerTechPerDay: Number(
+      document.maximumClientsPerTechPerDay ??
+        defaults.maximumClientsPerTechPerDay
+    ),
+    maximumTechsPerClientPerDay: Number(
+      document.maximumTechsPerClientPerDay ??
+        defaults.maximumTechsPerClientPerDay
+    ),
+    preferSameTeam: Boolean(
+      document.preferSameTeam ?? defaults.preferSameTeam
+    ),
+    preferStaffContinuity: Boolean(
+      document.preferStaffContinuity ?? defaults.preferStaffContinuity
+    ),
+    slotLengthMinutes: Number(
+      document.slotLengthMinutes ?? defaults.slotLengthMinutes
+    ),
+    breakWindowStart: String(
+      document.breakWindowStart ?? defaults.breakWindowStart
+    ),
+    breakWindowEnd: String(
+      document.breakWindowEnd ?? defaults.breakWindowEnd
+    ),
+    defaultBreakMinutes: Number(
+      document.defaultBreakMinutes ?? defaults.defaultBreakMinutes
+    ),
+  };
+}
+
+function mapStaff(
+  staffDocuments: DatabaseRecord[],
+  callOuts: DaySchedulerData["partialCallOuts"],
   date: string
-): Promise<DaySchedulerData> {
-  await connectToDatabase();
-
-  const [
-    staffDocuments,
-    clientDocuments,
-    callOutDocuments,
-    speechDocuments,
-    assignmentDocuments,
-    rulesDocument,
-  ] = await Promise.all([
-    Staff.find({ locationId, active: true }).sort({ fullName: 1 }).lean(),
-    Client.find({ locationId, active: true }).sort({ displayCode: 1 }).lean(),
-    CallOut.find({ locationId, date }).lean(),
-    SpeechSession.find({ locationId, date }).lean(),
-    ScheduleAssignment.find({ locationId, date }).lean(),
-    SchedulingRules.findOne({ locationId }).lean(),
-  ]);
-
-  const callOuts = callOutDocuments as unknown as LeanCallOut[];
-  const speechSessions = speechDocuments as unknown as LeanSpeechSession[];
-
-  const staff: SchedulerStaff[] = (
-    staffDocuments as unknown as LeanStaff[]
-  )
-    .filter((staffMember) =>
-      dateIsWithinRecordRange(
+): SchedulerStaff[] {
+  return staffDocuments
+    .filter((staffMember) => {
+      return isDateInsideActiveRange(
         date,
         staffMember.startDate,
         staffMember.endDate
-      )
-    )
+      );
+    })
     .map((staffMember) => {
       const staffId = String(staffMember._id);
       const unavailableRanges = callOuts
-        .filter((callOut) => String(callOut.staffId) === staffId)
+        .filter((callOut) => callOut.staffId === staffId)
         .map((callOut) => ({
           startTime: callOut.startTime,
           endTime: callOut.endTime,
         }));
 
-      const availableSlots = removeSlotsInsideRanges(
-        slotsForPatterns(staffMember.shiftPatterns, date),
-        unavailableRanges
+      const normalAvailableSlots = getPatternSlots(
+        staffMember.shiftPatterns,
+        date
       );
 
       return {
         id: staffId,
-        name: staffMember.fullName,
-        teamId: staffMember.teamId ? String(staffMember.teamId) : undefined,
-        availableSlots,
+        name: String(staffMember.fullName ?? ""),
+        teamId: staffMember.teamId
+          ? String(staffMember.teamId)
+          : undefined,
+        availableSlots: removeBlockedSlots(
+          normalAvailableSlots,
+          unavailableRanges
+        ),
       };
     });
+}
 
-  const clients: SchedulerClient[] = (
-    clientDocuments as unknown as LeanClient[]
-  )
-    .filter((client) =>
-      dateIsWithinRecordRange(date, client.startDate, client.endDate)
-    )
+function mapClients(
+  clientDocuments: DatabaseRecord[],
+  speechSessions: DatabaseRecord[],
+  date: string
+): SchedulerClient[] {
+  return clientDocuments
+    .filter((client) => {
+      return isDateInsideActiveRange(
+        date,
+        client.startDate,
+        client.endDate
+      );
+    })
     .map((client) => {
       const clientId = String(client._id);
+      const attendanceSlots = getPatternSlots(
+        client.attendancePatterns,
+        date
+      );
 
       const napRanges = (client.napPatterns ?? [])
-        .filter((pattern) => patternMatchesDate(pattern.days, date))
-        .flatMap((pattern) => {
-          if (!pattern.startTime || !pattern.endTime) {
-            return [];
-          }
+        .filter((pattern: DatabaseRecord) => {
+          const days = Array.isArray(pattern.days)
+            ? pattern.days.map((day: unknown) => String(day))
+            : [];
 
-          return [
-            {
-              startTime: pattern.startTime,
-              endTime: pattern.endTime,
-            },
-          ];
-        });
+          return patternMatchesDate(days, date);
+        })
+        .filter((pattern: DatabaseRecord) => {
+          return Boolean(pattern.startTime && pattern.endTime);
+        })
+        .map((pattern: DatabaseRecord) => ({
+          startTime: String(pattern.startTime),
+          endTime: String(pattern.endTime),
+        }));
 
       const speechRanges = speechSessions
         .filter((session) => String(session.clientId) === clientId)
         .map((session) => ({
-          startTime: session.startTime,
-          endTime: session.endTime,
+          startTime: String(session.startTime),
+          endTime: String(session.endTime),
         }));
-
-      const requiredSlots = removeSlotsInsideRanges(
-        slotsForPatterns(client.attendancePatterns, date),
-        [...napRanges, ...speechRanges]
-      );
 
       const staffRelationships: Record<string, StaffRelationship> = {};
 
@@ -264,86 +253,131 @@ export async function buildDaySchedulerInput(
           continue;
         }
 
-        staffRelationships[String(relationship.staffId)] =
-          relationship.relationship;
+        const relationshipValue = String(relationship.relationship);
+
+        if (
+          relationshipValue === "PREFERRED" ||
+          relationshipValue === "ALLOWED" ||
+          relationshipValue === "HARD_RESTRICTION"
+        ) {
+          staffRelationships[String(relationship.staffId)] =
+            relationshipValue;
+        }
       }
 
       return {
         id: clientId,
-        displayCode: client.displayCode,
+        displayCode: String(client.displayCode ?? ""),
         teamId: client.teamId ? String(client.teamId) : undefined,
-        requiredSlots,
+        requiredSlots: removeBlockedSlots(attendanceSlots, [
+          ...napRanges,
+          ...speechRanges,
+        ]),
         staffRelationships,
       };
     });
+}
 
-  const existingAssignments: SchedulerAssignment[] = (
-    assignmentDocuments as unknown as LeanAssignment[]
-  ).map((assignment) => ({
-    id: String(assignment._id),
-    staffId: String(assignment.staffId),
-    clientId: assignment.clientId
-      ? String(assignment.clientId)
-      : undefined,
-    startTime: assignment.startTime,
-    assignmentType: assignment.assignmentType,
-    source: assignment.source,
-    locked: assignment.locked || Boolean(assignment.manuallyOverridden),
-    note: assignment.note,
+function mapExistingAssignments(
+  assignmentDocuments: DatabaseRecord[]
+): SchedulerAssignment[] {
+  return assignmentDocuments.map((assignment) => {
+    return {
+      id: String(assignment._id),
+      staffId: String(assignment.staffId),
+      clientId: assignment.clientId
+        ? String(assignment.clientId)
+        : undefined,
+      startTime: String(assignment.startTime),
+      assignmentType:
+        assignment.assignmentType as SchedulerAssignment["assignmentType"],
+      source: assignment.source as SchedulerAssignment["source"],
+      locked:
+        Boolean(assignment.locked) ||
+        Boolean(assignment.manuallyOverridden),
+      note: assignment.note ? String(assignment.note) : undefined,
+    };
+  });
+}
+
+export async function buildDaySchedulerInput(
+  locationId: string,
+  date: string
+): Promise<DaySchedulerData> {
+  await connectToDatabase();
+
+  const [
+    rawStaff,
+    rawClients,
+    rawCallOuts,
+    rawSpeechSessions,
+    rawAssignments,
+    rawRules,
+  ] = await Promise.all([
+    Staff.find({ locationId, active: true })
+      .sort({ fullName: 1 })
+      .lean(),
+    Client.find({ locationId, active: true })
+      .sort({ displayCode: 1 })
+      .lean(),
+    CallOut.find({ locationId, date }).lean(),
+    SpeechSession.find({ locationId, date }).lean(),
+    ScheduleAssignment.find({ locationId, date }).lean(),
+    SchedulingRules.findOne({ locationId }).lean(),
+  ]);
+
+  const staffDocuments = rawStaff as unknown as DatabaseRecord[];
+  const clientDocuments = rawClients as unknown as DatabaseRecord[];
+  const speechSessions = rawSpeechSessions as unknown as DatabaseRecord[];
+  const assignmentDocuments = rawAssignments as unknown as DatabaseRecord[];
+  const rulesDocument = rawRules as unknown as DatabaseRecord | null;
+
+  const partialCallOuts = (
+    rawCallOuts as unknown as DatabaseRecord[]
+  ).map((callOut) => ({
+    staffId: String(callOut.staffId),
+    startTime: String(callOut.startTime),
+    endTime: String(callOut.endTime),
   }));
 
-  const defaults = getDefaultRules();
+  const staff = mapStaff(staffDocuments, partialCallOuts, date);
+  const clients = mapClients(clientDocuments, speechSessions, date);
+  const existingAssignments = mapExistingAssignments(
+    assignmentDocuments
+  );
+  const extendedRules = mapRules(rulesDocument);
 
-  const extendedRules: ExtendedSchedulerRules = rulesDocument
-    ? {
-        maximumClientsPerTechPerDay:
-          rulesDocument.maximumClientsPerTechPerDay ??
-          defaults.maximumClientsPerTechPerDay,
-        maximumTechsPerClientPerDay:
-          rulesDocument.maximumTechsPerClientPerDay ??
-          defaults.maximumTechsPerClientPerDay,
-        preferSameTeam:
-          rulesDocument.preferSameTeam ?? defaults.preferSameTeam,
-        preferStaffContinuity:
-          rulesDocument.preferStaffContinuity ??
-          defaults.preferStaffContinuity,
-        slotLengthMinutes:
-          rulesDocument.slotLengthMinutes ?? defaults.slotLengthMinutes,
-        breakWindowStart:
-          rulesDocument.breakWindowStart ?? defaults.breakWindowStart,
-        breakWindowEnd:
-          rulesDocument.breakWindowEnd ?? defaults.breakWindowEnd,
-        defaultBreakMinutes:
-          rulesDocument.defaultBreakMinutes ?? defaults.defaultBreakMinutes,
-      }
-    : defaults;
+  const fullDayCallOutStaffIds = partialCallOuts
+    .filter((callOut) => {
+      return (
+        callOut.startTime <= "08:00" &&
+        callOut.endTime >= "18:00"
+      );
+    })
+    .map((callOut) => callOut.staffId);
 
-  const fullDayCallOutStaffIds = callOuts
-    .filter(
-      (callOut) =>
-        callOut.startTime <= "08:00" && callOut.endTime >= "18:00"
-    )
-    .map((callOut) => String(callOut.staffId));
+  const input: SchedulerInput = {
+    staff,
+    clients,
+    existingAssignments,
+    callOutStaffIds: fullDayCallOutStaffIds,
+    rules: {
+      maximumClientsPerTechPerDay:
+        extendedRules.maximumClientsPerTechPerDay,
+      maximumTechsPerClientPerDay:
+        extendedRules.maximumTechsPerClientPerDay,
+      preferSameTeam: extendedRules.preferSameTeam,
+      preferStaffContinuity:
+        extendedRules.preferStaffContinuity,
+      slotLengthMinutes: extendedRules.slotLengthMinutes,
+    },
+  };
 
   return {
-    input: {
-      staff,
-      clients,
-      existingAssignments,
-      callOutStaffIds: fullDayCallOutStaffIds,
-      rules: {
-        maximumClientsPerTechPerDay:
-          extendedRules.maximumClientsPerTechPerDay,
-        maximumTechsPerClientPerDay:
-          extendedRules.maximumTechsPerClientPerDay,
-        preferSameTeam: extendedRules.preferSameTeam,
-        preferStaffContinuity: extendedRules.preferStaffContinuity,
-        slotLengthMinutes: extendedRules.slotLengthMinutes,
-      },
-    },
+    input,
     extendedRules,
     staff,
     clients,
-    partialCallOuts: callOuts,
+    partialCallOuts,
   };
 }
