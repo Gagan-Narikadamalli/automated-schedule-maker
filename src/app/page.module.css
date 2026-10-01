@@ -61,6 +61,37 @@
   line-height: 1.55;
 }
 
+.guardrailList {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 13px;
+}
+
+.guardrailChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 4px 8px;
+  border: 1px solid #d5e5ec;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.82);
+  color: #506b79;
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.guardrailDot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #2a9d6f;
+  box-shadow: 0 0 0 2px rgba(42, 157, 111, 0.12);
+}
+
 .commandActions {
   flex: 0 0 auto;
   display: flex;
@@ -223,6 +254,14 @@
   .commandCenter {
     padding: 16px;
     border-radius: 13px;
+  }
+
+  .guardrailList {
+    gap: 5px;
+  }
+
+  .guardrailChip {
+    white-space: normal;
   }
 
   .commandActions {
