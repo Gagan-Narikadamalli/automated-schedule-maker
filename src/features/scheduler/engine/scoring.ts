@@ -35,7 +35,9 @@ function getPreviousSlot(
   const previousHours = Math.floor(totalMinutes / 60)
     .toString()
     .padStart(2, "0");
-  const previousMinutes = (totalMinutes % 60).toString().padStart(2, "0");
+  const previousMinutes = (totalMinutes % 60)
+    .toString()
+    .padStart(2, "0");
 
   return `${previousHours}:${previousMinutes}`;
 }
@@ -94,7 +96,7 @@ function findReferenceAssignment(
   );
 }
 
-function getRoleCoveragePriority(
+export function getRoleCoveragePriority(
   staffMember: SchedulerStaff,
   rules: SchedulerRules
 ): number {
@@ -119,22 +121,35 @@ function getWeeklyHoursScore(
   slotLengthMinutes: number,
   weeklyHoursPriority: number
 ): number {
-  if (weeklyHoursPriority <= 0 || staffMember.targetWeeklyHours === undefined) {
+  if (
+    weeklyHoursPriority <= 0 ||
+    staffMember.targetWeeklyHours === undefined
+  ) {
     return 0;
   }
 
   const assignedTodayHours =
-    (countStaffClientSlots(staffMember.id, assignments) * slotLengthMinutes) / 60;
+    (countStaffClientSlots(staffMember.id, assignments) *
+      slotLengthMinutes) /
+    60;
   const previouslyScheduledHours =
     staffMember.scheduledWeeklyClientHoursBeforeDate ?? 0;
-  const projectedHours = previouslyScheduledHours + assignedTodayHours;
-  const hoursToTarget = staffMember.targetWeeklyHours - projectedHours;
+  const projectedHours =
+    previouslyScheduledHours + assignedTodayHours;
+  const hoursToTarget =
+    staffMember.targetWeeklyHours - projectedHours;
 
   if (hoursToTarget > 0) {
-    return Math.min(hoursToTarget, 8) * weeklyHoursPriority;
+    return (
+      Math.min(hoursToTarget, 8) *
+      weeklyHoursPriority
+    );
   }
 
-  return Math.max(hoursToTarget, -8) * weeklyHoursPriority;
+  return (
+    Math.max(hoursToTarget, -8) *
+    weeklyHoursPriority
+  );
 }
 
 export function scoreCandidate({
@@ -147,12 +162,17 @@ export function scoreCandidate({
 }: CandidateScoreContext): number {
   let score = 0;
 
-  // Coverage role hierarchy requested by the clinic:
-  // BT/RBT first, then interns, then office managers as relief coverage,
-  // and BCBAs only when the lower tiers cannot cover the client.
-  score += getRoleCoveragePriority(staffMember, rules);
+  // This score is still included so a larger role priority remains visible in
+  // diagnostics. The generator also sorts by the role priority before comparing
+  // the remaining soft-preference score, which makes the clinic role order
+  // deterministic rather than accidental.
+  score += getRoleCoveragePriority(
+    staffMember,
+    rules
+  );
 
-  const relationship = client.staffRelationships[staffMember.id] ?? "ALLOWED";
+  const relationship =
+    client.staffRelationships[staffMember.id] ?? "ALLOWED";
 
   if (relationship === "PREFERRED") {
     score += rules.preferredStaffPriority;
@@ -190,7 +210,11 @@ export function scoreCandidate({
     client.supportLevel === "ROTATION" ||
     client.supportLevel === "HIGH_SUPPORT";
 
-  if (rules.preferStaffContinuity && previousStartTime && !isRotationClient) {
+  if (
+    rules.preferStaffContinuity &&
+    previousStartTime &&
+    !isRotationClient
+  ) {
     const previousAssignment = assignments.find(
       (assignment) =>
         assignment.staffId === staffMember.id &&
@@ -212,13 +236,20 @@ export function scoreCandidate({
 
   if (!isRotationClient && priorClientAssignments > 0) {
     score += Math.min(
-      priorClientAssignments * Math.max(rules.continuityPriority / 8, 1),
+      priorClientAssignments *
+        Math.max(
+          rules.continuityPriority / 8,
+          1
+        ),
       rules.continuityPriority
     );
   }
 
   if (isRotationClient) {
-    const clientStaffIds = getClientStaffIds(client.id, assignments);
+    const clientStaffIds = getClientStaffIds(
+      client.id,
+      assignments
+    );
     const desiredDifferentStaff = Math.max(
       client.desiredDifferentStaffPerDay ??
         (client.supportLevel === "HIGH_SUPPORT" ? 3 : 2),
@@ -230,13 +261,22 @@ export function scoreCandidate({
       !clientStaffIds.has(staffMember.id)
     ) {
       const highSupportMultiplier =
-        client.supportLevel === "HIGH_SUPPORT" ? 1.25 : 1;
-      score += rules.rotationPriority * highSupportMultiplier;
+        client.supportLevel === "HIGH_SUPPORT"
+          ? 1.25
+          : 1;
+
+      score +=
+        rules.rotationPriority *
+        highSupportMultiplier;
     }
 
     if (clientStaffIds.has(staffMember.id)) {
       score -= Math.min(
-        priorClientAssignments * Math.max(rules.rotationPriority / 8, 1),
+        priorClientAssignments *
+          Math.max(
+            rules.rotationPriority / 8,
+            1
+          ),
         rules.rotationPriority
       );
     }
@@ -249,9 +289,16 @@ export function scoreCandidate({
     rules.weeklyHoursPriority
   );
 
-  const staffAssignedSlots = countStaffClientSlots(staffMember.id, assignments);
+  const staffAssignedSlots = countStaffClientSlots(
+    staffMember.id,
+    assignments
+  );
   score -=
-    staffAssignedSlots * Math.max(rules.workloadBalancePriority / 10, 0);
+    staffAssignedSlots *
+    Math.max(
+      rules.workloadBalancePriority / 10,
+      0
+    );
 
   return score;
 }
