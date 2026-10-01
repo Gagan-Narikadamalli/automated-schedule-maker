@@ -14,6 +14,7 @@ import { connectToDatabase } from "@/lib/db";
 import { Client } from "@/models/Client";
 import { ScheduleAssignment } from "@/models/ScheduleAssignment";
 import { Staff } from "@/models/Staff";
+import { UnplacedAssignment } from "@/models/UnplacedAssignment";
 
 type AssignmentType =
   | "CLIENT_1_TO_1"
@@ -385,6 +386,37 @@ export async function PUT(request: Request) {
 
     if (writeOperations.length > 0) {
       await ScheduleAssignment.bulkWrite(writeOperations, { ordered: true });
+    }
+
+    const clientPlacements = normalizedChanges
+      .map((change, index) => ({
+        change,
+        clientId: resolvedClientByChange.get(index),
+      }))
+      .filter(
+        ({ change, clientId }) =>
+          change.assignmentType === "CLIENT_1_TO_1" && Boolean(clientId)
+      );
+
+    for (const placement of clientPlacements) {
+      await UnplacedAssignment.findOneAndUpdate(
+        {
+          locationId,
+          date,
+          status: "UNPLACED",
+          clientId: placement.clientId,
+          originalStaffId: placement.change.staffId,
+          originalStartTime: placement.change.startTime,
+        },
+        {
+          $set: {
+            status: "RESOLVED",
+            resolvedBy: auth.session.userId,
+            resolvedAt: new Date(),
+          },
+        },
+        { sort: { createdAt: 1 } }
+      );
     }
 
     const afterRecords = await ScheduleAssignment.find({
