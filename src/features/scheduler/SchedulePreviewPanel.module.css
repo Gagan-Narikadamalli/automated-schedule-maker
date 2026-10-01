@@ -5,7 +5,7 @@
 
 .controls {
   display: grid;
-  grid-template-columns: repeat(2, minmax(180px, 1fr)) auto;
+  grid-template-columns: repeat(2, minmax(190px, 1fr)) auto;
   gap: 14px;
   align-items: end;
 }
@@ -17,50 +17,92 @@
 }
 
 .metricCard {
-  min-height: 96px;
+  position: relative;
+  min-height: 104px;
+  overflow: hidden;
   padding: 16px;
-  border: 1px solid rgba(18, 59, 93, 0.15);
-  border-radius: 12px;
-  background: #ffffff;
-  box-shadow: 0 4px 16px rgba(18, 59, 93, 0.07);
+  border: 1px solid #d7e5eb;
+  border-radius: 14px;
+  background:
+    linear-gradient(
+      145deg,
+      #ffffff,
+      #f7fbfd
+    );
+  box-shadow: 0 5px 18px rgba(18, 59, 93, 0.06);
+}
+
+.metricCard::after {
+  content: "";
+  position: absolute;
+  right: -24px;
+  bottom: -34px;
+  width: 82px;
+  height: 82px;
+  border-radius: 50%;
+  background: rgba(76, 168, 204, 0.08);
 }
 
 .metricLabel {
+  position: relative;
+  z-index: 1;
   display: block;
-  margin-bottom: 8px;
+  margin-bottom: 9px;
   color: #587286;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
 .metricValue {
+  position: relative;
+  z-index: 1;
   color: #123b5d;
-  font-size: 25px;
-  font-weight: 800;
+  font-size: 27px;
+  font-weight: 850;
+  letter-spacing: -0.02em;
 }
 
 .statusCard {
-  padding: 18px;
-  border: 1px solid rgba(18, 59, 93, 0.16);
-  border-radius: 12px;
-  background: #f6fbfd;
+  display: grid;
+  gap: 5px;
+  padding: 17px 18px;
+  border: 1px solid #d7e5eb;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 4px 14px rgba(18, 59, 93, 0.05);
 }
 
 .statusCard strong {
-  display: block;
-  margin-bottom: 5px;
   color: #123b5d;
   font-size: 18px;
 }
 
+.statusCard span {
+  color: #607887;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .statusComplete {
-  border-left: 5px solid #38865a;
+  border-left: 5px solid #2f9a68;
+  background:
+    linear-gradient(
+      90deg,
+      #f0fbf5,
+      #ffffff 35%
+    );
 }
 
 .statusPartial {
-  border-left: 5px solid #c88727;
+  border-left: 5px solid #cb8a2b;
+  background:
+    linear-gradient(
+      90deg,
+      #fff8e9,
+      #ffffff 35%
+    );
 }
 
 .twoColumn {
@@ -71,15 +113,17 @@
 
 .listCard {
   min-width: 0;
-  padding: 16px;
-  border: 1px solid rgba(18, 59, 93, 0.13);
-  border-radius: 12px;
+  padding: 17px;
+  border: 1px solid #d8e5ea;
+  border-radius: 14px;
   background: #ffffff;
+  box-shadow: 0 4px 14px rgba(18, 59, 93, 0.05);
 }
 
 .listCard h3 {
-  margin-top: 0;
+  margin: 0 0 12px;
   color: #123b5d;
+  font-size: 15px;
 }
 
 .listCard ul {
@@ -87,35 +131,64 @@
   gap: 8px;
   margin: 0;
   padding-left: 20px;
+  color: #4d6877;
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 .shortageTable {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+  border: 1px solid #dce7ec;
+  border-radius: 10px;
 }
 
 .shortageTable th,
 .shortageTable td {
-  padding: 9px 8px;
-  border-bottom: 1px solid rgba(18, 59, 93, 0.1);
+  padding: 9px 10px;
+  border-bottom: 1px solid #e2ebef;
   text-align: left;
 }
 
+.shortageTable tr:last-child td {
+  border-bottom: 0;
+}
+
 .shortageTable th {
+  background: #eef7fa;
   color: #587286;
-  font-size: 12px;
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
+.shortageTable tbody tr:hover {
+  background: #fafcfd;
+}
+
 .trainingNote {
-  padding: 14px 16px;
-  border-radius: 10px;
-  background: #eef7fb;
+  padding: 15px 17px;
+  border: 1px solid #cfe4ed;
+  border-radius: 12px;
+  background:
+    linear-gradient(
+      90deg,
+      #eef8fc,
+      #f8fcfd
+    );
   color: #244d67;
+  font-size: 13px;
+  line-height: 1.55;
 }
 
 .emptyMessage {
+  margin: 0;
   color: #667d8e;
+  font-size: 13px;
+  line-height: 1.55;
 }
 
 @media (max-width: 1050px) {
@@ -129,5 +202,9 @@
   .summaryGrid,
   .twoColumn {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .metricCard {
+    min-height: 88px;
   }
 }
