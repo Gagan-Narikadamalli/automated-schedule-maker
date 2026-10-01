@@ -1,0 +1,1 @@
+import{Schema,model,models}from"mongoose";const s=new Schema({locationId:{type:Schema.Types.ObjectId,ref:"Location",required:true},name:{type:String,required:true},color:{type:String,required:true}},{timestamps:true});export const Team=models.Team||model("Team",s);
