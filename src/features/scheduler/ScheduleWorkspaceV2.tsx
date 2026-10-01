@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { DAILY_TIME_SLOTS } from "./constants";
 import {
@@ -46,6 +46,21 @@ type ScheduleAssignment = {
   manuallyOverridden: boolean;
 };
 
+type UnplacedRecord = {
+  id: string;
+  clientId: string | null;
+  clientCode: string | null;
+  clientColor: string | null;
+  displayText: string;
+  originalStaffId: string | null;
+  originalStartTime: string;
+  reason: string;
+};
+
+type PendingDisplaced = {
+  displayText: string;
+};
+
 type ScheduleResponse = {
   locationId?: string;
   date?: string;
@@ -57,6 +72,13 @@ type ScheduleResponse = {
 
 type LocationsResponse = {
   locations?: LocationOption[];
+  error?: string;
+};
+
+type UnplacedResponse = {
+  unplacedAssignments?: UnplacedRecord[];
+  unplacedAssignment?: UnplacedRecord;
+  success?: boolean;
   error?: string;
 };
 
@@ -346,13 +368,15 @@ export function ScheduleWorkspaceV2() {
   const [statusMessage, setStatusMessage] = useState(
     "Loading the clinic schedule..."
   );
-  const [unplacedAssignments, setUnplacedAssignments] = useState<string[]>([]);
+  const [unplacedAssignments, setUnplacedAssignments] = useState<UnplacedRecord[]>([]);
+  const [placementRecord, setPlacementRecord] = useState<UnplacedRecord | null>(null);
   const [showCallOutPanel, setShowCallOutPanel] = useState(false);
   const [callOutStaffIds, setCallOutStaffIds] = useState<string[]>([]);
   const [showCopyPanel, setShowCopyPanel] = useState(false);
   const [copySourceDate, setCopySourceDate] = useState(() =>
     addDays(getTodayForDateInput(), -1)
   );
+  const pendingDisplacedRef = useRef<PendingDisplaced[]>([]);
 
   const demoMode = locationId.startsWith("demo-");
 
@@ -362,6 +386,26 @@ export function ScheduleWorkspaceV2() {
       "Clinic",
     [locations, locationId]
   );
+
+  const placementCell = useMemo<DemoGridCell | null>(() => {
+    if (!placementRecord) {
+      return null;
+    }
+
+    const clientCode =
+      placementRecord.clientCode ||
+      placementRecord.displayText.replace(/\s+1:1$/i, "").split(/\s+/)[0];
+
+    return {
+      text: placementRecord.displayText || `${clientCode} 1:1`,
+      assignmentType: "CLIENT_1_TO_1",
+      color: placementRecord.clientColor || "#D9F4EE",
+      clientId: placementRecord.clientId,
+      clientCode,
+      source: "MANUAL",
+      locked: true,
+    };
+  }, [placementRecord]);
 
   useEffect(() => {
     let cancelled = false;
@@ -410,6 +454,9 @@ export function ScheduleWorkspaceV2() {
   }, []);
 
   useEffect(() => {
+    setPlacementRecord(null);
+    pendingDisplacedRef.current = [];
+
     if (!locationId || !selectedDate) {
       return;
     }
@@ -423,8 +470,40 @@ export function ScheduleWorkspaceV2() {
     setStaff(createDemoStaff());
     setInitialGrid(nextGrid);
     setRequiredClientSlots(countDemoClientBlocks(nextGrid));
+    setUnplacedAssignments([]);
     setGridVersion((currentVersion) => currentVersion + 1);
     setLoading(false);
+  }
+
+  async function loadUnplacedAssignments(
+    requestedLocationId = locationId,
+    requestedDate = selectedDate
+  ) {
+    if (!requestedLocationId || requestedLocationId.startsWith("demo-")) {
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `/api/unplaced?locationId=${encodeURIComponent(
+          requestedLocationId
+        )}&date=${encodeURIComponent(requestedDate)}`,
+        { cache: "no-store" }
+      );
+      const data = await readJson<UnplacedResponse>(response);
+
+      if (!response.ok) {
+        throw new Error(data.error || "Unplaced assignments could not be loaded.");
+      }
+
+      setUnplacedAssignments(data.unplacedAssignments ?? []);
+    } catch (error) {
+      setStatusMessage(
+        error instanceof Error
+          ? error.message
+          : "Unplaced assignments could not be loaded."
+      );
+    }
   }
 
   async function loadSchedule(
@@ -462,6 +541,7 @@ export function ScheduleWorkspaceV2() {
       setInitialGrid(buildGrid(nextStaff, nextAssignments));
       setRequiredClientSlots(data.requiredClientSlots ?? 0);
       setGridVersion((currentVersion) => currentVersion + 1);
+      await loadUnplacedAssignments(requestedLocationId, requestedDate);
       setStatusMessage(
         `Loaded ${nextAssignments.length} saved assignment${
           nextAssignments.length === 1 ? "" : "s"
@@ -491,6 +571,10 @@ export function ScheduleWorkspaceV2() {
           : "Auto-safe mode is on. Existing assignments are protected from accidental replacement."
       );
 
+      if (!nextMode) {
+        setPlacementRecord(null);
+      }
+
       return nextMode;
     });
   }
@@ -500,10 +584,76 @@ export function ScheduleWorkspaceV2() {
   }
 
   function handleDisplacedAssignment(assignment: string) {
-    setUnplacedAssignments((currentAssignments) => [
-      ...currentAssignments,
-      assignment,
-    ]);
+    if (demoMode) {
+      setUnplacedAssignments((currentAssignments) => [
+        ...currentAssignments,
+        {
+          id: `demo-unplaced-${Date.now()}-${currentAssignments.length}`,
+          clientId: null,
+          clientCode: assignment.replace(/\s+1:1$/i, "").split(/\s+/)[0],
+          clientColor: null,
+          displayText: assignment,
+          originalStaffId: null,
+          originalStartTime: "",
+          reason: "Displaced during preview mode.",
+        },
+      ]);
+      return;
+    }
+
+    pendingDisplacedRef.current.push({ displayText: assignment });
+  }
+
+  async function saveDisplacedAssignments(
+    mutations: ScheduleGridMutation[]
+  ) {
+    if (demoMode || pendingDisplacedRef.current.length === 0) {
+      pendingDisplacedRef.current = [];
+      return;
+    }
+
+    const pending = [...pendingDisplacedRef.current];
+    pendingDisplacedRef.current = [];
+    const candidateMutations = mutations.filter(
+      (mutation) =>
+        mutation.previousCell.text &&
+        mutation.previousCell.text !== mutation.nextCell.text
+    );
+
+    for (const displaced of pending) {
+      const mutation = candidateMutations.find(
+        (candidate) => candidate.previousCell.text === displaced.displayText
+      );
+
+      if (!mutation) {
+        continue;
+      }
+
+      const response = await fetch("/api/unplaced", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          locationId,
+          date: selectedDate,
+          clientId: mutation.previousCell.clientId ?? null,
+          displayText: displaced.displayText,
+          originalStaffId: mutation.staffId,
+          originalStartTime: mutation.startTime,
+          reason: "Displaced by a confirmed manager schedule change.",
+        }),
+      });
+      const data = await readJson<UnplacedResponse>(response);
+
+      if (!response.ok) {
+        throw new Error(
+          data.error || "A displaced assignment could not be saved to the tray."
+        );
+      }
+    }
+
+    await loadUnplacedAssignments();
   }
 
   async function persistGridMutations(
@@ -511,6 +661,7 @@ export function ScheduleWorkspaceV2() {
     force: boolean
   ): Promise<boolean> {
     if (demoMode) {
+      pendingDisplacedRef.current = [];
       setStatusMessage(
         `${mutations.length} preview cell change(s) applied locally. Preview changes are not saved.`
       );
@@ -539,12 +690,15 @@ export function ScheduleWorkspaceV2() {
       const data = await readJson<BatchResponse>(response);
 
       if (!response.ok) {
+        pendingDisplacedRef.current = [];
         const conflictMessage = data.conflicts?.[0]?.message;
         setStatusMessage(
           conflictMessage || data.error || "The schedule change could not be saved."
         );
         return false;
       }
+
+      await saveDisplacedAssignments(mutations);
 
       const conflictSuffix = data.conflicts?.length
         ? ` ${data.conflicts.length} conflict(s) were acknowledged as manual overrides.`
@@ -555,12 +709,68 @@ export function ScheduleWorkspaceV2() {
       );
       return true;
     } catch (error) {
+      pendingDisplacedRef.current = [];
       setStatusMessage(
         error instanceof Error
           ? error.message
           : "The schedule change could not be saved."
       );
       return false;
+    }
+  }
+
+  async function resolveUnplaced(unplacedId: string) {
+    if (demoMode) {
+      setUnplacedAssignments((currentAssignments) =>
+        currentAssignments.filter((assignment) => assignment.id !== unplacedId)
+      );
+      setPlacementRecord(null);
+      return;
+    }
+
+    const response = await fetch("/api/unplaced", {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        locationId,
+        unplacedId,
+      }),
+    });
+    const data = await readJson<UnplacedResponse>(response);
+
+    if (!response.ok) {
+      throw new Error(data.error || "The unplaced assignment could not be resolved.");
+    }
+
+    setPlacementRecord(null);
+    await loadUnplacedAssignments();
+  }
+
+  function beginPlacement(record: UnplacedRecord) {
+    setManualMode(true);
+    setPlacementRecord(record);
+    setStatusMessage(
+      `${record.displayText} is ready to place. Click or tap an available calendar cell.`
+    );
+  }
+
+  async function completePlacement() {
+    if (!placementRecord) {
+      return;
+    }
+
+    try {
+      const placedText = placementRecord.displayText;
+      await resolveUnplaced(placementRecord.id);
+      setStatusMessage(`${placedText} was placed and removed from the Unplaced tray.`);
+    } catch (error) {
+      setStatusMessage(
+        error instanceof Error
+          ? error.message
+          : "The unplaced assignment could not be marked resolved."
+      );
     }
   }
 
@@ -1041,6 +1251,7 @@ export function ScheduleWorkspaceV2() {
             <span>Arrow keys: move</span>
             <span>Shift + arrows/click: multi-select</span>
             <span>Ctrl/Cmd + C / V: copy and paste</span>
+            <span>Ctrl/Cmd + Z / Y: undo and redo</span>
             <span>Double-click or F2: edit text</span>
             <span>Quick actions: Break, Nap, Speech, combinations</span>
             <span>Manual Mode: drag or Move Selected</span>
@@ -1059,6 +1270,8 @@ export function ScheduleWorkspaceV2() {
               staff={staff}
               initialGrid={initialGrid}
               manualMode={manualMode}
+              placementCell={placementCell}
+              onPlacementComplete={completePlacement}
               onConflict={handleConflict}
               onDisplacedAssignment={handleDisplacedAssignment}
               onMutations={persistGridMutations}
@@ -1069,16 +1282,53 @@ export function ScheduleWorkspaceV2() {
         <aside className="unplaced-tray">
           <h2>Unplaced Assignments</h2>
           <p>
-            In Manual Mode, replaced entries are held here so the manager can see
-            what still needs coverage instead of losing the displaced assignment.
+            Replaced client assignments stay here until they are placed in another
+            calendar cell or marked covered by the manager.
           </p>
+
+          {placementRecord && (
+            <div className="notice warning-notice">
+              <strong>Placement mode</strong>
+              <p>{placementRecord.displayText} — click a destination cell.</p>
+              <button
+                type="button"
+                className="button button-secondary button-small"
+                onClick={() => setPlacementRecord(null)}
+              >
+                Cancel Placement
+              </button>
+            </div>
+          )}
 
           {unplacedAssignments.length === 0 ? (
             <div className="empty-state">No unplaced assignments.</div>
           ) : (
             <ul>
-              {unplacedAssignments.map((assignment, index) => (
-                <li key={`${assignment}-${index}`}>{assignment}</li>
+              {unplacedAssignments.map((assignment) => (
+                <li key={assignment.id}>
+                  <strong>{assignment.displayText}</strong>
+                  {assignment.originalStartTime && (
+                    <span>From {assignment.originalStartTime}</span>
+                  )}
+                  <div className="table-actions">
+                    <button
+                      type="button"
+                      className="button button-primary button-small"
+                      disabled={working}
+                      onClick={() => beginPlacement(assignment)}
+                    >
+                      Place
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-secondary button-small"
+                      disabled={working}
+                      onClick={() => void resolveUnplaced(assignment.id)}
+                    >
+                      Mark Covered
+                    </button>
+                  </div>
+                </li>
               ))}
             </ul>
           )}

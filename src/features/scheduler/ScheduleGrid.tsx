@@ -34,6 +34,8 @@ type ScheduleGridProps = {
   staff: StaffColumn[];
   initialGrid: DemoGridCell[][];
   manualMode: boolean;
+  placementCell?: DemoGridCell | null;
+  onPlacementComplete?: () => Promise<void> | void;
   onConflict: (message: string) => void;
   onDisplacedAssignment: (assignment: string) => void;
   onMutations?: (
@@ -45,6 +47,10 @@ type ScheduleGridProps = {
 type Selection = {
   anchor: CellPosition;
   focus: CellPosition;
+};
+
+type HistoryEntry = {
+  mutations: ScheduleGridMutation[];
 };
 
 function normalizeSelection(selection: Selection) {
@@ -105,6 +111,8 @@ export function ScheduleGrid({
   staff,
   initialGrid,
   manualMode,
+  placementCell = null,
+  onPlacementComplete,
   onConflict,
   onDisplacedAssignment,
   onMutations,
@@ -120,6 +128,8 @@ export function ScheduleGrid({
   const [moveSource, setMoveSource] = useState<CellPosition | null>(null);
   const [dragSelecting, setDragSelecting] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [undoStack, setUndoStack] = useState<HistoryEntry[]>([]);
+  const [redoStack, setRedoStack] = useState<HistoryEntry[]>([]);
   const scheduleAreaRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<HTMLInputElement | null>(null);
 
@@ -169,17 +179,22 @@ export function ScheduleGrid({
   async function commitMutations(
     nextGrid: DemoGridCell[][],
     mutations: ScheduleGridMutation[],
-    force: boolean
-  ) {
+    force: boolean,
+    recordHistory = true
+  ): Promise<boolean> {
     if (mutations.length === 0) {
-      return;
+      return true;
     }
 
     const previousGrid = grid;
     setGrid(nextGrid);
 
     if (!onMutations) {
-      return;
+      if (recordHistory) {
+        setUndoStack((current) => [...current, { mutations }].slice(-50));
+        setRedoStack([]);
+      }
+      return true;
     }
 
     try {
@@ -188,12 +203,21 @@ export function ScheduleGrid({
 
       if (!saved) {
         setGrid(previousGrid);
+        return false;
       }
+
+      if (recordHistory) {
+        setUndoStack((current) => [...current, { mutations }].slice(-50));
+        setRedoStack([]);
+      }
+
+      return true;
     } catch {
       setGrid(previousGrid);
       onConflict(
         "The schedule change could not be saved, so the grid was restored."
       );
+      return false;
     } finally {
       setSaving(false);
     }
@@ -209,12 +233,117 @@ export function ScheduleGrid({
     );
   }
 
+  async function undoLastChange() {
+    const entry = undoStack[undoStack.length - 1];
+
+    if (!entry || saving) {
+      return;
+    }
+
+    const nextGrid = cloneGrid(grid);
+    const inverseMutations = entry.mutations.map((mutation) => {
+      nextGrid[mutation.row][mutation.column] = {
+        ...mutation.previousCell,
+      };
+
+      return {
+        ...mutation,
+        previousCell: mutation.nextCell,
+        nextCell: mutation.previousCell,
+      };
+    });
+
+    const saved = await commitMutations(
+      nextGrid,
+      inverseMutations,
+      true,
+      false
+    );
+
+    if (saved) {
+      setUndoStack((current) => current.slice(0, -1));
+      setRedoStack((current) => [...current, entry].slice(-50));
+      onConflict("Last schedule edit undone and saved.");
+    }
+  }
+
+  async function redoLastChange() {
+    const entry = redoStack[redoStack.length - 1];
+
+    if (!entry || saving) {
+      return;
+    }
+
+    const nextGrid = cloneGrid(grid);
+
+    entry.mutations.forEach((mutation) => {
+      nextGrid[mutation.row][mutation.column] = {
+        ...mutation.nextCell,
+      };
+    });
+
+    const saved = await commitMutations(nextGrid, entry.mutations, true, false);
+
+    if (saved) {
+      setRedoStack((current) => current.slice(0, -1));
+      setUndoStack((current) => [...current, entry].slice(-50));
+      onConflict("Schedule edit redone and saved.");
+    }
+  }
+
+  async function placeExternalAssignment(row: number, column: number) {
+    if (!placementCell || saving) {
+      return;
+    }
+
+    const targetCell = grid[row][column];
+
+    if (targetCell.assignmentType === "UNAVAILABLE") {
+      onConflict(
+        "That destination is unavailable because the staff member is off shift or called out."
+      );
+      return;
+    }
+
+    if (isOccupied(targetCell) && !confirmReplacement(1)) {
+      return;
+    }
+
+    if (isOccupied(targetCell) && targetCell.text) {
+      onDisplacedAssignment(targetCell.text);
+    }
+
+    const nextCell: DemoGridCell = {
+      ...placementCell,
+      source: "MANUAL",
+      locked: true,
+    };
+    const nextGrid = cloneGrid(grid);
+    nextGrid[row][column] = nextCell;
+    const saved = await commitMutations(
+      nextGrid,
+      [mutationForCell(row, column, targetCell, nextCell)],
+      true
+    );
+
+    if (saved) {
+      selectSingleCell(row, column);
+      await onPlacementComplete?.();
+    }
+  }
+
   function handleCellMouseDown(
     event: MouseEvent<HTMLTableCellElement>,
     row: number,
     column: number
   ) {
     if (saving) {
+      return;
+    }
+
+    if (placementCell) {
+      event.preventDefault();
+      void placeExternalAssignment(row, column);
       return;
     }
 
@@ -237,7 +366,7 @@ export function ScheduleGrid({
   }
 
   function handleCellMouseEnter(row: number, column: number) {
-    if (!dragSelecting || moveSource || saving) {
+    if (!dragSelecting || moveSource || placementCell || saving) {
       return;
     }
 
@@ -409,6 +538,23 @@ export function ScheduleGrid({
 
   function handleGridKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (editingCell || saving) {
+      return;
+    }
+
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
+      event.preventDefault();
+
+      if (event.shiftKey) {
+        void redoLastChange();
+      } else {
+        void undoLastChange();
+      }
+      return;
+    }
+
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "y") {
+      event.preventDefault();
+      void redoLastChange();
       return;
     }
 
@@ -681,6 +827,7 @@ export function ScheduleGrid({
 
     if (
       !manualMode ||
+      placementCell ||
       saving ||
       cell.assignmentType === "EMPTY" ||
       cell.assignmentType === "UNAVAILABLE"
@@ -701,7 +848,7 @@ export function ScheduleGrid({
   ) {
     event.preventDefault();
 
-    if (!manualMode || !draggedCell || saving) {
+    if (!manualMode || !draggedCell || placementCell || saving) {
       return;
     }
 
@@ -756,9 +903,15 @@ export function ScheduleGrid({
     <div ref={scheduleAreaRef} className="schedule-grid-area">
       <div className="schedule-grid-tools" aria-label="Selected cell actions">
         <div className="schedule-grid-tools-label">
-          <strong>Selected cell actions</strong>
+          <strong>
+            {placementCell
+              ? `Placement mode: ${placementCell.text}`
+              : "Selected cell actions"}
+          </strong>
           <span>
-            Set Break, Nap, Speech, or a combined Break activity without typing.
+            {placementCell
+              ? "Click or tap an available destination cell to place this unassigned client."
+              : "Set Break, Nap, Speech, or a combined Break activity without typing."}
             {saving ? " Saving changes..." : ""}
           </span>
         </div>
@@ -769,7 +922,7 @@ export function ScheduleGrid({
               key={preset.assignmentType}
               type="button"
               className="quick-action-button"
-              disabled={saving}
+              disabled={saving || Boolean(placementCell)}
               onClick={() => void applyPresetToSelection(preset)}
             >
               {preset.label}
@@ -779,7 +932,7 @@ export function ScheduleGrid({
           <button
             type="button"
             className="quick-action-button"
-            disabled={saving}
+            disabled={saving || Boolean(placementCell)}
             onClick={() => void clearSelectedCells()}
           >
             Clear
@@ -790,10 +943,28 @@ export function ScheduleGrid({
             className={`quick-action-button ${
               moveSource ? "quick-action-button-active" : ""
             }`}
-            disabled={saving}
+            disabled={saving || Boolean(placementCell)}
             onClick={moveSource ? () => setMoveSource(null) : beginMoveSelected}
           >
             {moveSource ? "Cancel Move" : "Move Selected"}
+          </button>
+
+          <button
+            type="button"
+            className="quick-action-button"
+            disabled={saving || undoStack.length === 0 || Boolean(placementCell)}
+            onClick={() => void undoLastChange()}
+          >
+            Undo
+          </button>
+
+          <button
+            type="button"
+            className="quick-action-button"
+            disabled={saving || redoStack.length === 0 || Boolean(placementCell)}
+            onClick={() => void redoLastChange()}
+          >
+            Redo
           </button>
 
           <button
@@ -808,7 +979,7 @@ export function ScheduleGrid({
 
       <div
         className={`schedule-grid-wrapper ${
-          moveSource ? "schedule-grid-move-mode" : ""
+          moveSource || placementCell ? "schedule-grid-move-mode" : ""
         }`}
         tabIndex={0}
         onKeyDown={handleGridKeyDown}
@@ -852,6 +1023,7 @@ export function ScheduleGrid({
                       style={{ backgroundColor: cell.color }}
                       draggable={
                         manualMode &&
+                        !placementCell &&
                         !saving &&
                         cell.assignmentType !== "EMPTY" &&
                         cell.assignmentType !== "UNAVAILABLE"
@@ -863,7 +1035,7 @@ export function ScheduleGrid({
                         handleCellMouseEnter(rowIndex, columnIndex)
                       }
                       onDoubleClick={() => {
-                        if (saving) {
+                        if (saving || placementCell) {
                           return;
                         }
 
