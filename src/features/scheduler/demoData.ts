@@ -70,6 +70,7 @@ export function createDemoGrid(): DemoGridCell[][] {
         return {
           text: "Break/Nap",
           assignmentType: "BREAK_NAP",
+          color: "#FFF3D6",
         };
       }
 
@@ -78,6 +79,14 @@ export function createDemoGrid(): DemoGridCell[][] {
           text: "Speech",
           assignmentType: "SPEECH",
           color: "#DCE9F8",
+        };
+      }
+
+      if (rowIndex === 10 && columnIndex === 6) {
+        return {
+          text: "Break/Speech",
+          assignmentType: "BREAK_SPEECH",
+          color: "#E4F1FA",
         };
       }
 
