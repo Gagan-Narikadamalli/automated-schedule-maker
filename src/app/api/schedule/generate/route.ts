@@ -14,6 +14,7 @@ import type {
 import { applyHistoricalTraining } from "@/features/scheduler/server/applyHistoricalTraining";
 import { applyLivingstonWorkbookTrial } from "@/features/scheduler/server/applyLivingstonWorkbookTrial";
 import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySchedulerInput";
+import { syncAutoUnplacedGaps } from "@/features/scheduler/server/syncAutoUnplacedGaps";
 import { writeAuditLog } from "@/lib/api/audit";
 import { connectToDatabase } from "@/lib/db";
 import { ScheduleAssignment } from "@/models/ScheduleAssignment";
@@ -178,6 +179,12 @@ export async function POST(request: Request) {
       );
     }
 
+    const managerGapCount = await syncAutoUnplacedGaps(
+      locationId,
+      date,
+      result.uncoveredRequirements
+    );
+
     const completeCoverage =
       result.metrics.uncoveredClientSlots === 0;
     const partialBuild = !completeCoverage;
@@ -201,6 +208,7 @@ export async function POST(request: Request) {
         metrics: result.metrics,
         uncoveredRequirements:
           result.uncoveredRequirements,
+        managerGapCount,
         warningCount: result.warnings.length,
         reservedBreakCount: reservedBreaks.length,
         completeCoverage,
@@ -232,13 +240,14 @@ export async function POST(request: Request) {
       completeCoverage,
       partialBuild,
       message: partialBuild
-        ? "The automatic scheduler built every assignment it could safely cover. Remaining client blocks are listed for manager completion."
+        ? "The automatic scheduler built every assignment it could safely cover. Remaining client blocks were added to the manager Unplaced Assignments tray."
         : "The automatic scheduler completed all required client coverage.",
       readiness,
       metrics: result.metrics,
       warnings: result.warnings,
       uncoveredRequirements:
         result.uncoveredRequirements,
+      managerGapCount,
       reservedBreakCount: reservedBreaks.length,
       coverageByRole,
       autoTemplateName: dayData.autoTemplateName,
