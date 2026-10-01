@@ -81,19 +81,59 @@ function getClientStaffIds(
   );
 }
 
-function findReferenceAssignment(
+function getReferenceHistoryScore(
   staffId: string,
   clientId: string,
   startTime: string,
-  referenceAssignments: SchedulerAssignment[]
-): SchedulerAssignment | undefined {
-  return referenceAssignments.find(
+  referenceAssignments: SchedulerAssignment[],
+  rules: SchedulerRules,
+  isRotationClient: boolean
+): number {
+  const clientHistory = referenceAssignments.filter(
     (assignment) =>
       assignment.staffId === staffId &&
       assignment.clientId === clientId &&
-      assignment.startTime === startTime &&
       assignment.assignmentType === "CLIENT_1_TO_1"
   );
+
+  if (clientHistory.length === 0) {
+    return 0;
+  }
+
+  const exactSlotMatches = clientHistory.filter(
+    (assignment) => assignment.startTime === startTime
+  );
+  const templateMatches = exactSlotMatches.filter(
+    (assignment) => assignment.source === "TEMPLATE"
+  ).length;
+  const historicalMatches = exactSlotMatches.filter(
+    (assignment) => assignment.source !== "TEMPLATE"
+  ).length;
+
+  let score = 0;
+
+  if (templateMatches > 0) {
+    score += rules.weekdayTemplatePriority;
+  }
+
+  if (historicalMatches > 0) {
+    const matchMultiplier = Math.min(historicalMatches, 4);
+    const rotationMultiplier = isRotationClient ? 0.35 : 1;
+
+    score +=
+      matchMultiplier *
+      rules.scheduleStabilityPriority *
+      rotationMultiplier;
+  }
+
+  const generalPairingMatches = Math.min(clientHistory.length, 12);
+  const generalPairingWeight = isRotationClient
+    ? rules.continuityPriority / 20
+    : rules.continuityPriority / 8;
+
+  score += generalPairingMatches * Math.max(generalPairingWeight, 0);
+
+  return score;
 }
 
 export function getRoleCoveragePriority(
@@ -140,16 +180,10 @@ function getWeeklyHoursScore(
     staffMember.targetWeeklyHours - projectedHours;
 
   if (hoursToTarget > 0) {
-    return (
-      Math.min(hoursToTarget, 8) *
-      weeklyHoursPriority
-    );
+    return Math.min(hoursToTarget, 8) * weeklyHoursPriority;
   }
 
-  return (
-    Math.max(hoursToTarget, -8) *
-    weeklyHoursPriority
-  );
+  return Math.max(hoursToTarget, -8) * weeklyHoursPriority;
 }
 
 export function scoreCandidate({
@@ -162,14 +196,9 @@ export function scoreCandidate({
 }: CandidateScoreContext): number {
   let score = 0;
 
-  // This score is still included so a larger role priority remains visible in
-  // diagnostics. The generator also sorts by the role priority before comparing
-  // the remaining soft-preference score, which makes the clinic role order
-  // deterministic rather than accidental.
-  score += getRoleCoveragePriority(
-    staffMember,
-    rules
-  );
+  // Role points remain visible in diagnostics and tie-breaking. The generator
+  // also enforces the clinic role tier before comparing soft preferences.
+  score += getRoleCoveragePriority(staffMember, rules);
 
   const relationship =
     client.staffRelationships[staffMember.id] ?? "ALLOWED";
@@ -187,21 +216,6 @@ export function scoreCandidate({
     score += rules.sameTeamPriority;
   }
 
-  const referenceAssignment = findReferenceAssignment(
-    staffMember.id,
-    client.id,
-    startTime,
-    referenceAssignments
-  );
-
-  if (referenceAssignment) {
-    if (referenceAssignment.source === "TEMPLATE") {
-      score += rules.weekdayTemplatePriority;
-    } else {
-      score += rules.scheduleStabilityPriority;
-    }
-  }
-
   const previousStartTime = getPreviousSlot(
     startTime,
     rules.slotLengthMinutes
@@ -209,6 +223,15 @@ export function scoreCandidate({
   const isRotationClient =
     client.supportLevel === "ROTATION" ||
     client.supportLevel === "HIGH_SUPPORT";
+
+  score += getReferenceHistoryScore(
+    staffMember.id,
+    client.id,
+    startTime,
+    referenceAssignments,
+    rules,
+    isRotationClient
+  );
 
   if (
     rules.preferStaffContinuity &&
@@ -237,10 +260,7 @@ export function scoreCandidate({
   if (!isRotationClient && priorClientAssignments > 0) {
     score += Math.min(
       priorClientAssignments *
-        Math.max(
-          rules.continuityPriority / 8,
-          1
-        ),
+        Math.max(rules.continuityPriority / 8, 1),
       rules.continuityPriority
     );
   }
@@ -273,10 +293,7 @@ export function scoreCandidate({
     if (clientStaffIds.has(staffMember.id)) {
       score -= Math.min(
         priorClientAssignments *
-          Math.max(
-            rules.rotationPriority / 8,
-            1
-          ),
+          Math.max(rules.rotationPriority / 8, 1),
         rules.rotationPriority
       );
     }
@@ -295,10 +312,7 @@ export function scoreCandidate({
   );
   score -=
     staffAssignedSlots *
-    Math.max(
-      rules.workloadBalancePriority / 10,
-      0
-    );
+    Math.max(rules.workloadBalancePriority / 10, 0);
 
   return score;
 }
