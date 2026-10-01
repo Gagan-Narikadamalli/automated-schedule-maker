@@ -197,9 +197,7 @@
 }
 
 .page :global(.toolbar-card) {
-  position: sticky;
-  top: 76px;
-  z-index: 25;
+  position: static;
 }
 
 .page :global(.schedule-card) {
@@ -218,10 +216,6 @@
 
   .workflowStrip {
     grid-template-columns: 1fr;
-  }
-
-  .page :global(.toolbar-card) {
-    position: static;
   }
 }
 
