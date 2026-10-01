@@ -1,6 +1,9 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 
+import { LogoutButton } from "@/components/LogoutButton";
+import { requirePageSession } from "@/lib/auth/session";
+
 const navigationItems = [
   { href: "/", label: "Calendar" },
   { href: "/staff", label: "Staff" },
@@ -17,13 +20,20 @@ type AppShellProps = {
   children: ReactNode;
 };
 
-export function AppShell({ children }: AppShellProps) {
+export async function AppShell({ children }: AppShellProps) {
+  const session = await requirePageSession();
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
         <div className="sidebar-brand">
           <span className="sidebar-brand-main">SUCCESS ON THE SPECTRUM</span>
           <span className="sidebar-brand-subtitle">Automated Schedule Maker</span>
+        </div>
+
+        <div className="sidebar-user-card">
+          <strong>{session.username}</strong>
+          <span>{session.role.replaceAll("_", " ")}</span>
         </div>
 
         <nav className="sidebar-navigation" aria-label="Primary navigation">
@@ -33,6 +43,10 @@ export function AppShell({ children }: AppShellProps) {
             </Link>
           ))}
         </nav>
+
+        <div className="sidebar-footer">
+          <LogoutButton />
+        </div>
       </aside>
 
       <main className="main-content">{children}</main>
