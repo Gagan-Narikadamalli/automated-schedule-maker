@@ -120,6 +120,7 @@ export async function POST(request: Request) {
         historicalBreakPriority:
           schedulerInput.rules.historicalBreakPriority,
       },
+      schedulerRules: schedulerInput.rules,
     });
 
     const result = generateSchedule({
