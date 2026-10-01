@@ -1,0 +1,370 @@
+:root {
+  --sos-navy-deep: #0b3049;
+  --sos-navy-soft: #164d70;
+  --sos-cyan: #4ca8cc;
+  --sos-aqua: #dff3fb;
+  --sos-mint: #e7f7f0;
+  --sos-surface: #ffffff;
+  --sos-surface-soft: #f8fbfd;
+  --sos-border-soft: #d8e5eb;
+  --sos-border-medium: #bfd2dc;
+  --sos-text-soft: #607887;
+  --sos-shadow-soft: 0 10px 30px rgba(18, 59, 93, 0.08);
+  --sos-shadow-card: 0 5px 18px rgba(18, 59, 93, 0.07);
+}
+
+body {
+  min-width: 320px;
+  background:
+    radial-gradient(
+      circle at top right,
+      rgba(76, 168, 204, 0.1),
+      transparent 32rem
+    ),
+    #f4f9fb;
+}
+
+.section-page,
+.schedule-page {
+  width: 100%;
+  max-width: 1800px;
+  margin: 0 auto;
+}
+
+.page-header {
+  align-items: center;
+  padding: 20px 22px;
+  border: 1px solid var(--sos-border-soft);
+  border-radius: 16px;
+  background:
+    linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.98),
+      rgba(234, 246, 251, 0.9)
+    );
+  box-shadow: var(--sos-shadow-card);
+}
+
+.page-header > div:first-child {
+  min-width: 0;
+}
+
+.page-header h1 {
+  margin-top: 4px;
+  font-size: clamp(26px, 3vw, 38px);
+  letter-spacing: -0.02em;
+}
+
+.page-eyebrow {
+  color: var(--sos-blue);
+  letter-spacing: 0.14em;
+}
+
+.page-subtitle {
+  max-width: 760px;
+  line-height: 1.55;
+}
+
+.section-card,
+.toolbar-card,
+.callout-panel,
+.schedule-card,
+.unplaced-tray {
+  border-color: var(--sos-border-soft);
+  border-radius: 14px;
+  box-shadow: var(--sos-shadow-card);
+}
+
+.section-card {
+  padding: 20px;
+}
+
+.section-card h2 {
+  margin-bottom: 8px;
+  letter-spacing: -0.01em;
+}
+
+.toolbar-card {
+  position: relative;
+  overflow: hidden;
+  padding: 10px 12px;
+  border-color: #cfdee5;
+  background: rgba(255, 255, 255, 0.98);
+}
+
+.toolbar-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: linear-gradient(180deg, #1c6a96, #4ca8cc);
+}
+
+.toolbar-group {
+  align-items: center;
+}
+
+.button {
+  min-height: 40px;
+  padding: 8px 14px;
+  border-radius: 9px;
+  box-shadow: none;
+}
+
+.button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+  transform: none;
+}
+
+.button-primary {
+  border-color: #185e87;
+  background:
+    linear-gradient(
+      180deg,
+      #237aa8,
+      #1c6a96
+    );
+  box-shadow: 0 4px 12px rgba(28, 106, 150, 0.18);
+}
+
+.button-primary:hover:not(:disabled) {
+  background:
+    linear-gradient(
+      180deg,
+      #1f6f9a,
+      #15516f
+    );
+}
+
+.button-secondary {
+  border-color: #c3d5de;
+  background: #ffffff;
+}
+
+.button-secondary:hover:not(:disabled) {
+  border-color: #7fb5cd;
+  background: #f1f9fc;
+}
+
+.button-warning {
+  border-color: #dfb66f;
+  background: #fff6e5;
+  color: #74470d;
+}
+
+.field-label {
+  gap: 6px;
+}
+
+.field-label select,
+.field-label input,
+.form-field input,
+.form-field select,
+.form-field textarea {
+  border-color: #c8d9e1;
+  border-radius: 9px;
+  background: #ffffff;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.field-label select:focus,
+.field-label input:focus,
+.form-field input:focus,
+.form-field select:focus,
+.form-field textarea:focus {
+  border-color: #4c9fc3;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(76, 159, 195, 0.12);
+}
+
+.schedule-status-bar {
+  min-height: 48px;
+  gap: 8px 12px;
+  padding: 10px 14px;
+  border-color: #c7dfe9;
+  border-radius: 12px;
+  background:
+    linear-gradient(
+      90deg,
+      #edf8fc,
+      #f8fcfd
+    );
+}
+
+.schedule-status-bar > span:not(:last-child),
+.schedule-status-bar > strong {
+  padding-right: 11px;
+  border-right: 1px solid #cbdfe7;
+}
+
+.schedule-status-bar > span:last-child {
+  flex: 1 1 320px;
+  color: #506977;
+}
+
+.demo-mode-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  border: 1px solid #e7c788;
+  border-radius: 11px;
+  background: #fff9ec;
+  color: #75511a;
+  font-size: 13px;
+}
+
+.callout-panel {
+  padding: 18px;
+  background: #ffffff;
+}
+
+.checkbox-card {
+  min-height: 42px;
+  border-color: #d4e1e7;
+  background: #fbfdfe;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease;
+}
+
+.checkbox-card:hover {
+  border-color: #8ebbd0;
+  background: #f1f9fc;
+}
+
+.schedule-card {
+  border-color: #cbdbe3;
+  background: #ffffff;
+  box-shadow: 0 8px 26px rgba(18, 59, 93, 0.08);
+}
+
+.spreadsheet-help {
+  gap: 8px;
+  padding: 9px 10px;
+  background: #f7fbfd;
+}
+
+.spreadsheet-help span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 25px;
+  padding: 4px 8px;
+  border: 1px solid #d9e6ec;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #526d7b;
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.unplaced-tray {
+  border-color: #ead5a9;
+  background:
+    linear-gradient(
+      180deg,
+      #fffdf8,
+      #fffaf0
+    );
+}
+
+.unplaced-tray h2 {
+  color: #5f471f;
+}
+
+.unplaced-tray li {
+  border-color: #e7cf9d;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(111, 77, 18, 0.06);
+}
+
+.inline-message {
+  border-color: #c8e1ec;
+  border-radius: 10px;
+  background: #f1f9fc;
+}
+
+.data-table {
+  overflow: hidden;
+  border: 1px solid #d9e5ea;
+  border-radius: 10px;
+}
+
+.data-table th {
+  background: #edf6fa;
+}
+
+.data-table tbody tr:hover {
+  background: #f8fcfd;
+}
+
+.metric-card {
+  border-color: #d8e5ea;
+  border-radius: 14px;
+  box-shadow: var(--sos-shadow-card);
+}
+
+.team-card {
+  border-color: #d8e5ea;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 3px 12px rgba(18, 59, 93, 0.05);
+}
+
+@media (max-width: 900px) {
+  .page-header {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 16px;
+  }
+
+  .schedule-context-controls {
+    width: 100%;
+  }
+
+  .schedule-context-controls .field-label {
+    flex: 1 1 180px;
+  }
+
+  .toolbar-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .toolbar-group {
+    width: 100%;
+  }
+
+  .toolbar-group .button {
+    flex: 1 1 150px;
+  }
+}
+
+@media (max-width: 600px) {
+  .page-header {
+    padding: 14px;
+    border-radius: 12px;
+  }
+
+  .page-header h1 {
+    font-size: 25px;
+  }
+
+  .toolbar-card,
+  .section-card,
+  .callout-panel {
+    border-radius: 11px;
+  }
+
+  .toolbar-group .button {
+    flex: 1 1 100%;
+  }
+
+  .schedule-status-bar > span:not(:last-child),
+  .schedule-status-bar > strong {
+    border-right: 0;
+  }
+}
