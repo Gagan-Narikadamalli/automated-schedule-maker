@@ -12,69 +12,90 @@ type NavigationItem = {
   shortLabel: string;
 };
 
-const navigationItems: NavigationItem[] = [
+type NavigationGroup = {
+  label: string;
+  items: NavigationItem[];
+};
+
+const navigationGroups: NavigationGroup[] = [
   {
-    href: "/",
-    label: "Calendar",
-    shortLabel: "CAL",
+    label: "Scheduling",
+    items: [
+      {
+        href: "/",
+        label: "Calendar",
+        shortLabel: "CAL",
+      },
+      {
+        href: "/schedule-preview",
+        label: "Auto Schedule Preview",
+        shortLabel: "AUTO",
+      },
+      {
+        href: "/fixed-events",
+        label: "Speech & Fixed Events",
+        shortLabel: "EVT",
+      },
+      {
+        href: "/templates",
+        label: "Templates",
+        shortLabel: "TPL",
+      },
+      {
+        href: "/overview",
+        label: "Weekly Overview",
+        shortLabel: "WK",
+      },
+    ],
   },
   {
-    href: "/schedule-preview",
-    label: "Auto Schedule Preview",
-    shortLabel: "AUTO",
+    label: "Clinic",
+    items: [
+      {
+        href: "/staff",
+        label: "Staff",
+        shortLabel: "STF",
+      },
+      {
+        href: "/clients",
+        label: "Clients",
+        shortLabel: "CLI",
+      },
+      {
+        href: "/teams",
+        label: "Teams",
+        shortLabel: "TEAM",
+      },
+      {
+        href: "/supervision",
+        label: "Supervision",
+        shortLabel: "SUP",
+      },
+    ],
   },
   {
-    href: "/staff",
-    label: "Staff",
-    shortLabel: "STF",
-  },
-  {
-    href: "/clients",
-    label: "Clients",
-    shortLabel: "CLI",
-  },
-  {
-    href: "/teams",
-    label: "Teams",
-    shortLabel: "TEAM",
-  },
-  {
-    href: "/fixed-events",
-    label: "Speech & Fixed Events",
-    shortLabel: "EVT",
-  },
-  {
-    href: "/templates",
-    label: "Templates",
-    shortLabel: "TPL",
-  },
-  {
-    href: "/overview",
-    label: "Weekly Overview",
-    shortLabel: "WK",
-  },
-  {
-    href: "/activity",
-    label: "Activity & Changes",
-    shortLabel: "LOG",
-  },
-  {
-    href: "/supervision",
-    label: "Supervision",
-    shortLabel: "SUP",
-  },
-  {
-    href: "/settings",
-    label: "Clinic Settings",
-    shortLabel: "SET",
-  },
-  {
-    href: "/settings/data-maintenance",
-    label: "Data Maintenance",
-    shortLabel: "DATA",
+    label: "Administration",
+    items: [
+      {
+        href: "/activity",
+        label: "Activity & Changes",
+        shortLabel: "LOG",
+      },
+      {
+        href: "/settings",
+        label: "Clinic Settings",
+        shortLabel: "SET",
+      },
+      {
+        href: "/settings/data-maintenance",
+        label: "Data Maintenance",
+        shortLabel: "DATA",
+      },
+    ],
   },
 ];
 
+const navigationItems = navigationGroups.flatMap((group) => group.items);
 const SIDEBAR_STORAGE_KEY = "sos-scheduler-sidebar-open";
 
 type AppShellProps = {
@@ -157,25 +178,36 @@ export function AppShell({ children }: AppShellProps) {
         </div>
 
         <nav className={styles.sidebarNavigation} aria-label="Primary navigation">
-          {navigationItems.map((item) => {
-            const active = item.href === activeNavigationHref;
+          {navigationGroups.map((group) => (
+            <div className={styles.navigationGroup} key={group.label}>
+              <div className={styles.navigationGroupLabel}>{group.label}</div>
 
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`${styles.sidebarLink} ${
-                  active ? styles.sidebarLinkActive : ""
-                }`}
-                onClick={closeSidebarOnSmallScreen}
-              >
-                <span className={styles.sidebarLinkBadge} aria-hidden="true">
-                  {item.shortLabel}
-                </span>
-                <span>{item.label}</span>
-              </Link>
-            );
-          })}
+              <div className={styles.navigationGroupItems}>
+                {group.items.map((item) => {
+                  const active = item.href === activeNavigationHref;
+
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className={`${styles.sidebarLink} ${
+                        active ? styles.sidebarLinkActive : ""
+                      }`}
+                      onClick={closeSidebarOnSmallScreen}
+                    >
+                      <span
+                        className={styles.sidebarLinkBadge}
+                        aria-hidden="true"
+                      >
+                        {item.shortLabel}
+                      </span>
+                      <span>{item.label}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </nav>
 
         <div className={styles.sidebarFooter}>
