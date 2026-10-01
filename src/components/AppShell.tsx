@@ -7,6 +7,7 @@ import styles from "./AppShell.module.css";
 
 const navigationItems = [
   { href: "/", label: "Calendar" },
+  { href: "/schedule-preview", label: "Auto Schedule Preview" },
   { href: "/staff", label: "Staff" },
   { href: "/clients", label: "Clients" },
   { href: "/teams", label: "Teams" },
