@@ -5,6 +5,17 @@ import { ScheduleWorkspaceV2 } from "@/features/scheduler/ScheduleWorkspaceV2";
 
 import styles from "./page.module.css";
 
+const schedulerGuardrails = [
+  "Staff availability",
+  "Client attendance",
+  "Call-outs",
+  "Break coverage",
+  "Speech & nap",
+  "Pairing rules",
+  "Templates",
+  "Recent patterns",
+];
+
 const workflowSteps = [
   {
     step: "01",
@@ -42,6 +53,15 @@ export default function HomePage() {
               breaks, call-outs, templates, and recent scheduling patterns first.
               Managers can then adjust the result directly in the spreadsheet grid.
             </p>
+
+            <div className={styles.guardrailList} aria-label="Scheduling guardrails">
+              {schedulerGuardrails.map((guardrail) => (
+                <span className={styles.guardrailChip} key={guardrail}>
+                  <span className={styles.guardrailDot} aria-hidden="true" />
+                  {guardrail}
+                </span>
+              ))}
+            </div>
           </div>
 
           <div className={styles.commandActions}>
