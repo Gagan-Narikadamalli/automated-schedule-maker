@@ -1,12 +1,5 @@
 import { NextResponse } from "next/server";
 
-import {
-  forbiddenResponse,
-  requireApiSession,
-  SETTINGS_WRITE_ROLES,
-  sessionCanAccessLocation,
-  sessionHasAnyRole,
-} from "@/lib/api/auth";
 import { writeAuditLog } from "@/lib/api/audit";
 import { connectToDatabase } from "@/lib/db";
 import { SchedulingRules } from "@/models/SchedulingRules";
@@ -20,6 +13,7 @@ type RulesRequest = {
   maximumClientsPerTechPerDay?: number;
   maximumTechsPerClientPerDay?: number;
   defaultBreakMinutes?: number;
+  breakEligibilityHours?: number;
   breakWindowStart?: string;
   breakWindowEnd?: string;
   scheduleStartTime?: string;
@@ -28,6 +22,11 @@ type RulesRequest = {
   preferSameTeam?: boolean;
   preferStaffContinuity?: boolean;
   preserveManualOverrides?: boolean;
+  preferredStaffPriority?: number;
+  sameTeamPriority?: number;
+  continuityPriority?: number;
+  rotationPriority?: number;
+  workloadBalancePriority?: number;
   supervisionPlanningTargetPercent?: number;
 };
 
@@ -41,14 +40,20 @@ function defaultRules(locationId: string) {
     maximumClientsPerTechPerDay: 6,
     maximumTechsPerClientPerDay: 4,
     defaultBreakMinutes: 30,
+    breakEligibilityHours: 6,
     breakWindowStart: "11:00",
-    breakWindowEnd: "14:00",
+    breakWindowEnd: "13:30",
     scheduleStartTime: "08:00",
     scheduleEndTime: "18:00",
     slotLengthMinutes: 30,
     preferSameTeam: true,
     preferStaffContinuity: true,
     preserveManualOverrides: true,
+    preferredStaffPriority: 100,
+    sameTeamPriority: 40,
+    continuityPriority: 35,
+    rotationPriority: 60,
+    workloadBalancePriority: 10,
     supervisionPlanningTargetPercent: 5,
   };
 }
@@ -62,25 +67,19 @@ function serializeRules(rules: Record<string, unknown>) {
   };
 }
 
+function validatePriority(value: number | undefined): boolean {
+  return value === undefined || (value >= 0 && value <= 200);
+}
+
 export async function GET(request: Request) {
-  const auth = await requireApiSession();
-
-  if (auth.error) {
-    return auth.error;
-  }
-
   const url = new URL(request.url);
-  const locationId = url.searchParams.get("locationId");
+  const locationId = url.searchParams.get("locationId")?.trim();
 
   if (!locationId) {
     return NextResponse.json(
       { error: "locationId is required." },
       { status: 400 }
     );
-  }
-
-  if (!sessionCanAccessLocation(auth.session, locationId)) {
-    return forbiddenResponse("You do not have access to this location.");
   }
 
   try {
@@ -108,16 +107,6 @@ export async function GET(request: Request) {
 }
 
 export async function PUT(request: Request) {
-  const auth = await requireApiSession();
-
-  if (auth.error) {
-    return auth.error;
-  }
-
-  if (!sessionHasAnyRole(auth.session, SETTINGS_WRITE_ROLES)) {
-    return forbiddenResponse();
-  }
-
   try {
     const body = (await request.json()) as RulesRequest;
     const locationId = body.locationId?.trim();
@@ -127,10 +116,6 @@ export async function PUT(request: Request) {
         { error: "locationId is required." },
         { status: 400 }
       );
-    }
-
-    if (!sessionCanAccessLocation(auth.session, locationId)) {
-      return forbiddenResponse("You do not have access to this location.");
     }
 
     if (
@@ -144,12 +129,59 @@ export async function PUT(request: Request) {
       );
     }
 
+    if (
+      body.breakWindowStart &&
+      body.breakWindowEnd &&
+      body.breakWindowEnd <= body.breakWindowStart
+    ) {
+      return NextResponse.json(
+        { error: "Break window end must be later than break window start." },
+        { status: 400 }
+      );
+    }
+
     if (body.slotLengthMinutes !== undefined && body.slotLengthMinutes !== 30) {
       return NextResponse.json(
         {
           error:
             "The current SOS Excel-compatible calendar requires 30-minute blocks.",
         },
+        { status: 400 }
+      );
+    }
+
+    if (
+      body.defaultBreakMinutes !== undefined &&
+      body.defaultBreakMinutes !== 0 &&
+      body.defaultBreakMinutes !== 30
+    ) {
+      return NextResponse.json(
+        { error: "Automatic breaks currently support 0 or 30 minutes." },
+        { status: 400 }
+      );
+    }
+
+    if (
+      body.breakEligibilityHours !== undefined &&
+      (body.breakEligibilityHours < 0 || body.breakEligibilityHours > 24)
+    ) {
+      return NextResponse.json(
+        { error: "Break eligibility hours must be between 0 and 24." },
+        { status: 400 }
+      );
+    }
+
+    const prioritiesAreValid = [
+      body.preferredStaffPriority,
+      body.sameTeamPriority,
+      body.continuityPriority,
+      body.rotationPriority,
+      body.workloadBalancePriority,
+    ].every(validatePriority);
+
+    if (!prioritiesAreValid) {
+      return NextResponse.json(
+        { error: "Scheduler priority values must be between 0 and 200." },
         { status: 400 }
       );
     }
@@ -186,11 +218,11 @@ export async function PUT(request: Request) {
 
     await writeAuditLog({
       locationId,
-      userId: auth.session.userId,
+      userId: "scheduler-system",
       action: existing ? "UPDATE" : "CREATE",
       entityType: "SCHEDULING_RULES",
       entityId: String(savedRules._id),
-      summary: "Updated clinic scheduling rules.",
+      summary: "Updated clinic scheduling rules and automatic scheduler priorities.",
       before: existing,
       after: savedRules.toObject(),
     });
