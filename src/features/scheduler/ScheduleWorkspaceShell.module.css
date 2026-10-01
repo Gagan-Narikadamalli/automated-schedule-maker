@@ -240,7 +240,18 @@
   font-size: 12px;
 }
 
+.workspace :global(.schedule-layout) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+
+.workspace :global(.schedule-card) {
+  min-width: 0;
+}
+
 .workspace :global(.schedule-grid-wrapper) {
+  border-top: 1px solid #d2e0e6;
   scrollbar-color: #8fb2c3 #edf4f7;
   scrollbar-width: thin;
 }
@@ -264,6 +275,72 @@
   background: #6f9bb0;
 }
 
+.workspace :global(.schedule-grid thead th) {
+  background: #dce9f4;
+  color: #103b59;
+  box-shadow:
+    inset 0 -1px 0 #9eb9c7,
+    0 2px 5px rgba(18, 59, 93, 0.07);
+}
+
+.workspace :global(.schedule-time-column) {
+  background: #eef5f8;
+}
+
+.workspace :global(.schedule-grid thead .schedule-time-column) {
+  background: #cfe0ec;
+}
+
+.workspace :global(.schedule-cell:hover) {
+  box-shadow:
+    inset 0 0 0 1px rgba(11, 111, 180, 0.5),
+    inset 0 0 14px rgba(255, 255, 255, 0.14);
+}
+
+.workspace :global(.unplaced-tray) {
+  width: 100%;
+  max-height: 240px;
+  overflow: hidden;
+  padding: 12px 14px;
+  border: 1px solid #ead5a9;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #fffdf8, #fff9ec);
+  box-shadow: 0 4px 14px rgba(111, 77, 18, 0.06);
+}
+
+.workspace :global(.unplaced-tray h2) {
+  margin-bottom: 2px;
+  font-size: 15px;
+}
+
+.workspace :global(.unplaced-tray > p) {
+  max-width: 900px;
+  font-size: 11px;
+}
+
+.workspace :global(.unplaced-tray ul) {
+  max-height: 155px;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin-top: 9px;
+  padding: 0 0 5px;
+}
+
+.workspace :global(.unplaced-tray li) {
+  flex: 0 0 min(270px, 80vw);
+  min-height: 88px;
+  display: grid;
+  align-content: start;
+  gap: 5px;
+}
+
+.workspace :global(.unplaced-tray .empty-state) {
+  margin-top: 8px;
+  padding: 10px;
+}
+
 @media (max-width: 900px) {
   .displayBar,
   .displayHeading {
@@ -281,6 +358,10 @@
 
   .viewButton {
     flex: 1 1 120px;
+  }
+
+  .workspace :global(.unplaced-tray) {
+    max-height: 220px;
   }
 }
 
@@ -302,5 +383,9 @@
 
   .legendNote {
     min-width: 100%;
+  }
+
+  .workspace :global(.unplaced-tray) {
+    padding: 10px;
   }
 }
