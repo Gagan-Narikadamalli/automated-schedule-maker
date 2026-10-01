@@ -9,6 +9,7 @@ const navigationItems = [
   { href: "/staff", label: "Staff" },
   { href: "/clients", label: "Clients" },
   { href: "/teams", label: "Teams" },
+  { href: "/fixed-events", label: "Speech & Fixed Events" },
   { href: "/templates", label: "Templates" },
   { href: "/overview", label: "Weekly Overview" },
   { href: "/activity", label: "Activity & Changes" },
