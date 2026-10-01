@@ -1,4 +1,7 @@
-import { getSlotsInsideTimeRange, patternMatchesDate } from "@/features/scheduler/engine/dateUtils";
+import {
+  getSlotsInsideTimeRange,
+  patternMatchesDate,
+} from "@/features/scheduler/engine/dateUtils";
 import type {
   SchedulerAssignment,
   SchedulerClient,
@@ -32,7 +35,6 @@ type LeanStaff = {
   fullName: string;
   startDate: Date;
   endDate?: Date | null;
-  maximumWeeklyHours?: number;
   shiftPatterns?: PatternRecord[];
 };
 
@@ -71,6 +73,12 @@ type LeanAssignment = {
   note?: string;
 };
 
+type ExtendedSchedulerRules = SchedulerRules & {
+  breakWindowStart: string;
+  breakWindowEnd: string;
+  defaultBreakMinutes: number;
+};
+
 function dateIsWithinRecordRange(
   date: string,
   startDate: Date,
@@ -80,16 +88,21 @@ function dateIsWithinRecordRange(
   const normalizedStart = new Date(startDate);
   const normalizedEnd = endDate ? new Date(endDate) : null;
 
+  if (Number.isNaN(requestedDate.getTime())) {
+    return false;
+  }
+
   normalizedStart.setHours(0, 0, 0, 0);
 
   if (normalizedEnd) {
     normalizedEnd.setHours(23, 59, 59, 999);
   }
 
-  return (
-    requestedDate >= normalizedStart &&
-    (!normalizedEnd || requestedDate <= normalizedEnd)
-  );
+  const requestedTime = requestedDate.getTime();
+  const startTime = normalizedStart.getTime();
+  const endTime = normalizedEnd?.getTime() ?? Number.POSITIVE_INFINITY;
+
+  return requestedTime >= startTime && requestedTime <= endTime;
 }
 
 function slotsForPatterns(
@@ -130,11 +143,7 @@ function removeSlotsInsideRanges(
   );
 }
 
-function getDefaultRules(): SchedulerRules & {
-  breakWindowStart: string;
-  breakWindowEnd: string;
-  defaultBreakMinutes: number;
-} {
+function getDefaultRules(): ExtendedSchedulerRules {
   return {
     maximumClientsPerTechPerDay: 6,
     maximumTechsPerClientPerDay: 4,
@@ -149,11 +158,7 @@ function getDefaultRules(): SchedulerRules & {
 
 export type DaySchedulerData = {
   input: SchedulerInput;
-  extendedRules: SchedulerRules & {
-    breakWindowStart: string;
-    breakWindowEnd: string;
-    defaultBreakMinutes: number;
-  };
+  extendedRules: ExtendedSchedulerRules;
   staff: SchedulerStaff[];
   clients: SchedulerClient[];
   partialCallOuts: LeanCallOut[];
@@ -224,18 +229,21 @@ export async function buildDaySchedulerInput(
     )
     .map((client) => {
       const clientId = String(client._id);
+
       const napRanges = (client.napPatterns ?? [])
         .filter((pattern) => patternMatchesDate(pattern.days, date))
-        .filter(
-          (pattern): pattern is PatternRecord & {
-            startTime: string;
-            endTime: string;
-          } => Boolean(pattern.startTime && pattern.endTime)
-        )
-        .map((pattern) => ({
-          startTime: pattern.startTime,
-          endTime: pattern.endTime,
-        }));
+        .flatMap((pattern) => {
+          if (!pattern.startTime || !pattern.endTime) {
+            return [];
+          }
+
+          return [
+            {
+              startTime: pattern.startTime,
+              endTime: pattern.endTime,
+            },
+          ];
+        });
 
       const speechRanges = speechSessions
         .filter((session) => String(session.clientId) === clientId)
@@ -284,24 +292,31 @@ export async function buildDaySchedulerInput(
     note: assignment.note,
   }));
 
-  const defaultRules = getDefaultRules();
-  const extendedRules = {
-    ...defaultRules,
-    ...(rulesDocument
-      ? {
-          maximumClientsPerTechPerDay:
-            rulesDocument.maximumClientsPerTechPerDay,
-          maximumTechsPerClientPerDay:
-            rulesDocument.maximumTechsPerClientPerDay,
-          preferSameTeam: rulesDocument.preferSameTeam,
-          preferStaffContinuity: rulesDocument.preferStaffContinuity,
-          slotLengthMinutes: rulesDocument.slotLengthMinutes,
-          breakWindowStart: rulesDocument.breakWindowStart,
-          breakWindowEnd: rulesDocument.breakWindowEnd,
-          defaultBreakMinutes: rulesDocument.defaultBreakMinutes,
-        }
-      : {}),
-  };
+  const defaults = getDefaultRules();
+
+  const extendedRules: ExtendedSchedulerRules = rulesDocument
+    ? {
+        maximumClientsPerTechPerDay:
+          rulesDocument.maximumClientsPerTechPerDay ??
+          defaults.maximumClientsPerTechPerDay,
+        maximumTechsPerClientPerDay:
+          rulesDocument.maximumTechsPerClientPerDay ??
+          defaults.maximumTechsPerClientPerDay,
+        preferSameTeam:
+          rulesDocument.preferSameTeam ?? defaults.preferSameTeam,
+        preferStaffContinuity:
+          rulesDocument.preferStaffContinuity ??
+          defaults.preferStaffContinuity,
+        slotLengthMinutes:
+          rulesDocument.slotLengthMinutes ?? defaults.slotLengthMinutes,
+        breakWindowStart:
+          rulesDocument.breakWindowStart ?? defaults.breakWindowStart,
+        breakWindowEnd:
+          rulesDocument.breakWindowEnd ?? defaults.breakWindowEnd,
+        defaultBreakMinutes:
+          rulesDocument.defaultBreakMinutes ?? defaults.defaultBreakMinutes,
+      }
+    : defaults;
 
   const fullDayCallOutStaffIds = callOuts
     .filter(
