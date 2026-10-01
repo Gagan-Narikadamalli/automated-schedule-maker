@@ -193,7 +193,7 @@ export async function PUT(request: Request) {
         const displayCode = extractDisplayCode(change.text);
 
         if (displayCode) {
-          const client = await Client.findOne({
+          const clientResult = await Client.findOne({
             locationId,
             active: true,
             displayCode: {
@@ -203,6 +203,9 @@ export async function PUT(request: Request) {
           })
             .select("_id")
             .lean();
+          const client = clientResult
+            ? (clientResult as unknown as PlainRecord)
+            : null;
 
           clientId = client ? String(client._id) : null;
         }
@@ -257,7 +260,7 @@ export async function PUT(request: Request) {
         }
 
         if (change.assignmentType === "CLIENT_1_TO_1") {
-          const otherAssignment = await ScheduleAssignment.findOne({
+          const otherAssignmentResult = await ScheduleAssignment.findOne({
             locationId,
             date,
             startTime: change.startTime,
@@ -267,6 +270,9 @@ export async function PUT(request: Request) {
           })
             .select("staffId startTime")
             .lean();
+          const otherAssignment = otherAssignmentResult
+            ? (otherAssignmentResult as unknown as PlainRecord)
+            : null;
 
           if (
             otherAssignment &&
