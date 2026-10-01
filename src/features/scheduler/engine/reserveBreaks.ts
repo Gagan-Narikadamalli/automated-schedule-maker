@@ -2,6 +2,7 @@ import type {
   SchedulerAssignment,
   SchedulerClient,
   SchedulerStaff,
+  StaffRole,
 } from "./types";
 
 export type BreakReservationRules = {
@@ -16,6 +17,7 @@ type BreakReservationInput = {
   staff: SchedulerStaff[];
   clients: SchedulerClient[];
   existingAssignments: SchedulerAssignment[];
+  referenceAssignments?: SchedulerAssignment[];
   callOutStaffIds: string[];
   rules: BreakReservationRules;
 };
@@ -70,12 +72,47 @@ function countFreeStaff(
   ).length;
 }
 
+function roleBreakOrder(role: StaffRole): number {
+  switch (role) {
+    case "BT":
+    case "RBT":
+      return 0;
+    case "INTERN":
+      return 1;
+    case "OTHER":
+      return 2;
+    case "OFFICE_MANAGER":
+      return 3;
+    case "BCBA":
+      return 4;
+    default:
+      return 5;
+  }
+}
+
+function hasReferenceBreak(
+  staffId: string,
+  startTime: string,
+  referenceAssignments: SchedulerAssignment[]
+): boolean {
+  return referenceAssignments.some(
+    (assignment) =>
+      assignment.staffId === staffId &&
+      assignment.startTime === startTime &&
+      (assignment.assignmentType === "BREAK" ||
+        assignment.assignmentType === "BREAK_NAP" ||
+        assignment.assignmentType === "BREAK_SPEECH")
+  );
+}
+
 function calculateBreakSlotScore(
+  staffId: string,
   clients: SchedulerClient[],
   staff: SchedulerStaff[],
   callOutStaffIds: Set<string>,
   startTime: string,
-  assignments: SchedulerAssignment[]
+  assignments: SchedulerAssignment[],
+  referenceAssignments: SchedulerAssignment[]
 ): number {
   const uncoveredDemand = countUncoveredClientDemand(
     clients,
@@ -89,9 +126,17 @@ function calculateBreakSlotScore(
     assignments
   );
   const spareStaff = freeStaff - uncoveredDemand;
+  const referenceBonus = hasReferenceBreak(
+    staffId,
+    startTime,
+    referenceAssignments
+  )
+    ? -1000
+    : 0;
 
-  // Lower is better. Large positive spare capacity is preferred, then lower demand.
-  return uncoveredDemand * 10 - spareStaff * 25;
+  // Lower is better. Historical/template break placement is preferred first,
+  // then slots with the most spare coverage and the least client demand.
+  return referenceBonus + uncoveredDemand * 10 - spareStaff * 25;
 }
 
 function slotCanSafelyAbsorbBreak(
@@ -113,22 +158,99 @@ function slotCanSafelyAbsorbBreak(
     assignments
   );
 
-  // The staff member taking the break consumes one free staff slot. Require at
-  // least one more free staff member than uncovered client demand before reserving.
   return freeStaff > uncoveredDemand;
+}
+
+function shiftTime(
+  startTime: string,
+  minuteOffset: number
+): string | null {
+  const [hoursText, minutesText] = startTime.split(":");
+  const hours = Number(hoursText);
+  const minutes = Number(minutesText);
+
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) {
+    return null;
+  }
+
+  const totalMinutes = hours * 60 + minutes + minuteOffset;
+
+  if (totalMinutes < 0 || totalMinutes >= 24 * 60) {
+    return null;
+  }
+
+  return `${String(Math.floor(totalMinutes / 60)).padStart(2, "0")}:${String(
+    totalMinutes % 60
+  ).padStart(2, "0")}`;
+}
+
+function findSupervisedFixedEventClient(
+  breakAssignment: SchedulerAssignment,
+  assignments: SchedulerAssignment[],
+  clients: SchedulerClient[],
+  slotLengthMinutes: number
+): {
+  client: SchedulerClient;
+  assignmentType: "BREAK_NAP" | "BREAK_SPEECH";
+} | null {
+  const previousTime = shiftTime(
+    breakAssignment.startTime,
+    -slotLengthMinutes
+  );
+  const nextTime = shiftTime(
+    breakAssignment.startTime,
+    slotLengthMinutes
+  );
+  const adjacentAssignments = assignments.filter(
+    (assignment) =>
+      assignment.staffId === breakAssignment.staffId &&
+      assignment.assignmentType === "CLIENT_1_TO_1" &&
+      (assignment.startTime === previousTime || assignment.startTime === nextTime) &&
+      Boolean(assignment.clientId)
+  );
+
+  const adjacentClientIds = adjacentAssignments.map(
+    (assignment) => assignment.clientId as string
+  );
+  const orderedClientIds = [
+    ...new Set(adjacentClientIds),
+  ];
+
+  for (const clientId of orderedClientIds) {
+    const client = clients.find((candidate) => candidate.id === clientId);
+
+    if (!client) {
+      continue;
+    }
+
+    if (client.napSlots.includes(breakAssignment.startTime)) {
+      return {
+        client,
+        assignmentType: "BREAK_NAP",
+      };
+    }
+
+    if (client.speechSlots.includes(breakAssignment.startTime)) {
+      return {
+        client,
+        assignmentType: "BREAK_SPEECH",
+      };
+    }
+  }
+
+  return null;
 }
 
 /**
  * Reserves one automatic break for each eligible staff member before client
- * matching. A break is only placed when the remaining free staff can still cover
- * all client demand for that 30-minute slot. This allows multiple simultaneous
- * breaks when there is genuine spare capacity, but avoids creating an uncovered
- * client simply to force a break into the calendar.
+ * matching. Frontline staff are processed before managers and BCBAs so relief
+ * roles remain available to cover the client while a technician takes a break.
  */
 export function reserveStaffBreaks({
   staff,
   clients,
   existingAssignments,
+  referenceAssignments = [],
   callOutStaffIds,
   rules,
 }: BreakReservationInput): SchedulerAssignment[] {
@@ -143,11 +265,22 @@ export function reserveStaffBreaks({
   const callOutSet = new Set(callOutStaffIds);
   const reservedAssignments: SchedulerAssignment[] = [];
 
-  const staffByLongestShiftFirst = [...staff].sort(
-    (left, right) => right.availableSlots.length - left.availableSlots.length
-  );
+  const staffByBreakPriority = [...staff].sort((left, right) => {
+    const roleDifference =
+      roleBreakOrder(left.role) - roleBreakOrder(right.role);
 
-  for (const staffMember of staffByLongestShiftFirst) {
+    if (roleDifference !== 0) {
+      return roleDifference;
+    }
+
+    if (right.availableSlots.length !== left.availableSlots.length) {
+      return right.availableSlots.length - left.availableSlots.length;
+    }
+
+    return left.name.localeCompare(right.name);
+  });
+
+  for (const staffMember of staffByBreakPriority) {
     if (callOutSet.has(staffMember.id)) {
       continue;
     }
@@ -190,11 +323,13 @@ export function reserveStaffBreaks({
       .map((startTime) => ({
         startTime,
         score: calculateBreakSlotScore(
+          staffMember.id,
           clients,
           staff,
           callOutSet,
           startTime,
-          currentAssignments
+          currentAssignments,
+          referenceAssignments
         ),
       }))
       .sort((left, right) => {
@@ -223,4 +358,43 @@ export function reserveStaffBreaks({
   }
 
   return reservedAssignments;
+}
+
+/**
+ * Converts a normal break into Break/Nap or Break/Speech when the same technician
+ * is supervising a client immediately around that fixed event. This mirrors the
+ * clinic spreadsheet convention while keeping the client out of 1:1 demand for
+ * the fixed-event block.
+ */
+export function enrichBreakAssignmentsWithFixedEvents(
+  assignments: SchedulerAssignment[],
+  clients: SchedulerClient[],
+  slotLengthMinutes: number
+): SchedulerAssignment[] {
+  return assignments.map((assignment) => {
+    if (assignment.assignmentType !== "BREAK") {
+      return assignment;
+    }
+
+    const fixedEvent = findSupervisedFixedEventClient(
+      assignment,
+      assignments,
+      clients,
+      slotLengthMinutes
+    );
+
+    if (!fixedEvent) {
+      return assignment;
+    }
+
+    return {
+      ...assignment,
+      clientId: fixedEvent.client.id,
+      assignmentType: fixedEvent.assignmentType,
+      note:
+        fixedEvent.assignmentType === "BREAK_NAP"
+          ? `Break combined with ${fixedEvent.client.displayCode} nap supervision.`
+          : `Break combined with ${fixedEvent.client.displayCode} speech supervision.`,
+    };
+  });
 }
