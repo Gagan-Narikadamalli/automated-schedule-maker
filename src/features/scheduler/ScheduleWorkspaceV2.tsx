@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { DAILY_TIME_SLOTS } from "./constants";
 import {
@@ -57,10 +57,6 @@ type UnplacedRecord = {
   reason: string;
 };
 
-type PendingDisplaced = {
-  displayText: string;
-};
-
 type ScheduleResponse = {
   locationId?: string;
   date?: string;
@@ -112,6 +108,7 @@ type BatchResponse = {
   success?: boolean;
   updatedCount?: number;
   forced?: boolean;
+  requiresConfirmation?: boolean;
   conflicts?: Array<{
     code: string;
     message: string;
@@ -354,6 +351,17 @@ function formatMetrics(metrics: GenerateMetrics | undefined): string {
   return `${covered}/${required} required client blocks covered; ${uncovered} uncovered.`;
 }
 
+function clientWasMovedInsideBatch(
+  clientId: string,
+  mutations: ScheduleGridMutation[]
+): boolean {
+  return mutations.some(
+    (mutation) =>
+      mutation.nextCell.assignmentType === "CLIENT_1_TO_1" &&
+      mutation.nextCell.clientId === clientId
+  );
+}
+
 export function ScheduleWorkspaceV2() {
   const [locations, setLocations] = useState<LocationOption[]>([]);
   const [locationId, setLocationId] = useState("");
@@ -376,7 +384,6 @@ export function ScheduleWorkspaceV2() {
   const [copySourceDate, setCopySourceDate] = useState(() =>
     addDays(getTodayForDateInput(), -1)
   );
-  const pendingDisplacedRef = useRef<PendingDisplaced[]>([]);
 
   const demoMode = locationId.startsWith("demo-");
 
@@ -455,7 +462,6 @@ export function ScheduleWorkspaceV2() {
 
   useEffect(() => {
     setPlacementRecord(null);
-    pendingDisplacedRef.current = [];
 
     if (!locationId || !selectedDate) {
       return;
@@ -584,51 +590,54 @@ export function ScheduleWorkspaceV2() {
   }
 
   function handleDisplacedAssignment(assignment: string) {
-    if (demoMode) {
-      setUnplacedAssignments((currentAssignments) => [
-        ...currentAssignments,
-        {
-          id: `demo-unplaced-${Date.now()}-${currentAssignments.length}`,
-          clientId: null,
-          clientCode: assignment.replace(/\s+1:1$/i, "").split(/\s+/)[0],
-          clientColor: null,
-          displayText: assignment,
-          originalStaffId: null,
-          originalStartTime: "",
-          reason: "Displaced during preview mode.",
-        },
-      ]);
+    if (!demoMode || !/\s1:1$/i.test(assignment.trim())) {
       return;
     }
 
-    pendingDisplacedRef.current.push({ displayText: assignment });
+    setUnplacedAssignments((currentAssignments) => [
+      ...currentAssignments,
+      {
+        id: `demo-unplaced-${Date.now()}-${currentAssignments.length}`,
+        clientId: null,
+        clientCode: assignment.replace(/\s+1:1$/i, "").split(/\s+/)[0],
+        clientColor: null,
+        displayText: assignment,
+        originalStaffId: null,
+        originalStartTime: "",
+        reason: "Displaced during preview mode.",
+      },
+    ]);
   }
 
   async function saveDisplacedAssignments(
     mutations: ScheduleGridMutation[]
   ) {
-    if (demoMode || pendingDisplacedRef.current.length === 0) {
-      pendingDisplacedRef.current = [];
+    if (demoMode) {
       return;
     }
 
-    const pending = [...pendingDisplacedRef.current];
-    pendingDisplacedRef.current = [];
-    const candidateMutations = mutations.filter(
-      (mutation) =>
-        mutation.previousCell.text &&
-        mutation.previousCell.text !== mutation.nextCell.text
-    );
+    const displacedMutations = mutations.filter((mutation) => {
+      const previousClientId = mutation.previousCell.clientId;
 
-    for (const displaced of pending) {
-      const mutation = candidateMutations.find(
-        (candidate) => candidate.previousCell.text === displaced.displayText
-      );
-
-      if (!mutation) {
-        continue;
+      if (
+        mutation.previousCell.assignmentType !== "CLIENT_1_TO_1" ||
+        !previousClientId
+      ) {
+        return false;
       }
 
+      const sameClientRemainsInCell =
+        mutation.nextCell.assignmentType === "CLIENT_1_TO_1" &&
+        mutation.nextCell.clientId === previousClientId;
+
+      if (sameClientRemainsInCell) {
+        return false;
+      }
+
+      return !clientWasMovedInsideBatch(previousClientId, mutations);
+    });
+
+    for (const mutation of displacedMutations) {
       const response = await fetch("/api/unplaced", {
         method: "POST",
         headers: {
@@ -638,7 +647,7 @@ export function ScheduleWorkspaceV2() {
           locationId,
           date: selectedDate,
           clientId: mutation.previousCell.clientId ?? null,
-          displayText: displaced.displayText,
+          displayText: mutation.previousCell.text,
           originalStaffId: mutation.staffId,
           originalStartTime: mutation.startTime,
           reason: "Displaced by a confirmed manager schedule change.",
@@ -652,16 +661,40 @@ export function ScheduleWorkspaceV2() {
         );
       }
     }
+  }
 
-    await loadUnplacedAssignments();
+  async function sendBatchRequest(
+    mutations: ScheduleGridMutation[],
+    force: boolean
+  ): Promise<{ response: Response; data: BatchResponse }> {
+    const response = await fetch("/api/schedule/batch", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        locationId,
+        date: selectedDate,
+        force,
+        changes: mutations.map((mutation) => ({
+          staffId: mutation.staffId,
+          startTime: mutation.startTime,
+          assignmentType: mutation.nextCell.assignmentType,
+          text: mutation.nextCell.text,
+          clientId: mutation.nextCell.clientId ?? null,
+        })),
+      }),
+    });
+    const data = await readJson<BatchResponse>(response);
+
+    return { response, data };
   }
 
   async function persistGridMutations(
     mutations: ScheduleGridMutation[],
-    force: boolean
+    allowForce: boolean
   ): Promise<boolean> {
     if (demoMode) {
-      pendingDisplacedRef.current = [];
       setStatusMessage(
         `${mutations.length} preview cell change(s) applied locally. Preview changes are not saved.`
       );
@@ -669,28 +702,30 @@ export function ScheduleWorkspaceV2() {
     }
 
     try {
-      const response = await fetch("/api/schedule/batch", {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          locationId,
-          date: selectedDate,
-          force,
-          changes: mutations.map((mutation) => ({
-            staffId: mutation.staffId,
-            startTime: mutation.startTime,
-            assignmentType: mutation.nextCell.assignmentType,
-            text: mutation.nextCell.text,
-            clientId: mutation.nextCell.clientId ?? null,
-          })),
-        }),
-      });
-      const data = await readJson<BatchResponse>(response);
+      let { response, data } = await sendBatchRequest(mutations, false);
+
+      if (
+        response.status === 409 &&
+        data.requiresConfirmation &&
+        data.conflicts?.length &&
+        allowForce
+      ) {
+        const details = data.conflicts
+          .map((conflict, index) => `${index + 1}. ${conflict.message}`)
+          .join("\n");
+        const confirmed = window.confirm(
+          `This manual change conflicts with the current scheduling rules:\n\n${details}\n\nForce this manager override anyway?`
+        );
+
+        if (!confirmed) {
+          setStatusMessage("Manual override canceled. The schedule was not changed.");
+          return false;
+        }
+
+        ({ response, data } = await sendBatchRequest(mutations, true));
+      }
 
       if (!response.ok) {
-        pendingDisplacedRef.current = [];
         const conflictMessage = data.conflicts?.[0]?.message;
         setStatusMessage(
           conflictMessage || data.error || "The schedule change could not be saved."
@@ -699,9 +734,10 @@ export function ScheduleWorkspaceV2() {
       }
 
       await saveDisplacedAssignments(mutations);
+      await loadUnplacedAssignments();
 
       const conflictSuffix = data.conflicts?.length
-        ? ` ${data.conflicts.length} conflict(s) were acknowledged as manual overrides.`
+        ? ` ${data.conflicts.length} conflict(s) were explicitly confirmed as manager overrides.`
         : "";
 
       setStatusMessage(
@@ -709,7 +745,6 @@ export function ScheduleWorkspaceV2() {
       );
       return true;
     } catch (error) {
-      pendingDisplacedRef.current = [];
       setStatusMessage(
         error instanceof Error
           ? error.message
