@@ -24,6 +24,10 @@ import { SpeechSession } from "@/models/SpeechSession";
 import { Staff } from "@/models/Staff";
 
 type DatabaseRecord = Record<string, any>;
+type TimeRange = {
+  startTime: string;
+  endTime: string;
+};
 
 export type ExtendedSchedulerRules = SchedulerRules & {
   breakWindowStart: string;
@@ -139,7 +143,7 @@ function getPatternSlots(
 
 function removeBlockedSlots(
   slots: string[],
-  ranges: Array<{ startTime: string; endTime: string }>
+  ranges: TimeRange[]
 ): string[] {
   return slots.filter((slot) => {
     return !ranges.some((range) => {
@@ -391,7 +395,7 @@ function mapStaff(
     })
     .map((staffMember) => {
       const staffId = String(staffMember._id);
-      const unavailableRanges = callOuts
+      const unavailableRanges: TimeRange[] = callOuts
         .filter((callOut) => callOut.staffId === staffId)
         .map((callOut) => ({
           startTime: callOut.startTime,
@@ -471,33 +475,35 @@ function mapClients(
         date
       );
 
-      const napRanges = (client.napPatterns ?? [])
-        .filter((pattern: DatabaseRecord) => {
+      const napRanges: TimeRange[] = (
+        (client.napPatterns ?? []) as DatabaseRecord[]
+      )
+        .filter((pattern) => {
           const days = Array.isArray(pattern.days)
             ? pattern.days.map((day: unknown) => String(day))
             : [];
 
           return patternMatchesDate(days, date);
         })
-        .filter((pattern: DatabaseRecord) => {
+        .filter((pattern) => {
           return Boolean(pattern.startTime && pattern.endTime);
         })
-        .map((pattern: DatabaseRecord) => ({
+        .map((pattern) => ({
           startTime: String(pattern.startTime),
           endTime: String(pattern.endTime),
         }));
 
-      const speechRanges = speechSessions
+      const speechRanges: TimeRange[] = speechSessions
         .filter((session) => String(session.clientId) === clientId)
         .map((session) => ({
           startTime: String(session.startTime),
           endTime: String(session.endTime),
         }));
 
-      const napSlots = napRanges.flatMap((range) =>
+      const napSlots: string[] = napRanges.flatMap((range) =>
         getSlotsInsideTimeRange(range.startTime, range.endTime)
       );
-      const speechSlots = speechRanges.flatMap((range) =>
+      const speechSlots: string[] = speechRanges.flatMap((range) =>
         getSlotsInsideTimeRange(range.startTime, range.endTime)
       );
       const staffRelationships: Record<string, StaffRelationship> = {};
