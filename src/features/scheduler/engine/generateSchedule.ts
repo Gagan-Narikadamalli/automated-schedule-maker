@@ -14,6 +14,14 @@ type ClientRequirement = {
   startTime: string;
 };
 
+type SwapCandidate = {
+  assignmentIndex: number;
+  displacedAssignment: SchedulerAssignment;
+  replacementStaff: SchedulerStaff;
+  uncoveredStaff: SchedulerStaff;
+  score: number;
+};
+
 function shouldPreserveExistingAssignment(
   assignment: SchedulerAssignment
 ): boolean {
@@ -23,7 +31,10 @@ function shouldPreserveExistingAssignment(
 
   return (
     assignment.assignmentType === "SPEECH" ||
-    assignment.assignmentType === "UNAVAILABLE"
+    assignment.assignmentType === "UNAVAILABLE" ||
+    assignment.assignmentType === "BREAK" ||
+    assignment.assignmentType === "BREAK_NAP" ||
+    assignment.assignmentType === "BREAK_SPEECH"
   );
 }
 
@@ -67,13 +78,40 @@ function countEligibleStaff(
   ).length;
 }
 
-function sortMostConstrainedRequirementsFirst(
+function supportPriority(client: SchedulerClient): number {
+  if (client.supportLevel === "HIGH_SUPPORT") {
+    return 3;
+  }
+
+  if (client.supportLevel === "ROTATION") {
+    return 2;
+  }
+
+  return 1;
+}
+
+/**
+ * The Excel schedules provided by the clinic generally keep a client with the
+ * same technician across neighboring blocks. Processing the day in time order
+ * lets the continuity score see the immediately preceding block instead of
+ * assigning unrelated afternoon cells before morning cells.
+ *
+ * Within each time slot, the clients with the fewest eligible technicians are
+ * assigned first so flexible clients do not consume scarce staff.
+ */
+function sortRequirementsForClinicFlow(
   requirements: ClientRequirement[],
   input: SchedulerInput,
   assignments: SchedulerAssignment[],
   callOutStaffIds: Set<string>
 ): ClientRequirement[] {
   return [...requirements].sort((left, right) => {
+    const timeComparison = left.startTime.localeCompare(right.startTime);
+
+    if (timeComparison !== 0) {
+      return timeComparison;
+    }
+
     const leftEligibleCount = countEligibleStaff(
       left,
       input.staff,
@@ -93,7 +131,14 @@ function sortMostConstrainedRequirementsFirst(
       return leftEligibleCount - rightEligibleCount;
     }
 
-    return left.startTime.localeCompare(right.startTime);
+    const supportDifference =
+      supportPriority(right.client) - supportPriority(left.client);
+
+    if (supportDifference !== 0) {
+      return supportDifference;
+    }
+
+    return left.client.displayCode.localeCompare(right.client.displayCode);
   });
 }
 
@@ -125,6 +170,7 @@ function findBestStaffMember(
           client: requirement.client,
           startTime: requirement.startTime,
           assignments,
+          referenceAssignments: input.referenceAssignments,
           rules: input.rules,
         }),
       };
@@ -161,6 +207,17 @@ function createAutoAssignment(
     source: "AUTO",
     locked: false,
   };
+}
+
+function createAutoClientAssignment(
+  staffMember: SchedulerStaff,
+  client: SchedulerClient,
+  startTime: string
+): SchedulerAssignment {
+  return createAutoAssignment(staffMember, {
+    client,
+    startTime,
+  });
 }
 
 function findProtectedConflicts(
@@ -252,6 +309,154 @@ function calculateCapacityMetrics(
   };
 }
 
+function findBestSwap(
+  requirement: ClientRequirement,
+  input: SchedulerInput,
+  assignments: SchedulerAssignment[],
+  callOutStaffIds: Set<string>
+): SwapCandidate | null {
+  const candidates: SwapCandidate[] = [];
+
+  assignments.forEach((currentAssignment, assignmentIndex) => {
+    if (
+      currentAssignment.startTime !== requirement.startTime ||
+      currentAssignment.assignmentType !== "CLIENT_1_TO_1" ||
+      currentAssignment.locked ||
+      currentAssignment.source !== "AUTO" ||
+      !currentAssignment.clientId
+    ) {
+      return;
+    }
+
+    const occupiedStaff = input.staff.find(
+      (staffMember) => staffMember.id === currentAssignment.staffId
+    );
+    const displacedClient = input.clients.find(
+      (client) => client.id === currentAssignment.clientId
+    );
+
+    if (!occupiedStaff || !displacedClient) {
+      return;
+    }
+
+    const assignmentsWithoutCurrent = assignments.filter(
+      (_, index) => index !== assignmentIndex
+    );
+
+    const uncoveredCheck = canAssignStaffToClient({
+      staffMember: occupiedStaff,
+      client: requirement.client,
+      startTime: requirement.startTime,
+      assignments: assignmentsWithoutCurrent,
+      callOutStaffIds,
+      rules: input.rules,
+    });
+
+    if (!uncoveredCheck.allowed) {
+      return;
+    }
+
+    const replacementCandidates = input.staff
+      .filter((staffMember) => staffMember.id !== occupiedStaff.id)
+      .map((staffMember) => {
+        const check = canAssignStaffToClient({
+          staffMember,
+          client: displacedClient,
+          startTime: requirement.startTime,
+          assignments: assignmentsWithoutCurrent,
+          callOutStaffIds,
+          rules: input.rules,
+        });
+
+        if (!check.allowed) {
+          return null;
+        }
+
+        return {
+          staffMember,
+          score: scoreCandidate({
+            staffMember,
+            client: displacedClient,
+            startTime: requirement.startTime,
+            assignments: assignmentsWithoutCurrent,
+            referenceAssignments: input.referenceAssignments,
+            rules: input.rules,
+          }),
+        };
+      })
+      .filter(
+        (
+          candidate
+        ): candidate is {
+          staffMember: SchedulerStaff;
+          score: number;
+        } => candidate !== null
+      )
+      .sort((left, right) => right.score - left.score);
+
+    const bestReplacement = replacementCandidates[0];
+
+    if (!bestReplacement) {
+      return;
+    }
+
+    const uncoveredScore = scoreCandidate({
+      staffMember: occupiedStaff,
+      client: requirement.client,
+      startTime: requirement.startTime,
+      assignments: assignmentsWithoutCurrent,
+      referenceAssignments: input.referenceAssignments,
+      rules: input.rules,
+    });
+
+    candidates.push({
+      assignmentIndex,
+      displacedAssignment: currentAssignment,
+      replacementStaff: bestReplacement.staffMember,
+      uncoveredStaff: occupiedStaff,
+      score: bestReplacement.score + uncoveredScore,
+    });
+  });
+
+  candidates.sort((left, right) => right.score - left.score);
+  return candidates[0] ?? null;
+}
+
+function attemptSingleSwapRepair(
+  requirement: ClientRequirement,
+  input: SchedulerInput,
+  assignments: SchedulerAssignment[],
+  callOutStaffIds: Set<string>
+): boolean {
+  const swap = findBestSwap(
+    requirement,
+    input,
+    assignments,
+    callOutStaffIds
+  );
+
+  if (!swap || !swap.displacedAssignment.clientId) {
+    return false;
+  }
+
+  const displacedClient = input.clients.find(
+    (client) => client.id === swap.displacedAssignment.clientId
+  );
+
+  if (!displacedClient) {
+    return false;
+  }
+
+  assignments[swap.assignmentIndex] = createAutoClientAssignment(
+    swap.replacementStaff,
+    displacedClient,
+    requirement.startTime
+  );
+  assignments.push(createAutoAssignment(swap.uncoveredStaff, requirement));
+
+  return true;
+}
+
 export function generateSchedule(input: SchedulerInput): SchedulerResult {
   const callOutStaffIds = new Set(input.callOutStaffIds);
 
@@ -271,13 +476,13 @@ export function generateSchedule(input: SchedulerInput): SchedulerResult {
   }));
 
   const allRequirements = buildRequirements(input.clients);
-  const uncoveredRequirements: UncoveredRequirement[] = [];
+  const initiallyUncovered: ClientRequirement[] = [];
 
   const requirementsToFill = allRequirements.filter(
     (requirement) => !requirementIsAlreadyCovered(requirement, assignments)
   );
 
-  const sortedRequirements = sortMostConstrainedRequirementsFirst(
+  const sortedRequirements = sortRequirementsForClinicFlow(
     requirementsToFill,
     input,
     assignments,
@@ -293,22 +498,43 @@ export function generateSchedule(input: SchedulerInput): SchedulerResult {
     );
 
     if (!bestStaffMember) {
-      uncoveredRequirements.push({
-        clientId: requirement.client.id,
-        clientCode: requirement.client.displayCode,
-        startTime: requirement.startTime,
-        reason:
-          "No eligible staff member satisfies availability, call-out, hard relationship, client rotation, and hour constraints.",
-      });
-
-      warnings.push({
-        code: "NO_ELIGIBLE_STAFF",
-        message: `${requirement.client.displayCode} is uncovered at ${requirement.startTime}.`,
-      });
+      initiallyUncovered.push(requirement);
       continue;
     }
 
     assignments.push(createAutoAssignment(bestStaffMember, requirement));
+  }
+
+  const uncoveredRequirements: UncoveredRequirement[] = [];
+
+  for (const requirement of initiallyUncovered) {
+    const repaired = attemptSingleSwapRepair(
+      requirement,
+      input,
+      assignments,
+      callOutStaffIds
+    );
+
+    if (repaired) {
+      warnings.push({
+        code: "REPAIRED_BY_SWAP",
+        message: `${requirement.client.displayCode} at ${requirement.startTime} was covered by a one-step staff swap.`,
+      });
+      continue;
+    }
+
+    uncoveredRequirements.push({
+      clientId: requirement.client.id,
+      clientCode: requirement.client.displayCode,
+      startTime: requirement.startTime,
+      reason:
+        "No eligible staff member satisfies availability, call-out, hard relationship, client rotation, and hour constraints, including a one-step swap repair.",
+    });
+
+    warnings.push({
+      code: "NO_ELIGIBLE_STAFF",
+      message: `${requirement.client.displayCode} is uncovered at ${requirement.startTime}.`,
+    });
   }
 
   const requiredClientSlots = allRequirements.length;
