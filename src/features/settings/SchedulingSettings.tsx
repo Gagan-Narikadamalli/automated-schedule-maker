@@ -18,13 +18,36 @@ type RulesForm = {
   maximumClientsPerTechPerDay: number;
   maximumTechsPerClientPerDay: number;
   defaultBreakMinutes: number;
+  breakEligibilityHours: number;
   breakWindowStart: string;
   breakWindowEnd: string;
   preferSameTeam: boolean;
   preferStaffContinuity: boolean;
   preserveManualOverrides: boolean;
+  preferredStaffPriority: number;
+  sameTeamPriority: number;
+  continuityPriority: number;
+  rotationPriority: number;
+  workloadBalancePriority: number;
   supervisionPlanningTargetPercent: number;
 };
+
+type NumericRuleField =
+  | "slotLengthMinutes"
+  | "fullTimeMinimumWeeklyHours"
+  | "fullTimeMaximumWeeklyHours"
+  | "partTimeMinimumWeeklyHours"
+  | "partTimeMaximumWeeklyHours"
+  | "maximumClientsPerTechPerDay"
+  | "maximumTechsPerClientPerDay"
+  | "defaultBreakMinutes"
+  | "breakEligibilityHours"
+  | "preferredStaffPriority"
+  | "sameTeamPriority"
+  | "continuityPriority"
+  | "rotationPriority"
+  | "workloadBalancePriority"
+  | "supervisionPlanningTargetPercent";
 
 const DEFAULT_RULES: RulesForm = {
   scheduleStartTime: "08:00",
@@ -37,11 +60,17 @@ const DEFAULT_RULES: RulesForm = {
   maximumClientsPerTechPerDay: 6,
   maximumTechsPerClientPerDay: 4,
   defaultBreakMinutes: 30,
+  breakEligibilityHours: 6,
   breakWindowStart: "11:00",
-  breakWindowEnd: "14:00",
+  breakWindowEnd: "13:30",
   preferSameTeam: true,
   preferStaffContinuity: true,
   preserveManualOverrides: true,
+  preferredStaffPriority: 100,
+  sameTeamPriority: 40,
+  continuityPriority: 35,
+  rotationPriority: 60,
+  workloadBalancePriority: 10,
   supervisionPlanningTargetPercent: 5,
 };
 
@@ -134,11 +163,31 @@ export function SchedulingSettings() {
     }
   }
 
-  function updateNumberField(field: keyof RulesForm, value: string) {
+  function updateNumberField(field: NumericRuleField, value: string) {
     setRules((currentRules) => ({
       ...currentRules,
       [field]: Number(value),
     }));
+  }
+
+  function priorityHelp(value: number): string {
+    if (value === 0) {
+      return "Off";
+    }
+
+    if (value <= 25) {
+      return "Low";
+    }
+
+    if (value <= 60) {
+      return "Medium";
+    }
+
+    if (value <= 110) {
+      return "High";
+    }
+
+    return "Very high";
   }
 
   async function saveRules() {
@@ -149,6 +198,11 @@ export function SchedulingSettings() {
 
     if (rules.scheduleEndTime <= rules.scheduleStartTime) {
       setMessage("Schedule end time must be later than schedule start time.");
+      return;
+    }
+
+    if (rules.breakWindowEnd <= rules.breakWindowStart) {
+      setMessage("Break window end must be later than break window start.");
       return;
     }
 
@@ -191,7 +245,9 @@ export function SchedulingSettings() {
         ...DEFAULT_RULES,
         ...data.rules,
       });
-      setMessage("Scheduling rules saved. Auto Generate and Repair now use them.");
+      setMessage(
+        "Scheduling rules saved. Auto Generate and Repair will use the new priorities."
+      );
     } catch (error) {
       setMessage(
         error instanceof Error
@@ -234,6 +290,11 @@ export function SchedulingSettings() {
 
       <section className="section-card">
         <h2>Calendar Rules</h2>
+        <p>
+          These values define the Excel-style day that the automatic scheduler is
+          allowed to use.
+        </p>
+
         <div className="form-grid">
           <label className="form-field">
             <span>Schedule starts</span>
@@ -268,6 +329,7 @@ export function SchedulingSettings() {
             <input
               type="number"
               min="30"
+              max="30"
               step="30"
               value={rules.slotLengthMinutes}
               onChange={(event) =>
@@ -348,47 +410,37 @@ export function SchedulingSettings() {
       </section>
 
       <section className="section-card">
-        <h2>Automatic Scheduling Rules</h2>
+        <h2>Break Planning</h2>
+        <p>
+          Automatic breaks are only placed when enough staff remain to cover all
+          clients. Multiple staff may break together when the clinic has spare
+          coverage.
+        </p>
+
         <div className="form-grid">
           <label className="form-field">
-            <span>Max clients per technician per day</span>
-            <input
-              type="number"
-              min="1"
-              value={rules.maximumClientsPerTechPerDay}
-              onChange={(event) =>
-                updateNumberField(
-                  "maximumClientsPerTechPerDay",
-                  event.target.value
-                )
-              }
-            />
-          </label>
-
-          <label className="form-field">
-            <span>Max technicians per client per day</span>
-            <input
-              type="number"
-              min="1"
-              value={rules.maximumTechsPerClientPerDay}
-              onChange={(event) =>
-                updateNumberField(
-                  "maximumTechsPerClientPerDay",
-                  event.target.value
-                )
-              }
-            />
-          </label>
-
-          <label className="form-field">
             <span>Default break minutes</span>
-            <input
-              type="number"
-              min="0"
-              step="30"
+            <select
               value={rules.defaultBreakMinutes}
               onChange={(event) =>
                 updateNumberField("defaultBreakMinutes", event.target.value)
+              }
+            >
+              <option value={0}>No automatic break</option>
+              <option value={30}>30 minutes</option>
+            </select>
+          </label>
+
+          <label className="form-field">
+            <span>Break required after shift hours</span>
+            <input
+              type="number"
+              min="0"
+              max="24"
+              step="0.5"
+              value={rules.breakEligibilityHours}
+              onChange={(event) =>
+                updateNumberField("breakEligibilityHours", event.target.value)
               }
             />
           </label>
@@ -417,6 +469,127 @@ export function SchedulingSettings() {
                   ...currentRules,
                   breakWindowEnd: event.target.value,
                 }))
+              }
+            />
+          </label>
+        </div>
+      </section>
+
+      <section className="section-card">
+        <h2>Automatic Scheduler Priorities</h2>
+        <p>
+          Higher numbers make a soft preference more important. Hard rules such as
+          availability, call-outs, double-booking, service setting, and hard
+          staff/client restrictions always take priority over these scores.
+        </p>
+
+        <div className="form-grid">
+          <label className="form-field">
+            <span>Preferred staff priority</span>
+            <input
+              type="number"
+              min="0"
+              max="200"
+              step="5"
+              value={rules.preferredStaffPriority}
+              onChange={(event) =>
+                updateNumberField("preferredStaffPriority", event.target.value)
+              }
+            />
+            <small>{priorityHelp(rules.preferredStaffPriority)}</small>
+          </label>
+
+          <label className="form-field">
+            <span>Same team priority</span>
+            <input
+              type="number"
+              min="0"
+              max="200"
+              step="5"
+              value={rules.sameTeamPriority}
+              onChange={(event) =>
+                updateNumberField("sameTeamPriority", event.target.value)
+              }
+            />
+            <small>{priorityHelp(rules.sameTeamPriority)}</small>
+          </label>
+
+          <label className="form-field">
+            <span>Continuity priority</span>
+            <input
+              type="number"
+              min="0"
+              max="200"
+              step="5"
+              value={rules.continuityPriority}
+              onChange={(event) =>
+                updateNumberField("continuityPriority", event.target.value)
+              }
+            />
+            <small>{priorityHelp(rules.continuityPriority)}</small>
+          </label>
+
+          <label className="form-field">
+            <span>Rotation / higher-support priority</span>
+            <input
+              type="number"
+              min="0"
+              max="200"
+              step="5"
+              value={rules.rotationPriority}
+              onChange={(event) =>
+                updateNumberField("rotationPriority", event.target.value)
+              }
+            />
+            <small>{priorityHelp(rules.rotationPriority)}</small>
+          </label>
+
+          <label className="form-field">
+            <span>Workload balancing priority</span>
+            <input
+              type="number"
+              min="0"
+              max="200"
+              step="5"
+              value={rules.workloadBalancePriority}
+              onChange={(event) =>
+                updateNumberField("workloadBalancePriority", event.target.value)
+              }
+            />
+            <small>{priorityHelp(rules.workloadBalancePriority)}</small>
+          </label>
+        </div>
+      </section>
+
+      <section className="section-card">
+        <h2>Automatic Scheduling Limits</h2>
+        <div className="form-grid">
+          <label className="form-field">
+            <span>Max clients per technician per day</span>
+            <input
+              type="number"
+              min="1"
+              value={rules.maximumClientsPerTechPerDay}
+              onChange={(event) =>
+                updateNumberField(
+                  "maximumClientsPerTechPerDay",
+                  event.target.value
+                )
+              }
+            />
+          </label>
+
+          <label className="form-field">
+            <span>Max technicians per client per day</span>
+            <input
+              type="number"
+              min="1"
+              value={rules.maximumTechsPerClientPerDay}
+              onChange={(event) =>
+                updateNumberField(
+                  "maximumTechsPerClientPerDay",
+                  event.target.value
+                )
               }
             />
           </label>
@@ -452,8 +625,8 @@ export function SchedulingSettings() {
               }
             />
             <span>
-              Prefer matching staff and clients from the same team before using
-              other allowed staff.
+              Use the same-team priority when staff and client belong to the same
+              team.
             </span>
           </label>
 
@@ -469,8 +642,8 @@ export function SchedulingSettings() {
               }
             />
             <span>
-              Prefer continuity so a good schedule does not change pairings
-              unnecessarily.
+              Prefer continuity for standard clients while rotation clients still
+              rotate according to their own support rules.
             </span>
           </label>
 
