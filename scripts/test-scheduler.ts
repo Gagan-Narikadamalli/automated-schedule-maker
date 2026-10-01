@@ -97,6 +97,23 @@ function clientAssignments(
   );
 }
 
+function createHistoricalReference(
+  id: string,
+  staffId: string,
+  clientId: string,
+  startTime: string
+): SchedulerAssignment {
+  return {
+    id,
+    staffId,
+    clientId,
+    startTime,
+    assignmentType: "CLIENT_1_TO_1",
+    source: "COPIED",
+    locked: false,
+  };
+}
+
 function testRoleCoverageOrder() {
   const staff = [
     createStaff("bt-1", "Primary BT", "BT", ["08:00"]),
@@ -129,6 +146,72 @@ function testRoleCoverageOrder() {
     assignment.staffId,
     "bt-1",
     "BT should cover the client before intern, manager, or BCBA with default clinic priorities."
+  );
+}
+
+function testHistoricalPreferenceCannotJumpRoleTier() {
+  const staff = [
+    createStaff("bt-1", "Primary BT", "BT", ["08:00"]),
+    createStaff("intern-1", "Intern", "INTERN", ["08:00"]),
+  ];
+  const client = createClient("client-1", "AA", ["08:00"]);
+  const history = Array.from({ length: 8 }, (_, index) =>
+    createHistoricalReference(
+      `history-${index}`,
+      "intern-1",
+      "client-1",
+      "08:00"
+    )
+  );
+
+  const result = generateSchedule(
+    createInput(staff, [client], [], history)
+  );
+  const assignment = clientAssignments(result.assignments)[0];
+
+  assert.equal(
+    assignment.staffId,
+    "bt-1",
+    "Historical patterns should guide matching inside a role tier, but should not cause an intern to replace an available BT."
+  );
+}
+
+function testHistoricalSameWeekdayPatternGuidesMatching() {
+  const staff = [
+    createStaff("bt-1", "BT One", "BT", ["08:00"]),
+    createStaff("bt-2", "BT Two", "BT", ["08:00"]),
+  ];
+  const client = createClient("client-1", "AA", ["08:00"]);
+  const history = [
+    createHistoricalReference(
+      "history-1",
+      "bt-2",
+      "client-1",
+      "08:00"
+    ),
+    createHistoricalReference(
+      "history-2",
+      "bt-2",
+      "client-1",
+      "08:00"
+    ),
+    createHistoricalReference(
+      "history-3",
+      "bt-2",
+      "client-1",
+      "08:00"
+    ),
+  ];
+
+  const result = generateSchedule(
+    createInput(staff, [client], [], history)
+  );
+  const assignment = clientAssignments(result.assignments)[0];
+
+  assert.equal(
+    assignment.staffId,
+    "bt-2",
+    "Repeated same-weekday history should teach the scheduler to reuse a stable staff/client pattern when no harder rule conflicts."
   );
 }
 
@@ -370,6 +453,8 @@ function testBreakPlanningUsesReliefCapacity() {
 
 function runSchedulerRegressionScenarios() {
   testRoleCoverageOrder();
+  testHistoricalPreferenceCannotJumpRoleTier();
+  testHistoricalSameWeekdayPatternGuidesMatching();
   testPartialBuildKeepsSafeCoverage();
   testManualAssignmentsStayProtected();
   testHigherSupportClientRotates();
