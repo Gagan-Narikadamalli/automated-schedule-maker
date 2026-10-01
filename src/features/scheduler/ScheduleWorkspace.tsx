@@ -1,31 +1,347 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
+import { DAILY_TIME_SLOTS } from "./constants";
+import type { DemoGridCell } from "./demoData";
 import { ScheduleGrid } from "./ScheduleGrid";
-import { createDemoGrid, DEMO_STAFF } from "./demoData";
+import type { AssignmentType, StaffColumn } from "./types";
 
-const LOCATIONS = [
-  { id: "livingston", name: "Livingston" },
-  { id: "parsippany", name: "Parsippany" },
-];
+type LocationOption = {
+  id: string;
+  name: string;
+  code: string;
+};
+
+type ScheduleStaff = StaffColumn & {
+  role: string;
+  teamId: string | null;
+  availableSlots: string[];
+};
+
+type PopulatedClient = {
+  _id?: string;
+  id?: string;
+  displayCode?: string;
+  fullName?: string;
+  color?: string;
+};
+
+type ScheduleAssignment = {
+  id: string;
+  staffId: string;
+  clientId: string | PopulatedClient | null;
+  startTime: string;
+  endTime: string;
+  assignmentType: AssignmentType;
+  source: "AUTO" | "MANUAL" | "TEMPLATE" | "COPIED";
+  locked: boolean;
+  manuallyOverridden: boolean;
+};
+
+type ScheduleResponse = {
+  locationId?: string;
+  date?: string;
+  staff?: ScheduleStaff[];
+  assignments?: ScheduleAssignment[];
+  requiredClientSlots?: number;
+  error?: string;
+};
+
+type LocationsResponse = {
+  locations?: LocationOption[];
+  error?: string;
+};
+
+type GenerateMetrics = {
+  requiredClientSlots?: number;
+  coveredClientSlots?: number;
+  uncoveredClientSlots?: number;
+};
+
+type GenerateResponse = {
+  success?: boolean;
+  metrics?: GenerateMetrics;
+  warnings?: string[];
+  uncoveredRequirements?: unknown[];
+  affectedStaffIds?: string[];
+  error?: string;
+};
+
+type SimpleApiResponse = {
+  error?: string;
+};
+
+function getTodayForDateInput(): string {
+  const now = new Date();
+  const localTime = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
+  return localTime.toISOString().slice(0, 10);
+}
+
+async function readJson<T>(response: Response): Promise<T> {
+  const data = (await response.json()) as T;
+
+  if (response.status === 401) {
+    window.location.href = "/login";
+    throw new Error("Your session expired. Please sign in again.");
+  }
+
+  return data;
+}
+
+function createEmptyCell(): DemoGridCell {
+  return {
+    text: "",
+    assignmentType: "EMPTY",
+  };
+}
+
+function createUnavailableCell(): DemoGridCell {
+  return {
+    text: "",
+    assignmentType: "UNAVAILABLE",
+    color: "#8D8D8D",
+  };
+}
+
+function clientFromAssignment(
+  assignment: ScheduleAssignment
+): PopulatedClient | null {
+  if (
+    assignment.clientId &&
+    typeof assignment.clientId === "object"
+  ) {
+    return assignment.clientId;
+  }
+
+  return null;
+}
+
+function assignmentToGridCell(
+  assignment: ScheduleAssignment
+): DemoGridCell {
+  const client = clientFromAssignment(assignment);
+
+  switch (assignment.assignmentType) {
+    case "CLIENT_1_TO_1":
+      return {
+        text: client?.displayCode
+          ? `${client.displayCode} 1:1`
+          : "Client 1:1",
+        assignmentType: "CLIENT_1_TO_1",
+        color: client?.color || "#D9F4EE",
+      };
+
+    case "BREAK":
+      return {
+        text: "Break",
+        assignmentType: "BREAK",
+      };
+
+    case "BREAK_NAP":
+      return {
+        text: "Break/Nap",
+        assignmentType: "BREAK_NAP",
+      };
+
+    case "NAP":
+      return {
+        text: "Nap",
+        assignmentType: "NAP",
+        color: "#F4EFE3",
+      };
+
+    case "SPEECH":
+      return {
+        text: client?.displayCode
+          ? `${client.displayCode} Speech`
+          : "Speech",
+        assignmentType: "SPEECH",
+        color: "#DCE9F8",
+      };
+
+    case "UNAVAILABLE":
+      return createUnavailableCell();
+
+    case "OPEN":
+    default:
+      return createEmptyCell();
+  }
+}
+
+function buildGrid(
+  staff: ScheduleStaff[],
+  assignments: ScheduleAssignment[]
+): DemoGridCell[][] {
+  const staffIndexById = new Map(
+    staff.map((staffMember, index) => [staffMember.id, index])
+  );
+  const timeIndexByStartTime = new Map(
+    DAILY_TIME_SLOTS.map((timeSlot, index) => [timeSlot.startTime, index])
+  );
+
+  const grid = DAILY_TIME_SLOTS.map((timeSlot) =>
+    staff.map((staffMember) =>
+      staffMember.availableSlots.includes(timeSlot.startTime)
+        ? createEmptyCell()
+        : createUnavailableCell()
+    )
+  );
+
+  for (const assignment of assignments) {
+    const rowIndex = timeIndexByStartTime.get(assignment.startTime);
+    const columnIndex = staffIndexById.get(String(assignment.staffId));
+
+    if (rowIndex === undefined || columnIndex === undefined) {
+      continue;
+    }
+
+    grid[rowIndex][columnIndex] = assignmentToGridCell(assignment);
+  }
+
+  return grid;
+}
+
+function formatMetrics(metrics: GenerateMetrics | undefined): string {
+  if (!metrics) {
+    return "Schedule operation completed.";
+  }
+
+  const required = metrics.requiredClientSlots ?? 0;
+  const covered = metrics.coveredClientSlots ?? 0;
+  const uncovered = metrics.uncoveredClientSlots ?? Math.max(required - covered, 0);
+
+  return `${covered}/${required} required client blocks covered; ${uncovered} uncovered.`;
+}
 
 export function ScheduleWorkspace() {
-  const [locationId, setLocationId] = useState("livingston");
-  const [selectedDate, setSelectedDate] = useState("2026-10-01");
+  const [locations, setLocations] = useState<LocationOption[]>([]);
+  const [locationId, setLocationId] = useState("");
+  const [selectedDate, setSelectedDate] = useState(getTodayForDateInput);
+  const [staff, setStaff] = useState<ScheduleStaff[]>([]);
+  const [initialGrid, setInitialGrid] = useState<DemoGridCell[][]>([]);
+  const [requiredClientSlots, setRequiredClientSlots] = useState(0);
+  const [gridVersion, setGridVersion] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [working, setWorking] = useState(false);
+
   const [manualMode, setManualMode] = useState(false);
   const [statusMessage, setStatusMessage] = useState(
-    "Auto-safe mode is on. Existing assignments are protected."
+    "Loading the clinic schedule from MongoDB..."
   );
   const [unplacedAssignments, setUnplacedAssignments] = useState<string[]>([]);
   const [showCallOutPanel, setShowCallOutPanel] = useState(false);
   const [callOutStaffIds, setCallOutStaffIds] = useState<string[]>([]);
 
-  const initialGrid = useMemo(() => createDemoGrid(), []);
+  const locationName = useMemo(
+    () =>
+      locations.find((location) => location.id === locationId)?.name ??
+      "Clinic",
+    [locations, locationId]
+  );
 
-  const locationName =
-    LOCATIONS.find((location) => location.id === locationId)?.name ??
-    "Livingston";
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadLocations() {
+      try {
+        const response = await fetch("/api/locations", {
+          cache: "no-store",
+        });
+        const data = await readJson<LocationsResponse>(response);
+
+        if (!response.ok) {
+          throw new Error(data.error || "Locations could not be loaded.");
+        }
+
+        if (cancelled) {
+          return;
+        }
+
+        const nextLocations = data.locations ?? [];
+        setLocations(nextLocations);
+
+        if (nextLocations.length > 0) {
+          setLocationId((currentLocationId) =>
+            currentLocationId || nextLocations[0].id
+          );
+        } else {
+          setLoading(false);
+          setStatusMessage("No clinic locations are available for this account.");
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setLoading(false);
+          setStatusMessage(
+            error instanceof Error
+              ? error.message
+              : "Clinic locations could not be loaded."
+          );
+        }
+      }
+    }
+
+    void loadLocations();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!locationId || !selectedDate) {
+      return;
+    }
+
+    void loadSchedule(locationId, selectedDate);
+  }, [locationId, selectedDate]);
+
+  async function loadSchedule(
+    requestedLocationId = locationId,
+    requestedDate = selectedDate
+  ) {
+    if (!requestedLocationId || !requestedDate) {
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      const response = await fetch(
+        `/api/schedule?locationId=${encodeURIComponent(
+          requestedLocationId
+        )}&date=${encodeURIComponent(requestedDate)}`,
+        { cache: "no-store" }
+      );
+      const data = await readJson<ScheduleResponse>(response);
+
+      if (!response.ok) {
+        throw new Error(data.error || "Schedule could not be loaded.");
+      }
+
+      const nextStaff = data.staff ?? [];
+      const nextAssignments = data.assignments ?? [];
+
+      setStaff(nextStaff);
+      setInitialGrid(buildGrid(nextStaff, nextAssignments));
+      setRequiredClientSlots(data.requiredClientSlots ?? 0);
+      setGridVersion((currentVersion) => currentVersion + 1);
+      setStatusMessage(
+        `Loaded ${nextAssignments.length} saved assignment${
+          nextAssignments.length === 1 ? "" : "s"
+        }. ${data.requiredClientSlots ?? 0} client blocks require coverage.`
+      );
+    } catch (error) {
+      setStaff([]);
+      setInitialGrid([]);
+      setRequiredClientSlots(0);
+      setStatusMessage(
+        error instanceof Error ? error.message : "Schedule could not be loaded."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
 
   function toggleManualMode() {
     setManualMode((currentMode) => {
@@ -33,7 +349,7 @@ export function ScheduleWorkspace() {
 
       setStatusMessage(
         nextMode
-          ? "Manual Mode is on. You can drag, replace, clear, and force assignments. Replaced assignments will move to the Unplaced Assignments tray."
+          ? "Manual Mode is on. Spreadsheet edits and drag replacement are enabled. Manual database persistence is being connected cell-by-cell; generated and saved schedule data remains protected in MongoDB."
           : "Auto-safe mode is on. Existing assignments are protected from accidental replacement."
       );
 
@@ -66,30 +382,138 @@ export function ScheduleWorkspace() {
     });
   }
 
-  function saveCallOuts() {
-    if (callOutStaffIds.length === 0) {
+  async function saveCallOuts() {
+    if (!locationId || callOutStaffIds.length === 0) {
       setStatusMessage("Select at least one staff member before saving call-outs.");
       return;
     }
 
-    setStatusMessage(
-      `${callOutStaffIds.length} call-out${
-        callOutStaffIds.length === 1 ? "" : "s"
-      } selected for ${selectedDate}. The database-backed version will mark those staff unavailable and offer Repair Schedule.`
-    );
-    setShowCallOutPanel(false);
+    try {
+      setWorking(true);
+      setStatusMessage("Saving call-outs to MongoDB...");
+
+      for (const staffId of callOutStaffIds) {
+        const response = await fetch("/api/call-outs", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            locationId,
+            staffId,
+            date: selectedDate,
+            startTime: "08:00",
+            endTime: "18:00",
+            reason: "Call out",
+          }),
+        });
+        const data = await readJson<SimpleApiResponse>(response);
+
+        if (!response.ok) {
+          throw new Error(data.error || "A call-out could not be saved.");
+        }
+      }
+
+      const savedCount = callOutStaffIds.length;
+      setCallOutStaffIds([]);
+      setShowCallOutPanel(false);
+      await loadSchedule();
+      setStatusMessage(
+        `${savedCount} call-out${savedCount === 1 ? "" : "s"} saved for ${selectedDate}. Unavailable blocks are now shown in the calendar. Use Repair Schedule to refill affected coverage.`
+      );
+    } catch (error) {
+      setStatusMessage(
+        error instanceof Error ? error.message : "Call-outs could not be saved."
+      );
+    } finally {
+      setWorking(false);
+    }
   }
 
-  function requestAutoGenerate() {
-    setStatusMessage(
-      "Auto Generate will preserve locked/manual cells, then fill remaining coverage using availability, client attendance, speech sessions, hard restrictions, hours, team preference, and continuity rules."
-    );
+  async function requestAutoGenerate() {
+    if (!locationId) {
+      return;
+    }
+
+    try {
+      setWorking(true);
+      setStatusMessage(
+        "Generating the schedule from staff shifts, client attendance, speech/nap blocks, call-outs, relationships, hours, teams, and clinic rules..."
+      );
+
+      const response = await fetch("/api/schedule/generate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          locationId,
+          date: selectedDate,
+        }),
+      });
+      const data = await readJson<GenerateResponse>(response);
+
+      if (!response.ok) {
+        throw new Error(data.error || "The schedule could not be generated.");
+      }
+
+      await loadSchedule();
+      setStatusMessage(
+        `Auto Generate finished. ${formatMetrics(data.metrics)}${
+          data.warnings?.length
+            ? ` ${data.warnings.length} scheduler warning(s) need review.`
+            : ""
+        }`
+      );
+    } catch (error) {
+      setStatusMessage(
+        error instanceof Error
+          ? error.message
+          : "The schedule could not be generated."
+      );
+    } finally {
+      setWorking(false);
+    }
   }
 
-  function requestRepair() {
-    setStatusMessage(
-      "Repair Schedule will change only affected or uncovered blocks while preserving the rest of the approved schedule."
-    );
+  async function requestRepair() {
+    if (!locationId) {
+      return;
+    }
+
+    try {
+      setWorking(true);
+      setStatusMessage(
+        "Repairing only the schedule areas affected by recorded staff call-outs..."
+      );
+
+      const response = await fetch("/api/schedule/repair", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          locationId,
+          date: selectedDate,
+        }),
+      });
+      const data = await readJson<GenerateResponse>(response);
+
+      if (!response.ok) {
+        throw new Error(data.error || "The schedule could not be repaired.");
+      }
+
+      await loadSchedule();
+      setStatusMessage(
+        `Repair finished for ${data.affectedStaffIds?.length ?? 0} affected staff member(s). ${formatMetrics(data.metrics)}`
+      );
+    } catch (error) {
+      setStatusMessage(
+        error instanceof Error ? error.message : "The schedule could not be repaired."
+      );
+    } finally {
+      setWorking(false);
+    }
   }
 
   return (
@@ -108,9 +532,11 @@ export function ScheduleWorkspace() {
             Location
             <select
               value={locationId}
+              disabled={working || loading}
               onChange={(event) => setLocationId(event.target.value)}
             >
-              {LOCATIONS.map((location) => (
+              {locations.length === 0 && <option value="">No locations</option>}
+              {locations.map((location) => (
                 <option key={location.id} value={location.id}>
                   {location.name}
                 </option>
@@ -123,6 +549,7 @@ export function ScheduleWorkspace() {
             <input
               type="date"
               value={selectedDate}
+              disabled={working}
               onChange={(event) => setSelectedDate(event.target.value)}
             />
           </label>
@@ -134,6 +561,7 @@ export function ScheduleWorkspace() {
           <button
             type="button"
             className="button button-secondary"
+            disabled={working || loading || staff.length === 0}
             onClick={() => setShowCallOutPanel((open) => !open)}
           >
             Call Outs
@@ -142,7 +570,8 @@ export function ScheduleWorkspace() {
           <button
             type="button"
             className="button button-secondary"
-            onClick={requestRepair}
+            disabled={working || loading || staff.length === 0}
+            onClick={() => void requestRepair()}
           >
             Repair Schedule
           </button>
@@ -150,9 +579,10 @@ export function ScheduleWorkspace() {
           <button
             type="button"
             className="button button-secondary"
+            disabled={working || loading}
             onClick={() =>
               setStatusMessage(
-                "Copy Day will let you choose a source date, copy it to the selected date, and then revalidate staff availability, attendance, speech sessions, call-outs, and hard restrictions."
+                "Copy Day is the next calendar operation being connected. It will copy a selected source date and then revalidate the copied schedule against the target date."
               )
             }
           >
@@ -166,6 +596,7 @@ export function ScheduleWorkspace() {
             className={`button ${
               manualMode ? "button-warning" : "button-secondary"
             }`}
+            disabled={working || loading || staff.length === 0}
             onClick={toggleManualMode}
           >
             Manual Mode: {manualMode ? "On" : "Off"}
@@ -174,9 +605,10 @@ export function ScheduleWorkspace() {
           <button
             type="button"
             className="button button-primary"
-            onClick={requestAutoGenerate}
+            disabled={working || loading || staff.length === 0}
+            onClick={() => void requestAutoGenerate()}
           >
-            Auto Generate
+            {working ? "Working..." : "Auto Generate"}
           </button>
         </div>
       </section>
@@ -187,13 +619,14 @@ export function ScheduleWorkspace() {
             <div>
               <h2>Call Outs for {selectedDate}</h2>
               <p>
-                Select staff who are unavailable. The completed version will save
-                this to MongoDB and use it as a hard scheduling constraint.
+                Select staff who are unavailable for the full clinic day. The
+                call-out is saved to MongoDB and becomes a hard constraint.
               </p>
             </div>
             <button
               type="button"
               className="button button-secondary"
+              disabled={working}
               onClick={() => setShowCallOutPanel(false)}
             >
               Close
@@ -201,10 +634,11 @@ export function ScheduleWorkspace() {
           </div>
 
           <div className="callout-staff-list">
-            {DEMO_STAFF.map((staffMember) => (
+            {staff.map((staffMember) => (
               <label key={staffMember.id} className="checkbox-card">
                 <input
                   type="checkbox"
+                  disabled={working}
                   checked={callOutStaffIds.includes(staffMember.id)}
                   onChange={() => toggleCallOutStaff(staffMember.id)}
                 />
@@ -216,9 +650,10 @@ export function ScheduleWorkspace() {
           <button
             type="button"
             className="button button-primary"
-            onClick={saveCallOuts}
+            disabled={working || callOutStaffIds.length === 0}
+            onClick={() => void saveCallOuts()}
           >
-            Save Call Outs
+            {working ? "Saving..." : "Save Call Outs"}
           </button>
         </section>
       )}
@@ -226,6 +661,7 @@ export function ScheduleWorkspace() {
       <section className="schedule-status-bar" aria-live="polite">
         <strong>{locationName}</strong>
         <span>{selectedDate}</span>
+        <span>{requiredClientSlots} required client blocks</span>
         <span>{manualMode ? "Manual override enabled" : "Auto-safe enabled"}</span>
         <span>{statusMessage}</span>
       </section>
@@ -241,13 +677,23 @@ export function ScheduleWorkspace() {
             <span>Manual Mode: drag and replace</span>
           </div>
 
-          <ScheduleGrid
-            staff={DEMO_STAFF}
-            initialGrid={initialGrid}
-            manualMode={manualMode}
-            onConflict={handleConflict}
-            onDisplacedAssignment={handleDisplacedAssignment}
-          />
+          {loading ? (
+            <div className="empty-state">Loading schedule...</div>
+          ) : staff.length === 0 ? (
+            <div className="empty-state">
+              No active staff with a recurring shift are available for this date.
+              Add staff and shift patterns first.
+            </div>
+          ) : (
+            <ScheduleGrid
+              key={`${locationId}-${selectedDate}-${gridVersion}`}
+              staff={staff}
+              initialGrid={initialGrid}
+              manualMode={manualMode}
+              onConflict={handleConflict}
+              onDisplacedAssignment={handleDisplacedAssignment}
+            />
+          )}
         </section>
 
         <aside className="unplaced-tray">
