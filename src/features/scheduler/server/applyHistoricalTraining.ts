@@ -1,5 +1,8 @@
 import { getDayKeys } from "@/features/scheduler/engine/dateUtils";
-import { buildHistoricalPatternScores } from "@/features/scheduler/engine/historicalPatterns";
+import {
+  buildHistoricalPatternScores,
+  mergeHistoricalPatternScores,
+} from "@/features/scheduler/engine/historicalPatterns";
 import type {
   SchedulerAssignment,
   SchedulerInput,
@@ -80,6 +83,23 @@ function buildBreakReferences(
   return breakReferences;
 }
 
+function historicalRuleValues(rulesDocument: DatabaseRecord | null) {
+  return {
+    autoUseHistoricalPatterns: Boolean(
+      rulesDocument?.autoUseHistoricalPatterns ?? true
+    ),
+    historicalPairingPriority: Number(
+      rulesDocument?.historicalPairingPriority ?? 70
+    ),
+    historicalSlotPriority: Number(
+      rulesDocument?.historicalSlotPriority ?? 90
+    ),
+    historicalBreakPriority: Number(
+      rulesDocument?.historicalBreakPriority ?? 80
+    ),
+  };
+}
+
 export async function applyHistoricalTraining(
   locationId: string,
   date: string,
@@ -117,19 +137,19 @@ export async function applyHistoricalTraining(
 
   const records = rawRecords as unknown as DatabaseRecord[];
   const rulesDocument = rawRules as unknown as DatabaseRecord | null;
-  const autoUseHistoricalPatterns = Boolean(
-    rulesDocument?.autoUseHistoricalPatterns ?? true
-  );
+  const ruleValues = historicalRuleValues(rulesDocument);
 
-  if (!autoUseHistoricalPatterns || records.length === 0) {
+  const inputWithHistoricalRules: SchedulerInput = {
+    ...input,
+    rules: {
+      ...input.rules,
+      ...ruleValues,
+    },
+  };
+
+  if (!ruleValues.autoUseHistoricalPatterns || records.length === 0) {
     return {
-      input: {
-        ...input,
-        rules: {
-          ...input.rules,
-          autoUseHistoricalPatterns,
-        },
-      },
+      input: inputWithHistoricalRules,
       matchedScheduleDayCount: 0,
       matchedRecordCount: 0,
     };
@@ -168,7 +188,7 @@ export async function applyHistoricalTraining(
     );
   });
 
-  const historicalPatterns = buildHistoricalPatternScores(
+  const importedHistoricalPatterns = buildHistoricalPatternScores(
     matchedRecords.map((record) => ({
       scheduleDate: String(record.scheduleDate ?? ""),
       staffId: record.staffId ? String(record.staffId) : null,
@@ -193,27 +213,17 @@ export async function applyHistoricalTraining(
 
   return {
     input: {
-      ...input,
+      ...inputWithHistoricalRules,
       referenceAssignments: [
         ...input.referenceAssignments,
         ...breakReferences,
       ],
-      historicalPatterns,
-      rules: {
-        ...input.rules,
-        autoUseHistoricalPatterns: true,
-        historicalPairingPriority: Number(
-          rulesDocument?.historicalPairingPriority ?? 70
-        ),
-        historicalSlotPriority: Number(
-          rulesDocument?.historicalSlotPriority ?? 90
-        ),
-        historicalBreakPriority: Number(
-          rulesDocument?.historicalBreakPriority ?? 80
-        ),
-      },
+      historicalPatterns: mergeHistoricalPatternScores(
+        input.historicalPatterns,
+        importedHistoricalPatterns
+      ),
     },
-    matchedScheduleDayCount: historicalPatterns.scheduleDayCount,
-    matchedRecordCount: historicalPatterns.sampleCount,
+    matchedScheduleDayCount: importedHistoricalPatterns.scheduleDayCount,
+    matchedRecordCount: importedHistoricalPatterns.sampleCount,
   };
 }
