@@ -16,6 +16,7 @@ const navigationItems = [
   { href: "/activity", label: "Activity & Changes" },
   { href: "/supervision", label: "Supervision" },
   { href: "/settings", label: "Clinic Settings" },
+  { href: "/settings/data-maintenance", label: "Data Maintenance" },
 ];
 
 const SIDEBAR_STORAGE_KEY = "sos-scheduler-sidebar-open";
