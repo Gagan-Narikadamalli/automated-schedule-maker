@@ -39,7 +39,9 @@ type Conflict = {
   message: string;
 };
 
-function serializeAssignment(assignment: Record<string, unknown>) {
+type PlainDatabaseRecord = Record<string, any>;
+
+function serializeAssignment(assignment: PlainDatabaseRecord) {
   const client =
     assignment.clientId && typeof assignment.clientId === "object"
       ? assignment.clientId
@@ -102,21 +104,22 @@ export async function GET(request: Request) {
       ])
     );
 
+    const plainStaffDocuments = staffDocuments as unknown as PlainDatabaseRecord[];
+    const plainAssignments = assignments as unknown as PlainDatabaseRecord[];
+
     return NextResponse.json({
       date,
       locationId,
-      staff: staffDocuments.map((staffMember) => ({
+      staff: plainStaffDocuments.map((staffMember) => ({
         id: String(staffMember._id),
-        name: staffMember.fullName,
-        role: staffMember.role,
-        color: staffMember.color,
+        name: String(staffMember.fullName ?? ""),
+        role: String(staffMember.role ?? ""),
+        color: String(staffMember.color ?? "#DCE9F8"),
         teamId: staffMember.teamId ? String(staffMember.teamId) : null,
         availableSlots: availableSlotMap.get(String(staffMember._id)) ?? [],
       })),
-      assignments: assignments.map((assignment) =>
-        serializeAssignment(
-          assignment as unknown as Record<string, unknown>
-        )
+      assignments: plainAssignments.map((assignment) =>
+        serializeAssignment(assignment)
       ),
       requiredClientSlots: dayData.clients.reduce(
         (total, client) => total + client.requiredSlots.length,
@@ -164,10 +167,7 @@ export async function PUT(request: Request) {
       );
     }
 
-    if (
-      assignmentType === "CLIENT_1_TO_1" &&
-      !clientId
-    ) {
+    if (assignmentType === "CLIENT_1_TO_1" && !clientId) {
       return NextResponse.json(
         { error: "A client is required for a 1:1 assignment." },
         { status: 400 }
@@ -180,19 +180,20 @@ export async function PUT(request: Request) {
 
     await connectToDatabase();
 
-    const [staffMember, client, existingCell, dayData] = await Promise.all([
-      Staff.findOne({ _id: staffId, locationId, active: true }),
-      clientId
-        ? Client.findOne({ _id: clientId, locationId, active: true })
-        : Promise.resolve(null),
-      ScheduleAssignment.findOne({
-        locationId,
-        date,
-        staffId,
-        startTime,
-      }).lean(),
-      buildDaySchedulerInput(locationId, date),
-    ]);
+    const [staffMember, client, existingCellResult, dayData] =
+      await Promise.all([
+        Staff.findOne({ _id: staffId, locationId, active: true }),
+        clientId
+          ? Client.findOne({ _id: clientId, locationId, active: true })
+          : Promise.resolve(null),
+        ScheduleAssignment.findOne({
+          locationId,
+          date,
+          staffId,
+          startTime,
+        }).lean(),
+        buildDaySchedulerInput(locationId, date),
+      ]);
 
     if (!staffMember) {
       return NextResponse.json(
@@ -207,6 +208,10 @@ export async function PUT(request: Request) {
         { status: 404 }
       );
     }
+
+    const existingCell = existingCellResult
+      ? (existingCellResult as unknown as PlainDatabaseRecord)
+      : null;
 
     const conflicts: Conflict[] = [];
 
@@ -259,7 +264,7 @@ export async function PUT(request: Request) {
 
     if (client && clientId) {
       const relationship = client.staffRelationships?.find(
-        (item: { staffId: unknown }) => String(item.staffId) === staffId
+        (item: any) => String(item.staffId) === staffId
       );
 
       if (relationship?.relationship === "HARD_RESTRICTION") {
@@ -305,13 +310,13 @@ export async function PUT(request: Request) {
         {
           requiresConfirmation: true,
           conflicts,
-          displacedAssignment: existingCell ?? null,
+          displacedAssignment: existingCell,
         },
         { status: 409 }
       );
     }
 
-    const before = existingCell ?? null;
+    const before = existingCell;
     const endTime = getEndTimeForSlot(startTime);
 
     const assignment = await ScheduleAssignment.findOneAndUpdate(
