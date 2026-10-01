@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 
 import { getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
-import { repairSchedule } from "@/features/scheduler/engine/repairSchedule";
+import {
+  repairSchedule,
+  type RepairAffectedSlot,
+} from "@/features/scheduler/engine/repairSchedule";
+import type { SchedulerAssignment } from "@/features/scheduler/engine/types";
+import { applyHistoricalTraining } from "@/features/scheduler/server/applyHistoricalTraining";
+import { applyLivingstonWorkbookTrial } from "@/features/scheduler/server/applyLivingstonWorkbookTrial";
 import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySchedulerInput";
 import {
   forbiddenResponse,
@@ -19,6 +25,24 @@ type RepairRequest = {
   locationId?: string;
   date?: string;
 };
+
+type CallOutRecord = {
+  staffId: string;
+  startTime: string;
+  endTime: string;
+};
+
+function assignmentOverlapsCallOut(
+  assignment: SchedulerAssignment,
+  callOuts: CallOutRecord[]
+): boolean {
+  return callOuts.some(
+    (callOut) =>
+      callOut.staffId === assignment.staffId &&
+      assignment.startTime >= callOut.startTime &&
+      assignment.startTime < callOut.endTime
+  );
+}
 
 export async function POST(request: Request) {
   const auth = await requireApiSession();
@@ -56,12 +80,18 @@ export async function POST(request: Request) {
 
     await connectToDatabase();
 
-    const callOuts = await CallOut.find({ locationId, date })
-      .select("staffId")
+    const rawCallOuts = await CallOut.find({ locationId, date })
+      .select("staffId startTime endTime")
       .lean();
 
+    const callOuts: CallOutRecord[] = rawCallOuts.map((callOut) => ({
+      staffId: String(callOut.staffId),
+      startTime: String(callOut.startTime),
+      endTime: String(callOut.endTime),
+    }));
+
     const affectedStaffIds = Array.from(
-      new Set(callOuts.map((callOut) => String(callOut.staffId)))
+      new Set(callOuts.map((callOut) => callOut.staffId))
     );
 
     if (affectedStaffIds.length === 0) {
@@ -75,22 +105,71 @@ export async function POST(request: Request) {
     }
 
     const dayData = await buildDaySchedulerInput(locationId, date);
-    const result = repairSchedule(dayData.input, affectedStaffIds);
 
-    await ScheduleAssignment.deleteMany({
+    const workbookTraining = await applyLivingstonWorkbookTrial(
       locationId,
-      date,
-      manuallyOverridden: { $ne: true },
-      source: { $in: ["AUTO", "TEMPLATE", "COPIED"] },
-    });
-
-    const assignmentsToPersist = result.assignments.filter(
-      (assignment) => assignment.source !== "MANUAL"
+      dayData.input
     );
 
-    if (assignmentsToPersist.length > 0) {
+    const historicalTraining = await applyHistoricalTraining(
+      locationId,
+      date,
+      workbookTraining.input
+    );
+
+    const schedulerInput = historicalTraining.input;
+    const affectedSlots: RepairAffectedSlot[] =
+      schedulerInput.existingAssignments
+        .filter((assignment) =>
+          assignmentOverlapsCallOut(assignment, callOuts)
+        )
+        .map((assignment) => ({
+          staffId: assignment.staffId,
+          startTime: assignment.startTime,
+        }));
+
+    const result = repairSchedule(
+      schedulerInput,
+      affectedStaffIds,
+      affectedSlots
+    );
+
+    const originalAssignmentIds = new Set(
+      schedulerInput.existingAssignments.map(
+        (assignment) => assignment.id
+      )
+    );
+    const resultAssignmentIds = new Set(
+      result.assignments.map((assignment) => assignment.id)
+    );
+
+    const removedOriginalIds =
+      schedulerInput.existingAssignments
+        .filter(
+          (assignment) => !resultAssignmentIds.has(assignment.id)
+        )
+        .map((assignment) => assignment.id);
+
+    const newAssignments = result.assignments.filter(
+      (assignment) => !originalAssignmentIds.has(assignment.id)
+    );
+
+    if (removedOriginalIds.length > 0) {
+      await ScheduleAssignment.deleteMany({
+        _id: {
+          $in: removedOriginalIds,
+        },
+        locationId,
+        date,
+        manuallyOverridden: {
+          $ne: true,
+        },
+      });
+    }
+
+    if (newAssignments.length > 0) {
       await ScheduleAssignment.insertMany(
-        assignmentsToPersist.map((assignment) => ({
+        newAssignments.map((assignment) => ({
           locationId,
           date,
           startTime: assignment.startTime,
@@ -98,10 +177,12 @@ export async function POST(request: Request) {
           staffId: assignment.staffId,
           clientId: assignment.clientId || null,
           assignmentType: assignment.assignmentType,
-          source: assignment.source,
-          locked: assignment.locked,
+          source: "AUTO",
+          locked: false,
           manuallyOverridden: false,
-          note: assignment.note || "",
+          note:
+            assignment.note ||
+            "Added by targeted call-out schedule repair.",
         }))
       );
     }
@@ -112,12 +193,18 @@ export async function POST(request: Request) {
       action: "REPAIR",
       entityType: "SCHEDULE_DAY",
       entityId: date,
-      summary: `Repaired the schedule for ${date} after ${affectedStaffIds.length} staff call-out(s).`,
+      summary: `Repaired only the schedule cells affected by ${affectedStaffIds.length} staff call-out(s) on ${date}.`,
       after: {
         affectedStaffIds,
+        affectedSlots,
+        removedAssignmentCount: removedOriginalIds.length,
+        addedAssignmentCount: newAssignments.length,
         metrics: result.metrics,
         uncoveredRequirements: result.uncoveredRequirements,
         warningCount: result.warnings.length,
+        workbookTrainingApplied: workbookTraining.applied,
+        importedTrainingScheduleDays:
+          historicalTraining.matchedScheduleDayCount,
       },
     });
 
@@ -126,6 +213,9 @@ export async function POST(request: Request) {
       date,
       locationId,
       affectedStaffIds,
+      affectedSlots,
+      removedAssignmentCount: removedOriginalIds.length,
+      addedAssignmentCount: newAssignments.length,
       metrics: result.metrics,
       warnings: result.warnings,
       uncoveredRequirements: result.uncoveredRequirements,
