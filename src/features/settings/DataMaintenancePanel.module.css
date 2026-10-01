@@ -1,0 +1,69 @@
+.dangerCard {
+  border: 1px solid #e7a6a6;
+  background: #fffafa;
+}
+
+.warningBox {
+  margin: 16px 0;
+  padding: 14px 16px;
+  border: 1px solid #e8bcbc;
+  border-radius: 10px;
+  background: #fff3f3;
+  color: #6f1d1d;
+  line-height: 1.5;
+}
+
+.countGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+  margin: 16px 0;
+}
+
+.countItem {
+  padding: 12px;
+  border: 1px solid #d7e2ea;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.countItem span {
+  display: block;
+  margin-bottom: 4px;
+  color: #567086;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.countItem strong {
+  color: #123b5d;
+  font-size: 22px;
+}
+
+.preservedList {
+  margin: 10px 0 0;
+  padding-left: 20px;
+  color: #476176;
+}
+
+.deleteButton {
+  border-color: #b42318;
+  background: #b42318;
+  color: #ffffff;
+}
+
+.deleteButton:hover:not(:disabled),
+.deleteButton:focus-visible:not(:disabled) {
+  background: #8f1b13;
+}
+
+.deleteButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.previewHeading {
+  margin-top: 20px;
+}
