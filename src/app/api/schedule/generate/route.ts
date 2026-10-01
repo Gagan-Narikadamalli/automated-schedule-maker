@@ -11,6 +11,7 @@ import type {
   SchedulerAssignment,
   SchedulerStaff,
 } from "@/features/scheduler/engine/types";
+import { applyHistoricalTraining } from "@/features/scheduler/server/applyHistoricalTraining";
 import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySchedulerInput";
 import { writeAuditLog } from "@/lib/api/audit";
 import { connectToDatabase } from "@/lib/db";
@@ -88,27 +89,33 @@ export async function POST(request: Request) {
       locationId,
       date
     );
+    const trainingResult = await applyHistoricalTraining(
+      locationId,
+      date,
+      dayData.input
+    );
+    const schedulerInput = trainingResult.input;
     const readiness = calculateSchedulerReadiness(
-      dayData.input,
+      schedulerInput,
       dayData.extendedRules
     );
 
     const protectedAssignments =
-      dayData.input.existingAssignments.filter(
+      schedulerInput.existingAssignments.filter(
         shouldKeepExistingAssignment
       );
 
     const reservedBreaks = reserveStaffBreaks({
-      staff: dayData.staff,
-      clients: dayData.clients,
+      staff: schedulerInput.staff,
+      clients: schedulerInput.clients,
       existingAssignments: protectedAssignments,
-      referenceAssignments: dayData.input.referenceAssignments,
-      callOutStaffIds: dayData.input.callOutStaffIds,
+      referenceAssignments: schedulerInput.referenceAssignments,
+      callOutStaffIds: schedulerInput.callOutStaffIds,
       rules: dayData.extendedRules,
     });
 
     const result = generateSchedule({
-      ...dayData.input,
+      ...schedulerInput,
       existingAssignments: [
         ...protectedAssignments,
         ...reservedBreaks,
@@ -118,7 +125,7 @@ export async function POST(request: Request) {
     const enrichedAssignments =
       enrichBreakAssignmentsWithFixedEvents(
         result.assignments,
-        dayData.clients,
+        schedulerInput.clients,
         dayData.extendedRules.slotLengthMinutes
       );
 
@@ -164,7 +171,7 @@ export async function POST(request: Request) {
     const partialBuild = !completeCoverage;
     const coverageByRole = buildCoverageByRole(
       enrichedAssignments,
-      dayData.staff,
+      schedulerInput.staff,
       dayData.extendedRules.slotLengthMinutes
     );
 
@@ -190,6 +197,10 @@ export async function POST(request: Request) {
         autoTemplateName: dayData.autoTemplateName,
         previousReferenceDate:
           dayData.previousReferenceDate,
+        importedTrainingScheduleDays:
+          trainingResult.matchedScheduleDayCount,
+        importedTrainingRecords:
+          trainingResult.matchedRecordCount,
       },
     });
 
@@ -212,6 +223,10 @@ export async function POST(request: Request) {
       autoTemplateName: dayData.autoTemplateName,
       previousReferenceDate:
         dayData.previousReferenceDate,
+      importedTrainingScheduleDays:
+        trainingResult.matchedScheduleDayCount,
+      importedTrainingRecords:
+        trainingResult.matchedRecordCount,
     });
   } catch (error) {
     console.error(
