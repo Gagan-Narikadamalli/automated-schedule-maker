@@ -36,6 +36,16 @@ const DAYS = new Set([
   "SUNDAY",
 ]);
 
+const DAY_NAMES = [
+  "SUNDAY",
+  "MONDAY",
+  "TUESDAY",
+  "WEDNESDAY",
+  "THURSDAY",
+  "FRIDAY",
+  "SATURDAY",
+] as const;
+
 function serializeTemplate(template: PlainRecord) {
   return {
     id: String(template._id),
@@ -49,6 +59,28 @@ function serializeTemplate(template: PlainRecord) {
     createdAt: template.createdAt,
     updatedAt: template.updatedAt,
   };
+}
+
+function getDayOfWeek(dateText: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateText)) {
+    return null;
+  }
+
+  const [yearText, monthText, dayText] = dateText.split("-");
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+
+  if (
+    parsed.getUTCFullYear() !== year ||
+    parsed.getUTCMonth() !== month - 1 ||
+    parsed.getUTCDate() !== day
+  ) {
+    return null;
+  }
+
+  return DAY_NAMES[parsed.getUTCDay()];
 }
 
 export async function GET(request: Request) {
@@ -124,9 +156,22 @@ export async function POST(request: Request) {
       return forbiddenResponse("You do not have access to this location.");
     }
 
-    if (sourceDate && !/^\d{4}-\d{2}-\d{2}$/.test(sourceDate)) {
+    const sourceDayOfWeek = sourceDate
+      ? getDayOfWeek(sourceDate)
+      : null;
+
+    if (sourceDate && !sourceDayOfWeek) {
       return NextResponse.json(
-        { error: "Source date must use YYYY-MM-DD format." },
+        { error: "Source date must be a real YYYY-MM-DD calendar date." },
+        { status: 400 }
+      );
+    }
+
+    if (sourceDayOfWeek && sourceDayOfWeek !== dayOfWeek) {
+      return NextResponse.json(
+        {
+          error: `The source schedule is ${sourceDayOfWeek}. Save it as a ${sourceDayOfWeek} template instead of ${dayOfWeek}.`,
+        },
         { status: 400 }
       );
     }
@@ -136,6 +181,16 @@ export async function POST(request: Request) {
     const sourceAssignments = sourceDate
       ? await ScheduleAssignment.find({ locationId, date: sourceDate }).lean()
       : [];
+
+    if (sourceDate && sourceAssignments.length === 0) {
+      return NextResponse.json(
+        {
+          error:
+            "The selected source date has no saved schedule assignments. Choose a populated schedule or create an empty template without a source date.",
+        },
+        { status: 400 }
+      );
+    }
 
     const assignments = (sourceAssignments as unknown as PlainRecord[]).map(
       (assignment) => ({
