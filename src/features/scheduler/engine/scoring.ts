@@ -10,6 +10,7 @@ export type CandidateScoreContext = {
   client: SchedulerClient;
   startTime: string;
   assignments: SchedulerAssignment[];
+  referenceAssignments: SchedulerAssignment[];
   rules: SchedulerRules;
 };
 
@@ -78,11 +79,27 @@ function getClientStaffIds(
   );
 }
 
+function findReferenceAssignment(
+  staffId: string,
+  clientId: string,
+  startTime: string,
+  referenceAssignments: SchedulerAssignment[]
+): SchedulerAssignment | undefined {
+  return referenceAssignments.find(
+    (assignment) =>
+      assignment.staffId === staffId &&
+      assignment.clientId === clientId &&
+      assignment.startTime === startTime &&
+      assignment.assignmentType === "CLIENT_1_TO_1"
+  );
+}
+
 export function scoreCandidate({
   staffMember,
   client,
   startTime,
   assignments,
+  referenceAssignments,
   rules,
 }: CandidateScoreContext): number {
   let score = 0;
@@ -100,6 +117,21 @@ export function scoreCandidate({
     staffMember.teamId === client.teamId
   ) {
     score += rules.sameTeamPriority;
+  }
+
+  const referenceAssignment = findReferenceAssignment(
+    staffMember.id,
+    client.id,
+    startTime,
+    referenceAssignments
+  );
+
+  if (referenceAssignment) {
+    if (referenceAssignment.source === "TEMPLATE") {
+      score += rules.weekdayTemplatePriority;
+    } else {
+      score += rules.scheduleStabilityPriority;
+    }
   }
 
   const previousStartTime = getPreviousSlot(
