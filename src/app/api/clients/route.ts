@@ -11,6 +11,18 @@ import { writeAuditLog } from "@/lib/api/audit";
 import { connectToDatabase } from "@/lib/db";
 import { Client } from "@/models/Client";
 
+type TimePatternRequest = {
+  name: string;
+  days: string[];
+  startTime: string;
+  endTime: string;
+};
+
+type StaffRelationshipRequest = {
+  staffId: string;
+  relationship: "PREFERRED" | "ALLOWED" | "HARD_RESTRICTION";
+};
+
 type ClientRequest = {
   locationId?: string;
   fullName?: string;
@@ -24,16 +36,9 @@ type ClientRequest = {
   insurancePlan?: string;
   assignedBcbaId?: string | null;
   assignedInternIds?: string[];
-  attendancePatterns?: Array<{
-    name: string;
-    days: string[];
-    startTime: string;
-    endTime: string;
-  }>;
-  staffRelationships?: Array<{
-    staffId: string;
-    relationship: "PREFERRED" | "ALLOWED" | "HARD_RESTRICTION";
-  }>;
+  attendancePatterns?: TimePatternRequest[];
+  napPatterns?: TimePatternRequest[];
+  staffRelationships?: StaffRelationshipRequest[];
 };
 
 function serializeClient(client: Record<string, unknown>) {
@@ -162,6 +167,7 @@ export async function POST(request: Request) {
       assignedBcbaId: body.assignedBcbaId || null,
       assignedInternIds: body.assignedInternIds ?? [],
       attendancePatterns: body.attendancePatterns ?? [],
+      napPatterns: body.napPatterns ?? [],
       staffRelationships: body.staffRelationships ?? [],
       active: true,
     });
