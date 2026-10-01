@@ -1,6 +1,8 @@
+import { canAssignStaffToClient } from "./constraints";
 import type {
   SchedulerAssignment,
   SchedulerClient,
+  SchedulerRules,
   SchedulerStaff,
   StaffRole,
 } from "./types";
@@ -21,6 +23,7 @@ type BreakReservationInput = {
   referenceAssignments?: SchedulerAssignment[];
   callOutStaffIds: string[];
   rules: BreakReservationRules;
+  schedulerRules?: SchedulerRules;
 };
 
 function requirementAlreadyCovered(
@@ -36,15 +39,27 @@ function requirementAlreadyCovered(
   );
 }
 
+function getUncoveredClientsAtSlot(
+  clients: SchedulerClient[],
+  startTime: string,
+  assignments: SchedulerAssignment[]
+): SchedulerClient[] {
+  return clients.filter(
+    (client) =>
+      client.requiredSlots.includes(startTime) &&
+      !requirementAlreadyCovered(client.id, startTime, assignments)
+  );
+}
+
 function countUncoveredClientDemand(
   clients: SchedulerClient[],
   startTime: string,
   assignments: SchedulerAssignment[]
 ): number {
-  return clients.filter(
-    (client) =>
-      client.requiredSlots.includes(startTime) &&
-      !requirementAlreadyCovered(client.id, startTime, assignments)
+  return getUncoveredClientsAtSlot(
+    clients,
+    startTime,
+    assignments
   ).length;
 }
 
@@ -151,26 +166,131 @@ function calculateBreakSlotScore(
   );
 }
 
-function slotCanSafelyAbsorbBreak(
+function calculateMaximumEligibleCoverage(
   clients: SchedulerClient[],
   staff: SchedulerStaff[],
   callOutStaffIds: Set<string>,
   startTime: string,
-  assignments: SchedulerAssignment[]
+  assignments: SchedulerAssignment[],
+  schedulerRules: SchedulerRules
+): number {
+  const eligibleStaffByClient = new Map<string, string[]>();
+  const clientById = new Map(
+    clients.map((client) => [client.id, client])
+  );
+
+  for (const client of clients) {
+    const eligibleStaffIds = staff
+      .filter((staffMember) =>
+        canAssignStaffToClient({
+          staffMember,
+          client,
+          startTime,
+          assignments,
+          callOutStaffIds,
+          rules: schedulerRules,
+        }).allowed
+      )
+      .map((staffMember) => staffMember.id);
+
+    eligibleStaffByClient.set(client.id, eligibleStaffIds);
+  }
+
+  const orderedClientIds = [...eligibleStaffByClient.entries()]
+    .sort((left, right) => left[1].length - right[1].length)
+    .map(([clientId]) => clientId);
+  const matchedClientByStaff = new Map<string, string>();
+
+  function tryAssignClient(
+    clientId: string,
+    visitedStaffIds: Set<string>
+  ): boolean {
+    const eligibleStaffIds = eligibleStaffByClient.get(clientId) ?? [];
+
+    for (const staffId of eligibleStaffIds) {
+      if (visitedStaffIds.has(staffId)) {
+        continue;
+      }
+
+      visitedStaffIds.add(staffId);
+      const previousClientId = matchedClientByStaff.get(staffId);
+
+      if (
+        !previousClientId ||
+        (clientById.has(previousClientId) &&
+          tryAssignClient(previousClientId, visitedStaffIds))
+      ) {
+        matchedClientByStaff.set(staffId, clientId);
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  let coveredClientCount = 0;
+
+  for (const clientId of orderedClientIds) {
+    if (tryAssignClient(clientId, new Set<string>())) {
+      coveredClientCount += 1;
+    }
+  }
+
+  return coveredClientCount;
+}
+
+function slotCanSafelyAbsorbBreak(
+  clients: SchedulerClient[],
+  staff: SchedulerStaff[],
+  callOutStaffIds: Set<string>,
+  breakStaffId: string,
+  startTime: string,
+  assignments: SchedulerAssignment[],
+  schedulerRules?: SchedulerRules
 ): boolean {
-  const uncoveredDemand = countUncoveredClientDemand(
+  const uncoveredClients = getUncoveredClientsAtSlot(
     clients,
     startTime,
     assignments
   );
+
+  if (uncoveredClients.length === 0) {
+    return true;
+  }
+
+  const tentativeAssignments: SchedulerAssignment[] = [
+    ...assignments,
+    {
+      id: `break-safety-check-${breakStaffId}-${startTime}`,
+      staffId: breakStaffId,
+      startTime,
+      assignmentType: "BREAK",
+      source: "AUTO",
+      locked: true,
+    },
+  ];
+
+  if (schedulerRules) {
+    const maximumEligibleCoverage = calculateMaximumEligibleCoverage(
+      uncoveredClients,
+      staff,
+      callOutStaffIds,
+      startTime,
+      tentativeAssignments,
+      schedulerRules
+    );
+
+    return maximumEligibleCoverage >= uncoveredClients.length;
+  }
+
   const freeStaff = countFreeStaff(
     staff,
     callOutStaffIds,
     startTime,
-    assignments
+    tentativeAssignments
   );
 
-  return freeStaff > uncoveredDemand;
+  return freeStaff >= uncoveredClients.length;
 }
 
 function shiftTime(
@@ -258,6 +378,11 @@ function findSupervisedFixedEventClient(
  * Reserves one automatic break for each eligible staff member before client
  * matching. Frontline staff are processed before managers and BCBAs so relief
  * roles remain available to cover the client while a technician takes a break.
+ *
+ * When the complete scheduler rules are provided, a candidate break is accepted
+ * only if the remaining eligible staff can still be matched one-to-one with all
+ * uncovered clients in that half-hour block. This prevents a headcount-only
+ * break decision from overlooking hard staff/client or service-setting limits.
  */
 export function reserveStaffBreaks({
   staff,
@@ -266,6 +391,7 @@ export function reserveStaffBreaks({
   referenceAssignments = [],
   callOutStaffIds,
   rules,
+  schedulerRules,
 }: BreakReservationInput): SchedulerAssignment[] {
   if (rules.defaultBreakMinutes <= 0) {
     return [];
@@ -332,8 +458,10 @@ export function reserveStaffBreaks({
           clients,
           staff,
           callOutSet,
+          staffMember.id,
           startTime,
-          currentAssignments
+          currentAssignments,
+          schedulerRules
         )
       )
       .map((startTime) => ({
