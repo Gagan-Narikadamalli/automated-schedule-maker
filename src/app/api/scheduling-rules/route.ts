@@ -30,6 +30,9 @@ type RulesRequest = {
   scheduleStabilityPriority?: number;
   weekdayTemplatePriority?: number;
   weeklyHoursPriority?: number;
+  historicalPairingPriority?: number;
+  historicalSlotPriority?: number;
+  historicalBreakPriority?: number;
   btCoveragePriority?: number;
   internCoveragePriority?: number;
   managerCoveragePriority?: number;
@@ -37,6 +40,7 @@ type RulesRequest = {
   otherCoveragePriority?: number;
   autoUseWeekdayTemplate?: boolean;
   autoUsePreviousWeekdaySchedule?: boolean;
+  autoUseHistoricalPatterns?: boolean;
   supervisionPlanningTargetPercent?: number;
 };
 
@@ -67,6 +71,9 @@ function defaultRules(locationId: string) {
     scheduleStabilityPriority: 140,
     weekdayTemplatePriority: 75,
     weeklyHoursPriority: 12,
+    historicalPairingPriority: 70,
+    historicalSlotPriority: 90,
+    historicalBreakPriority: 80,
     btCoveragePriority: 500,
     internCoveragePriority: 300,
     managerCoveragePriority: 125,
@@ -74,6 +81,7 @@ function defaultRules(locationId: string) {
     otherCoveragePriority: 75,
     autoUseWeekdayTemplate: true,
     autoUsePreviousWeekdaySchedule: true,
+    autoUseHistoricalPatterns: true,
     supervisionPlanningTargetPercent: 5,
   };
 }
@@ -204,6 +212,9 @@ export async function PUT(request: Request) {
       body.scheduleStabilityPriority,
       body.weekdayTemplatePriority,
       body.weeklyHoursPriority,
+      body.historicalPairingPriority,
+      body.historicalSlotPriority,
+      body.historicalBreakPriority,
     ].every(validatePriority);
 
     if (!prioritiesAreValid) {
