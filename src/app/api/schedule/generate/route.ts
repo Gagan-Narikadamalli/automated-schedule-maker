@@ -3,8 +3,14 @@ import { NextResponse } from "next/server";
 import { getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
 import { generateSchedule } from "@/features/scheduler/engine/generateSchedule";
 import { calculateSchedulerReadiness } from "@/features/scheduler/engine/preflight";
-import { reserveStaffBreaks } from "@/features/scheduler/engine/reserveBreaks";
-import type { SchedulerAssignment } from "@/features/scheduler/engine/types";
+import {
+  enrichBreakAssignmentsWithFixedEvents,
+  reserveStaffBreaks,
+} from "@/features/scheduler/engine/reserveBreaks";
+import type {
+  SchedulerAssignment,
+  SchedulerStaff,
+} from "@/features/scheduler/engine/types";
 import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySchedulerInput";
 import { writeAuditLog } from "@/lib/api/audit";
 import { connectToDatabase } from "@/lib/db";
@@ -26,6 +32,30 @@ function shouldKeepExistingAssignment(
   );
 }
 
+function buildCoverageByRole(
+  assignments: SchedulerAssignment[],
+  staff: SchedulerStaff[],
+  slotLengthMinutes: number
+) {
+  const roleByStaffId = new Map(
+    staff.map((staffMember) => [staffMember.id, staffMember.role])
+  );
+  const slotHours = slotLengthMinutes / 60;
+  const coverageByRole: Record<string, number> = {};
+
+  for (const assignment of assignments) {
+    if (assignment.assignmentType !== "CLIENT_1_TO_1") {
+      continue;
+    }
+
+    const role = roleByStaffId.get(assignment.staffId) ?? "OTHER";
+    coverageByRole[role] =
+      (coverageByRole[role] ?? 0) + slotHours;
+  }
+
+  return coverageByRole;
+}
+
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as GenerateRequest;
@@ -34,32 +64,45 @@ export async function POST(request: Request) {
 
     if (!locationId || !date) {
       return NextResponse.json(
-        { error: "locationId and date are required." },
-        { status: 400 }
+        {
+          error: "locationId and date are required.",
+        },
+        {
+          status: 400,
+        }
       );
     }
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return NextResponse.json(
-        { error: "Date must use YYYY-MM-DD format." },
-        { status: 400 }
+        {
+          error: "Date must use YYYY-MM-DD format.",
+        },
+        {
+          status: 400,
+        }
       );
     }
 
-    const dayData = await buildDaySchedulerInput(locationId, date);
+    const dayData = await buildDaySchedulerInput(
+      locationId,
+      date
+    );
     const readiness = calculateSchedulerReadiness(
       dayData.input,
       dayData.extendedRules
     );
 
-    const protectedAssignments = dayData.input.existingAssignments.filter(
-      shouldKeepExistingAssignment
-    );
+    const protectedAssignments =
+      dayData.input.existingAssignments.filter(
+        shouldKeepExistingAssignment
+      );
 
     const reservedBreaks = reserveStaffBreaks({
       staff: dayData.staff,
       clients: dayData.clients,
       existingAssignments: protectedAssignments,
+      referenceAssignments: dayData.input.referenceAssignments,
       callOutStaffIds: dayData.input.callOutStaffIds,
       rules: dayData.extendedRules,
     });
@@ -72,16 +115,27 @@ export async function POST(request: Request) {
       ],
     });
 
+    const enrichedAssignments =
+      enrichBreakAssignmentsWithFixedEvents(
+        result.assignments,
+        dayData.clients,
+        dayData.extendedRules.slotLengthMinutes
+      );
+
     await connectToDatabase();
 
     await ScheduleAssignment.deleteMany({
       locationId,
       date,
-      manuallyOverridden: { $ne: true },
-      source: { $in: ["AUTO", "TEMPLATE", "COPIED"] },
+      manuallyOverridden: {
+        $ne: true,
+      },
+      source: {
+        $in: ["AUTO", "TEMPLATE", "COPIED"],
+      },
     });
 
-    const autoAssignments = result.assignments.filter(
+    const autoAssignments = enrichedAssignments.filter(
       (assignment) => assignment.source === "AUTO"
     );
 
@@ -91,7 +145,9 @@ export async function POST(request: Request) {
           locationId,
           date,
           startTime: assignment.startTime,
-          endTime: getEndTimeForSlot(assignment.startTime),
+          endTime: getEndTimeForSlot(
+            assignment.startTime
+          ),
           staffId: assignment.staffId,
           clientId: assignment.clientId || null,
           assignmentType: assignment.assignmentType,
@@ -103,19 +159,37 @@ export async function POST(request: Request) {
       );
     }
 
+    const completeCoverage =
+      result.metrics.uncoveredClientSlots === 0;
+    const partialBuild = !completeCoverage;
+    const coverageByRole = buildCoverageByRole(
+      enrichedAssignments,
+      dayData.staff,
+      dayData.extendedRules.slotLengthMinutes
+    );
+
     await writeAuditLog({
       locationId,
       userId: "scheduler-system",
       action: "GENERATE",
       entityType: "SCHEDULE_DAY",
       entityId: date,
-      summary: `Generated schedule for ${date}: ${result.metrics.coveredClientSlots}/${result.metrics.requiredClientSlots} client blocks covered.`,
+      summary: partialBuild
+        ? `Built a partial schedule for ${date}: ${result.metrics.coveredClientSlots}/${result.metrics.requiredClientSlots} client blocks covered.`
+        : `Generated a complete schedule for ${date}: ${result.metrics.coveredClientSlots}/${result.metrics.requiredClientSlots} client blocks covered.`,
       after: {
         readiness,
         metrics: result.metrics,
-        uncoveredRequirements: result.uncoveredRequirements,
+        uncoveredRequirements:
+          result.uncoveredRequirements,
         warningCount: result.warnings.length,
         reservedBreakCount: reservedBreaks.length,
+        completeCoverage,
+        partialBuild,
+        coverageByRole,
+        autoTemplateName: dayData.autoTemplateName,
+        previousReferenceDate:
+          dayData.previousReferenceDate,
       },
     });
 
@@ -123,18 +197,35 @@ export async function POST(request: Request) {
       success: true,
       date,
       locationId,
+      completeCoverage,
+      partialBuild,
+      message: partialBuild
+        ? "The automatic scheduler built every assignment it could safely cover. Remaining client blocks are listed for manager completion."
+        : "The automatic scheduler completed all required client coverage.",
       readiness,
       metrics: result.metrics,
       warnings: result.warnings,
-      uncoveredRequirements: result.uncoveredRequirements,
+      uncoveredRequirements:
+        result.uncoveredRequirements,
       reservedBreakCount: reservedBreaks.length,
+      coverageByRole,
+      autoTemplateName: dayData.autoTemplateName,
+      previousReferenceDate:
+        dayData.previousReferenceDate,
     });
   } catch (error) {
-    console.error("Schedule generation failed:", error);
+    console.error(
+      "Schedule generation failed:",
+      error
+    );
 
     return NextResponse.json(
-      { error: "The schedule could not be generated." },
-      { status: 500 }
+      {
+        error: "The schedule could not be generated.",
+      },
+      {
+        status: 500,
+      }
     );
   }
 }
