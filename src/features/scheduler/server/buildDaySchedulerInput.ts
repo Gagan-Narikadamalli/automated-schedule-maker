@@ -1,4 +1,5 @@
 import {
+  getDayKeys,
   getSlotsInsideTimeRange,
   patternMatchesDate,
 } from "@/features/scheduler/engine/dateUtils";
@@ -16,6 +17,7 @@ import { connectToDatabase } from "@/lib/db";
 import { CallOut } from "@/models/CallOut";
 import { Client } from "@/models/Client";
 import { ScheduleAssignment } from "@/models/ScheduleAssignment";
+import { ScheduleTemplate } from "@/models/ScheduleTemplate";
 import { SchedulingRules } from "@/models/SchedulingRules";
 import { SpeechSession } from "@/models/SpeechSession";
 import { Staff } from "@/models/Staff";
@@ -41,6 +43,7 @@ export type DaySchedulerData = {
     startTime: string;
     endTime: string;
   }>;
+  autoTemplateName: string | null;
 };
 
 function isDateInsideActiveRange(
@@ -120,12 +123,15 @@ function getDefaultRules(): ExtendedSchedulerRules {
     continuityPriority: 35,
     rotationPriority: 60,
     workloadBalancePriority: 10,
+    scheduleStabilityPriority: 140,
+    weekdayTemplatePriority: 75,
+    autoUseWeekdayTemplate: true,
     breakWindowStart: "11:00",
     breakWindowEnd: "13:30",
     defaultBreakMinutes: 30,
     breakEligibilityHours: 6,
     scheduleStartTime: "08:00",
-    scheduleEndTime: "18:00",
+    scheduleEndTime: "20:00",
   };
 }
 
@@ -168,6 +174,15 @@ function mapRules(document: DatabaseRecord | null): ExtendedSchedulerRules {
     ),
     workloadBalancePriority: Number(
       document.workloadBalancePriority ?? defaults.workloadBalancePriority
+    ),
+    scheduleStabilityPriority: Number(
+      document.scheduleStabilityPriority ?? defaults.scheduleStabilityPriority
+    ),
+    weekdayTemplatePriority: Number(
+      document.weekdayTemplatePriority ?? defaults.weekdayTemplatePriority
+    ),
+    autoUseWeekdayTemplate: Boolean(
+      document.autoUseWeekdayTemplate ?? defaults.autoUseWeekdayTemplate
     ),
     breakWindowStart: String(
       document.breakWindowStart ?? defaults.breakWindowStart
@@ -318,6 +333,12 @@ function mapClients(
           endTime: String(session.endTime),
         }));
 
+      const napSlots = napRanges.flatMap((range) =>
+        getSlotsInsideTimeRange(range.startTime, range.endTime)
+      );
+      const speechSlots = speechRanges.flatMap((range) =>
+        getSlotsInsideTimeRange(range.startTime, range.endTime)
+      );
       const staffRelationships: Record<string, StaffRelationship> = {};
 
       for (const relationship of client.staffRelationships ?? []) {
@@ -358,6 +379,8 @@ function mapClients(
           ...napRanges,
           ...speechRanges,
         ]),
+        napSlots: [...new Set(napSlots)].sort(),
+        speechSlots: [...new Set(speechSlots)].sort(),
         staffRelationships,
         maxConsecutiveBlocksWithSameStaff:
           configuredMaxConsecutive > 0
@@ -393,11 +416,64 @@ function mapExistingAssignments(
   });
 }
 
+function mapTemplateReferences(
+  template: DatabaseRecord | null,
+  staff: SchedulerStaff[],
+  clients: SchedulerClient[]
+): SchedulerAssignment[] {
+  if (!template) {
+    return [];
+  }
+
+  const staffById = new Map(staff.map((staffMember) => [staffMember.id, staffMember]));
+  const clientById = new Map(clients.map((client) => [client.id, client]));
+  const references: SchedulerAssignment[] = [];
+
+  for (const assignment of template.assignments ?? []) {
+    if (String(assignment.assignmentType) !== "CLIENT_1_TO_1") {
+      continue;
+    }
+
+    const staffId = String(assignment.staffId ?? "");
+    const clientId = assignment.clientId ? String(assignment.clientId) : "";
+    const startTime = String(assignment.startTime ?? "");
+    const staffMember = staffById.get(staffId);
+    const client = clientById.get(clientId);
+
+    if (!staffMember || !client || !startTime) {
+      continue;
+    }
+
+    if (!staffMember.availableSlots.includes(startTime)) {
+      continue;
+    }
+
+    if (!client.requiredSlots.includes(startTime)) {
+      continue;
+    }
+
+    references.push({
+      id: `template-${String(template._id)}-${staffId}-${clientId}-${startTime}`,
+      staffId,
+      clientId,
+      startTime,
+      assignmentType: "CLIENT_1_TO_1",
+      source: "TEMPLATE",
+      locked: false,
+      note: `Reference from weekday template ${String(template.name ?? "")}.`,
+    });
+  }
+
+  return references;
+}
+
 export async function buildDaySchedulerInput(
   locationId: string,
   date: string
 ): Promise<DaySchedulerData> {
   await connectToDatabase();
+
+  const dayOfWeek = getDayKeys(date)[0] ?? "";
 
   const [
     rawStaff,
@@ -406,6 +482,7 @@ export async function buildDaySchedulerInput(
     rawSpeechSessions,
     rawAssignments,
     rawRules,
+    rawTemplate,
   ] = await Promise.all([
     Staff.find({ locationId, active: true })
       .sort({ fullName: 1 })
@@ -417,6 +494,15 @@ export async function buildDaySchedulerInput(
     SpeechSession.find({ locationId, date }).lean(),
     ScheduleAssignment.find({ locationId, date }).lean(),
     SchedulingRules.findOne({ locationId }).lean(),
+    dayOfWeek
+      ? ScheduleTemplate.findOne({
+          locationId,
+          dayOfWeek,
+          active: true,
+        })
+          .sort({ updatedAt: -1 })
+          .lean()
+      : Promise.resolve(null),
   ]);
 
   const staffDocuments = rawStaff as unknown as DatabaseRecord[];
@@ -424,6 +510,7 @@ export async function buildDaySchedulerInput(
   const speechSessions = rawSpeechSessions as unknown as DatabaseRecord[];
   const assignmentDocuments = rawAssignments as unknown as DatabaseRecord[];
   const rulesDocument = rawRules as unknown as DatabaseRecord | null;
+  const templateDocument = rawTemplate as unknown as DatabaseRecord | null;
 
   const partialCallOuts = (
     rawCallOuts as unknown as DatabaseRecord[]
@@ -439,6 +526,9 @@ export async function buildDaySchedulerInput(
     assignmentDocuments
   );
   const extendedRules = mapRules(rulesDocument);
+  const templateReferences = extendedRules.autoUseWeekdayTemplate
+    ? mapTemplateReferences(templateDocument, staff, clients)
+    : [];
 
   const fullDayCallOutStaffIds = partialCallOuts
     .filter((callOut) => {
@@ -453,6 +543,12 @@ export async function buildDaySchedulerInput(
     staff,
     clients,
     existingAssignments,
+    referenceAssignments: [
+      ...existingAssignments.filter(
+        (assignment) => assignment.assignmentType === "CLIENT_1_TO_1"
+      ),
+      ...templateReferences,
+    ],
     callOutStaffIds: fullDayCallOutStaffIds,
     rules: {
       maximumClientsPerTechPerDay:
@@ -468,6 +564,9 @@ export async function buildDaySchedulerInput(
       continuityPriority: extendedRules.continuityPriority,
       rotationPriority: extendedRules.rotationPriority,
       workloadBalancePriority: extendedRules.workloadBalancePriority,
+      scheduleStabilityPriority: extendedRules.scheduleStabilityPriority,
+      weekdayTemplatePriority: extendedRules.weekdayTemplatePriority,
+      autoUseWeekdayTemplate: extendedRules.autoUseWeekdayTemplate,
     },
   };
 
@@ -477,5 +576,9 @@ export async function buildDaySchedulerInput(
     staff,
     clients,
     partialCallOuts,
+    autoTemplateName:
+      extendedRules.autoUseWeekdayTemplate && templateDocument
+        ? String(templateDocument.name ?? "") || null
+        : null,
   };
 }
