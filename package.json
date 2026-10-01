@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "test:scheduler": "tsx scripts/test-scheduler.ts",
+    "test:scheduler": "tsx scripts/test-scheduler.ts && tsx scripts/test-repair.ts",
     "start": "next start"
   },
   "dependencies": {
