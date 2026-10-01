@@ -8,6 +8,7 @@ export type BreakReservationRules = {
   breakWindowStart: string;
   breakWindowEnd: string;
   defaultBreakMinutes: number;
+  breakEligibilityHours: number;
   slotLengthMinutes: number;
 };
 
@@ -19,22 +20,28 @@ type BreakReservationInput = {
   rules: BreakReservationRules;
 };
 
-function countClientDemand(
-  clients: SchedulerClient[],
-  startTime: string
-): number {
-  return clients.filter((client) => client.requiredSlots.includes(startTime)).length;
+function requirementAlreadyCovered(
+  clientId: string,
+  startTime: string,
+  assignments: SchedulerAssignment[]
+): boolean {
+  return assignments.some(
+    (assignment) =>
+      assignment.clientId === clientId &&
+      assignment.startTime === startTime &&
+      assignment.assignmentType === "CLIENT_1_TO_1"
+  );
 }
 
-function countAvailableStaff(
-  staff: SchedulerStaff[],
-  callOutStaffIds: Set<string>,
-  startTime: string
+function countUncoveredClientDemand(
+  clients: SchedulerClient[],
+  startTime: string,
+  assignments: SchedulerAssignment[]
 ): number {
-  return staff.filter(
-    (staffMember) =>
-      !callOutStaffIds.has(staffMember.id) &&
-      staffMember.availableSlots.includes(startTime)
+  return clients.filter(
+    (client) =>
+      client.requiredSlots.includes(startTime) &&
+      !requirementAlreadyCovered(client.id, startTime, assignments)
   ).length;
 }
 
@@ -49,27 +56,74 @@ function staffAlreadyOccupied(
   );
 }
 
+function countFreeStaff(
+  staff: SchedulerStaff[],
+  callOutStaffIds: Set<string>,
+  startTime: string,
+  assignments: SchedulerAssignment[]
+): number {
+  return staff.filter(
+    (staffMember) =>
+      !callOutStaffIds.has(staffMember.id) &&
+      staffMember.availableSlots.includes(startTime) &&
+      !staffAlreadyOccupied(staffMember.id, startTime, assignments)
+  ).length;
+}
+
 function calculateBreakSlotScore(
   clients: SchedulerClient[],
   staff: SchedulerStaff[],
   callOutStaffIds: Set<string>,
-  startTime: string
+  startTime: string,
+  assignments: SchedulerAssignment[]
 ): number {
-  const clientDemand = countClientDemand(clients, startTime);
-  const availableStaff = countAvailableStaff(staff, callOutStaffIds, startTime);
+  const uncoveredDemand = countUncoveredClientDemand(
+    clients,
+    startTime,
+    assignments
+  );
+  const freeStaff = countFreeStaff(
+    staff,
+    callOutStaffIds,
+    startTime,
+    assignments
+  );
+  const spareStaff = freeStaff - uncoveredDemand;
 
-  // Lower values are better. A slot with low client demand and more available
-  // staff is the least disruptive place to reserve a break.
-  return clientDemand * 10 - availableStaff;
+  // Lower is better. Large positive spare capacity is preferred, then lower demand.
+  return uncoveredDemand * 10 - spareStaff * 25;
+}
+
+function slotCanSafelyAbsorbBreak(
+  clients: SchedulerClient[],
+  staff: SchedulerStaff[],
+  callOutStaffIds: Set<string>,
+  startTime: string,
+  assignments: SchedulerAssignment[]
+): boolean {
+  const uncoveredDemand = countUncoveredClientDemand(
+    clients,
+    startTime,
+    assignments
+  );
+  const freeStaff = countFreeStaff(
+    staff,
+    callOutStaffIds,
+    startTime,
+    assignments
+  );
+
+  // The staff member taking the break consumes one free staff slot. Require at
+  // least one more free staff member than uncovered client demand before reserving.
+  return freeStaff > uncoveredDemand;
 }
 
 /**
- * Creates protected break assignments before client matching runs.
- *
- * The existing SOS spreadsheet normally gives staff one 30-minute break between
- * 11:00 AM and 2:00 PM. Reserving the break as a hard block prevents the generator
- * from filling every staff member continuously and then discovering too late that
- * nobody has a legal break window left.
+ * Reserves one automatic break for each eligible staff member before client
+ * matching. A break is only placed when the remaining free staff can still cover
+ * all client demand for that 30-minute slot. This allows multiple simultaneous
+ * breaks when there is genuine spare capacity, but avoids creating an uncovered
+ * client simply to force a break into the calendar.
  */
 export function reserveStaffBreaks({
   staff,
@@ -83,8 +137,6 @@ export function reserveStaffBreaks({
   }
 
   if (rules.defaultBreakMinutes !== rules.slotLengthMinutes) {
-    // The current Excel-compatible grid uses one 30-minute break block. Multi-slot
-    // breaks can be added later without changing the rest of the scheduling engine.
     return [];
   }
 
@@ -100,14 +152,17 @@ export function reserveStaffBreaks({
       continue;
     }
 
-    // Short shifts do not automatically receive a break. Six hours is a practical
-    // default and can become a clinic setting later if management wants it changed.
     const availableHours =
       (staffMember.availableSlots.length * rules.slotLengthMinutes) / 60;
 
-    if (availableHours < 6) {
+    if (availableHours < rules.breakEligibilityHours) {
       continue;
     }
+
+    const currentAssignments = [
+      ...existingAssignments,
+      ...reservedAssignments,
+    ];
 
     const candidateSlots = staffMember.availableSlots
       .filter(
@@ -120,8 +175,17 @@ export function reserveStaffBreaks({
           !staffAlreadyOccupied(
             staffMember.id,
             startTime,
-            [...existingAssignments, ...reservedAssignments]
+            currentAssignments
           )
+      )
+      .filter((startTime) =>
+        slotCanSafelyAbsorbBreak(
+          clients,
+          staff,
+          callOutSet,
+          startTime,
+          currentAssignments
+        )
       )
       .map((startTime) => ({
         startTime,
@@ -129,7 +193,8 @@ export function reserveStaffBreaks({
           clients,
           staff,
           callOutSet,
-          startTime
+          startTime,
+          currentAssignments
         ),
       }))
       .sort((left, right) => {
@@ -153,7 +218,7 @@ export function reserveStaffBreaks({
       assignmentType: "BREAK",
       source: "AUTO",
       locked: true,
-      note: "Automatically reserved staff break.",
+      note: "Automatically reserved capacity-safe staff break.",
     });
   }
 
