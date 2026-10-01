@@ -1,4 +1,6 @@
+import { canAssignStaffToClient } from "./constraints";
 import type {
+  SchedulerAssignment,
   SchedulerClient,
   SchedulerInput,
   SchedulerStaff,
@@ -15,6 +17,7 @@ export type SlotCapacity = {
   startTime: string;
   clientDemand: number;
   staffAvailable: number;
+  assignableClientCount: number;
   difference: number;
 };
 
@@ -81,6 +84,126 @@ function collectTimeSlots(
   return [...slots].sort();
 }
 
+function shouldProtectAssignment(
+  assignment: SchedulerAssignment
+): boolean {
+  return (
+    assignment.locked ||
+    assignment.source === "MANUAL" ||
+    assignment.assignmentType === "SPEECH" ||
+    assignment.assignmentType === "UNAVAILABLE"
+  );
+}
+
+function clientAlreadyCovered(
+  clientId: string,
+  startTime: string,
+  assignments: SchedulerAssignment[]
+): boolean {
+  return assignments.some(
+    (assignment) =>
+      assignment.clientId === clientId &&
+      assignment.startTime === startTime &&
+      assignment.assignmentType === "CLIENT_1_TO_1"
+  );
+}
+
+function staffAlreadyOccupied(
+  staffId: string,
+  startTime: string,
+  assignments: SchedulerAssignment[]
+): boolean {
+  return assignments.some(
+    (assignment) =>
+      assignment.staffId === staffId &&
+      assignment.startTime === startTime
+  );
+}
+
+function calculateMaximumEligibleCoverage(
+  clients: SchedulerClient[],
+  staff: SchedulerStaff[],
+  startTime: string,
+  protectedAssignments: SchedulerAssignment[],
+  callOutStaffIds: Set<string>,
+  input: SchedulerInput
+): number {
+  const unmatchedClients = clients.filter(
+    (client) =>
+      !clientAlreadyCovered(
+        client.id,
+        startTime,
+        protectedAssignments
+      )
+  );
+  const protectedCoverageCount =
+    clients.length - unmatchedClients.length;
+
+  if (unmatchedClients.length === 0) {
+    return protectedCoverageCount;
+  }
+
+  const eligibleStaffByClient = new Map<string, string[]>();
+
+  for (const client of unmatchedClients) {
+    const eligibleStaffIds = staff
+      .filter((staffMember) =>
+        canAssignStaffToClient({
+          staffMember,
+          client,
+          startTime,
+          assignments: protectedAssignments,
+          callOutStaffIds,
+          rules: input.rules,
+        }).allowed
+      )
+      .map((staffMember) => staffMember.id);
+
+    eligibleStaffByClient.set(client.id, eligibleStaffIds);
+  }
+
+  const orderedClientIds = [...eligibleStaffByClient.entries()]
+    .sort((left, right) => left[1].length - right[1].length)
+    .map(([clientId]) => clientId);
+  const matchedClientByStaff = new Map<string, string>();
+
+  function tryMatch(
+    clientId: string,
+    visitedStaffIds: Set<string>
+  ): boolean {
+    const eligibleStaffIds = eligibleStaffByClient.get(clientId) ?? [];
+
+    for (const staffId of eligibleStaffIds) {
+      if (visitedStaffIds.has(staffId)) {
+        continue;
+      }
+
+      visitedStaffIds.add(staffId);
+      const previousClientId = matchedClientByStaff.get(staffId);
+
+      if (
+        !previousClientId ||
+        tryMatch(previousClientId, visitedStaffIds)
+      ) {
+        matchedClientByStaff.set(staffId, clientId);
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  let matchedCount = 0;
+
+  for (const clientId of orderedClientIds) {
+    if (tryMatch(clientId, new Set<string>())) {
+      matchedCount += 1;
+    }
+  }
+
+  return protectedCoverageCount + matchedCount;
+}
+
 function calculateBuildForecast(
   clientCount: number,
   shortageSlots: SlotCapacity[],
@@ -109,6 +232,9 @@ export function calculateSchedulerReadiness(
   const workingStaff = activeWorkingStaff(input.staff, callOutStaffIds);
   const attendingClients = activeClients(input.clients);
   const timeSlots = collectTimeSlots(workingStaff, attendingClients);
+  const protectedAssignments = input.existingAssignments.filter(
+    shouldProtectAssignment
+  );
 
   const staffAvailableSlots = workingStaff.reduce(
     (total, staffMember) => total + staffMember.availableSlots.length,
@@ -142,18 +268,40 @@ export function calculateSchedulerReadiness(
   );
 
   const slotCapacity = timeSlots.map((startTime) => {
-    const clientDemand = attendingClients.filter((client) =>
+    const clientsAtSlot = attendingClients.filter((client) =>
       client.requiredSlots.includes(startTime)
+    );
+    const staffAvailable = workingStaff.filter(
+      (staffMember) =>
+        staffMember.availableSlots.includes(startTime) &&
+        !staffAlreadyOccupied(
+          staffMember.id,
+          startTime,
+          protectedAssignments
+        )
     ).length;
-    const staffAvailable = workingStaff.filter((staffMember) =>
-      staffMember.availableSlots.includes(startTime)
-    ).length;
+    const protectedStaffAtSlot = new Set(
+      protectedAssignments
+        .filter(
+          (assignment) => assignment.startTime === startTime
+        )
+        .map((assignment) => assignment.staffId)
+    ).size;
+    const assignableClientCount = calculateMaximumEligibleCoverage(
+      clientsAtSlot,
+      workingStaff,
+      startTime,
+      protectedAssignments,
+      callOutStaffIds,
+      input
+    );
 
     return {
       startTime,
-      clientDemand,
-      staffAvailable,
-      difference: staffAvailable - clientDemand,
+      clientDemand: clientsAtSlot.length,
+      staffAvailable: staffAvailable + protectedStaffAtSlot,
+      assignableClientCount,
+      difference: assignableClientCount - clientsAtSlot.length,
     };
   });
 
@@ -193,13 +341,13 @@ export function calculateSchedulerReadiness(
 
   if (shortageSlots.length > 0) {
     warnings.push(
-      `${shortageSlots.length} time slot(s) have more clients requiring 1:1 coverage than available staff.`
+      `${shortageSlots.length} time slot(s) cannot cover every required client after staff availability, existing protected assignments, hard staff/client restrictions, service setting, rotation limits, and hour limits are applied.`
     );
   }
 
   if (maximumConcurrentStaffShortage > 0) {
     warnings.push(
-      `The largest simultaneous staffing gap is ${maximumConcurrentStaffShortage} staff member${
+      `The largest simultaneous eligible-coverage gap is ${maximumConcurrentStaffShortage} staff member${
         maximumConcurrentStaffShortage === 1 ? "" : "s"
       }.`
     );
