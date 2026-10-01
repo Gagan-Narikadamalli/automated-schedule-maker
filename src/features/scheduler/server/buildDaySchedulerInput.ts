@@ -54,6 +54,7 @@ export type DaySchedulerData = {
   }>;
   autoTemplateName: string | null;
   previousReferenceDate: string | null;
+  historicalReferenceDates: string[];
 };
 
 function formatLocalDate(date: Date): string {
@@ -410,7 +411,9 @@ function mapStaff(
         normalAvailableSlots,
         unavailableRanges
       );
-      const employeeType = String(staffMember.employeeType ?? "FULL_TIME");
+      const employeeType = String(
+        staffMember.employeeType ?? "FULL_TIME"
+      );
       const fallbackMinimumWeeklyHours =
         employeeType === "PART_TIME"
           ? rules.partTimeMinimumWeeklyHours
@@ -436,11 +439,16 @@ function mapStaff(
         teamId: staffMember.teamId
           ? String(staffMember.teamId)
           : undefined,
-        serviceSetting: normalizeServiceSetting(staffMember.serviceSetting),
+        serviceSetting: normalizeServiceSetting(
+          staffMember.serviceSetting
+        ),
         availableSlots,
         maximumDailyHours:
           (availableSlots.length * rules.slotLengthMinutes) / 60,
-        minimumWeeklyHours: Math.max(configuredMinimumWeeklyHours, 0),
+        minimumWeeklyHours: Math.max(
+          configuredMinimumWeeklyHours,
+          0
+        ),
         targetWeeklyHours:
           configuredTargetWeeklyHours > 0
             ? configuredTargetWeeklyHours
@@ -539,8 +547,12 @@ function mapClients(
       return {
         id: clientId,
         displayCode: String(client.displayCode ?? ""),
-        teamId: client.teamId ? String(client.teamId) : undefined,
-        serviceSetting: normalizeServiceSetting(client.serviceSetting),
+        teamId: client.teamId
+          ? String(client.teamId)
+          : undefined,
+        serviceSetting: normalizeServiceSetting(
+          client.serviceSetting
+        ),
         supportLevel,
         requiredSlots: removeBlockedSlots(attendanceSlots, [
           ...napRanges,
@@ -578,7 +590,9 @@ function mapExistingAssignments(
       locked:
         Boolean(assignment.locked) ||
         Boolean(assignment.manuallyOverridden),
-      note: assignment.note ? String(assignment.note) : undefined,
+      note: assignment.note
+        ? String(assignment.note)
+        : undefined,
     };
   });
 }
@@ -618,7 +632,9 @@ function mapReferenceAssignments(
     }
 
     if (assignmentType === "CLIENT_1_TO_1") {
-      const client = clientId ? clientById.get(clientId) : undefined;
+      const client = clientId
+        ? clientById.get(clientId)
+        : undefined;
 
       if (!client || !client.requiredSlots.includes(startTime)) {
         return;
@@ -654,7 +670,10 @@ export async function buildDaySchedulerInput(
 
   const dayOfWeek = getDayKeys(date)[0] ?? "";
   const weekStart = getWeekStart(date);
-  const previousSameWeekdayDates = getPreviousSameWeekdayDates(date, 8);
+  const previousSameWeekdayDates = getPreviousSameWeekdayDates(
+    date,
+    8
+  );
 
   const [
     rawStaff,
@@ -688,7 +707,9 @@ export async function buildDaySchedulerInput(
       : Promise.resolve(null),
     ScheduleAssignment.find({
       locationId,
-      date: { $in: previousSameWeekdayDates },
+      date: {
+        $in: previousSameWeekdayDates,
+      },
     })
       .sort({ date: -1, startTime: 1 })
       .lean(),
@@ -733,7 +754,11 @@ export async function buildDaySchedulerInput(
     weeklyClientHoursByStaff,
     extendedRules
   );
-  const clients = mapClients(clientDocuments, speechSessions, date);
+  const clients = mapClients(
+    clientDocuments,
+    speechSessions,
+    date
+  );
   const existingAssignments = mapExistingAssignments(
     assignmentDocuments
   );
@@ -751,26 +776,31 @@ export async function buildDaySchedulerInput(
         )
       : [];
 
+  const historicalReferenceDates = [
+    ...new Set(
+      previousWeekdayAssignments
+        .map((assignment) => String(assignment.date ?? ""))
+        .filter(Boolean)
+    ),
+  ];
   const latestPreviousReferenceDate =
     extendedRules.autoUsePreviousWeekdaySchedule &&
-    previousWeekdayAssignments.length > 0
-      ? String(previousWeekdayAssignments[0].date)
+    historicalReferenceDates.length > 0
+      ? historicalReferenceDates[0]
       : null;
-  const latestPreviousAssignments = latestPreviousReferenceDate
-    ? previousWeekdayAssignments.filter(
-        (assignment) =>
-          String(assignment.date) === latestPreviousReferenceDate
-      )
-    : [];
-  const previousScheduleReferences = latestPreviousReferenceDate
-    ? mapReferenceAssignments(
-        latestPreviousAssignments,
-        "COPIED",
-        staff,
-        clients,
-        `Reference from previous ${dayOfWeek.toLowerCase()} schedule ${latestPreviousReferenceDate}.`
-      )
-    : [];
+  const previousScheduleReferences =
+    extendedRules.autoUsePreviousWeekdaySchedule
+      ? mapReferenceAssignments(
+          previousWeekdayAssignments,
+          "COPIED",
+          staff,
+          clients,
+          `Historical reference from the previous ${Math.min(
+            historicalReferenceDates.length,
+            8
+          )} ${dayOfWeek.toLowerCase()} schedule(s).`
+        )
+      : [];
 
   const fullDayCallOutStaffIds = partialCallOuts
     .filter((callOut) => {
@@ -802,24 +832,40 @@ export async function buildDaySchedulerInput(
         extendedRules.maximumClientsPerTechPerDay,
       maximumTechsPerClientPerDay:
         extendedRules.maximumTechsPerClientPerDay,
-      preferSameTeam: extendedRules.preferSameTeam,
+      preferSameTeam:
+        extendedRules.preferSameTeam,
       preferStaffContinuity:
         extendedRules.preferStaffContinuity,
-      slotLengthMinutes: extendedRules.slotLengthMinutes,
-      preferredStaffPriority: extendedRules.preferredStaffPriority,
-      sameTeamPriority: extendedRules.sameTeamPriority,
-      continuityPriority: extendedRules.continuityPriority,
-      rotationPriority: extendedRules.rotationPriority,
-      workloadBalancePriority: extendedRules.workloadBalancePriority,
-      scheduleStabilityPriority: extendedRules.scheduleStabilityPriority,
-      weekdayTemplatePriority: extendedRules.weekdayTemplatePriority,
-      weeklyHoursPriority: extendedRules.weeklyHoursPriority,
-      btCoveragePriority: extendedRules.btCoveragePriority,
-      internCoveragePriority: extendedRules.internCoveragePriority,
-      managerCoveragePriority: extendedRules.managerCoveragePriority,
-      bcbaCoveragePriority: extendedRules.bcbaCoveragePriority,
-      otherCoveragePriority: extendedRules.otherCoveragePriority,
-      autoUseWeekdayTemplate: extendedRules.autoUseWeekdayTemplate,
+      slotLengthMinutes:
+        extendedRules.slotLengthMinutes,
+      preferredStaffPriority:
+        extendedRules.preferredStaffPriority,
+      sameTeamPriority:
+        extendedRules.sameTeamPriority,
+      continuityPriority:
+        extendedRules.continuityPriority,
+      rotationPriority:
+        extendedRules.rotationPriority,
+      workloadBalancePriority:
+        extendedRules.workloadBalancePriority,
+      scheduleStabilityPriority:
+        extendedRules.scheduleStabilityPriority,
+      weekdayTemplatePriority:
+        extendedRules.weekdayTemplatePriority,
+      weeklyHoursPriority:
+        extendedRules.weeklyHoursPriority,
+      btCoveragePriority:
+        extendedRules.btCoveragePriority,
+      internCoveragePriority:
+        extendedRules.internCoveragePriority,
+      managerCoveragePriority:
+        extendedRules.managerCoveragePriority,
+      bcbaCoveragePriority:
+        extendedRules.bcbaCoveragePriority,
+      otherCoveragePriority:
+        extendedRules.otherCoveragePriority,
+      autoUseWeekdayTemplate:
+        extendedRules.autoUseWeekdayTemplate,
       autoUsePreviousWeekdaySchedule:
         extendedRules.autoUsePreviousWeekdaySchedule,
     },
@@ -836,5 +882,9 @@ export async function buildDaySchedulerInput(
         ? String(templateDocument.name ?? "") || null
         : null,
     previousReferenceDate: latestPreviousReferenceDate,
+    historicalReferenceDates:
+      extendedRules.autoUsePreviousWeekdaySchedule
+        ? historicalReferenceDates
+        : [],
   };
 }
