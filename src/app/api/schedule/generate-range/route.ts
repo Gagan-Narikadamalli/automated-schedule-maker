@@ -10,6 +10,7 @@ import type { SchedulerAssignment } from "@/features/scheduler/engine/types";
 import { applyHistoricalTraining } from "@/features/scheduler/server/applyHistoricalTraining";
 import { applyLivingstonWorkbookTrial } from "@/features/scheduler/server/applyLivingstonWorkbookTrial";
 import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySchedulerInput";
+import { syncAutoUnplacedGaps } from "@/features/scheduler/server/syncAutoUnplacedGaps";
 import {
   forbiddenResponse,
   requireApiSession,
@@ -244,6 +245,12 @@ export async function POST(request: Request) {
         );
       }
 
+      const managerGapCount = await syncAutoUnplacedGaps(
+        locationId,
+        date,
+        result.uncoveredRequirements
+      );
+
       const completeCoverage =
         result.metrics.uncoveredClientSlots === 0;
 
@@ -256,6 +263,7 @@ export async function POST(request: Request) {
         warningCount: result.warnings.length,
         uncoveredCount:
           result.uncoveredRequirements.length,
+        managerGapCount,
         reservedBreakCount: reservedBreaks.length,
         autoTemplateName: dayData.autoTemplateName,
         previousReferenceDate:
@@ -276,7 +284,7 @@ export async function POST(request: Request) {
       action: "GENERATE_RANGE",
       entityType: "SCHEDULE_RANGE",
       entityId: `${startDate}:${endDate}`,
-      summary: `Generated schedule range ${startDate} through ${endDate}. Partial days were retained for manager completion instead of being discarded.`,
+      summary: `Generated schedule range ${startDate} through ${endDate}. Partial days were retained and uncovered blocks were added to the manager tray.`,
       after: {
         results,
       },
