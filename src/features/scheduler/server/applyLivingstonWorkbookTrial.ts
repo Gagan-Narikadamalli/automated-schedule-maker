@@ -1,4 +1,6 @@
+import { mergeHistoricalPatternScores } from "@/features/scheduler/engine/historicalPatterns";
 import type {
+  HistoricalPatternScores,
   SchedulerAssignment,
   SchedulerInput,
 } from "@/features/scheduler/engine/types";
@@ -68,6 +70,81 @@ function referenceIsUsable(
   }
 
   return client.requiredSlots.includes(reference.startTime);
+}
+
+function increment(
+  target: Record<string, number>,
+  key: string
+) {
+  target[key] = (target[key] ?? 0) + 1;
+}
+
+function normalizeByLargestCount(
+  counts: Record<string, number>
+): Record<string, number> {
+  const largestCount = Math.max(
+    0,
+    ...Object.values(counts)
+  );
+
+  if (largestCount <= 0) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(counts).map(([key, value]) => [
+      key,
+      Math.min(value / largestCount, 1),
+    ])
+  );
+}
+
+function buildWorkbookPatternScores(
+  references: SchedulerAssignment[]
+): HistoricalPatternScores {
+  const pairingCounts: Record<string, number> = {};
+  const exactSlotCounts: Record<string, number> = {};
+  const breakSlotCounts: Record<string, number> = {};
+
+  for (const reference of references) {
+    if (
+      reference.assignmentType === "CLIENT_1_TO_1" &&
+      reference.clientId
+    ) {
+      if (reference.startTime === "00:00") {
+        increment(
+          pairingCounts,
+          `${reference.staffId}|${reference.clientId}`
+        );
+      } else {
+        increment(
+          exactSlotCounts,
+          `${reference.staffId}|${reference.clientId}|${reference.startTime}`
+        );
+      }
+
+      continue;
+    }
+
+    if (
+      reference.assignmentType === "BREAK" ||
+      reference.assignmentType === "BREAK_NAP" ||
+      reference.assignmentType === "BREAK_SPEECH"
+    ) {
+      increment(
+        breakSlotCounts,
+        `${reference.staffId}|${reference.startTime}`
+      );
+    }
+  }
+
+  return {
+    sampleCount: references.length,
+    scheduleDayCount: 5,
+    pairingScores: normalizeByLargestCount(pairingCounts),
+    exactSlotScores: normalizeByLargestCount(exactSlotCounts),
+    breakSlotScores: normalizeByLargestCount(breakSlotCounts),
+  };
 }
 
 export async function applyLivingstonWorkbookTrial(
@@ -157,15 +234,31 @@ export async function applyLivingstonWorkbookTrial(
     };
   }
 
+  const workbookPatterns = buildWorkbookPatternScores(
+    trialReferences
+  );
+  const breakReferences = trialReferences.filter(
+    (reference) =>
+      reference.assignmentType === "BREAK" ||
+      reference.assignmentType === "BREAK_NAP" ||
+      reference.assignmentType === "BREAK_SPEECH"
+  );
   const summary = getLivingstonWorkbookTrialSummary();
 
   return {
     input: {
       ...input,
+      // Break references are retained because break planning ranks only safe
+      // break slots. Client pairing/slot observations are represented through
+      // HistoricalPatternScores so the Clinic Settings history priorities apply.
       referenceAssignments: [
         ...input.referenceAssignments,
-        ...trialReferences,
+        ...breakReferences,
       ],
+      historicalPatterns: mergeHistoricalPatternScores(
+        input.historicalPatterns,
+        workbookPatterns
+      ),
       rules: {
         ...input.rules,
         autoUseHistoricalPatterns: true,
