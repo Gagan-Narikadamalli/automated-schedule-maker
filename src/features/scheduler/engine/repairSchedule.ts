@@ -1,9 +1,23 @@
 import { generateSchedule } from "./generateSchedule";
-import type { SchedulerAssignment, SchedulerInput, SchedulerResult } from "./types";
+import type {
+  SchedulerAssignment,
+  SchedulerInput,
+  SchedulerResult,
+} from "./types";
+
+export type RepairAffectedSlot = {
+  staffId: string;
+  startTime: string;
+};
+
+function slotKey(staffId: string, startTime: string): string {
+  return `${staffId}|${startTime}`;
+}
 
 function shouldKeepAssignmentDuringRepair(
   assignment: SchedulerAssignment,
-  affectedStaffIds: Set<string>
+  affectedStaffIds: Set<string>,
+  affectedSlotKeys: Set<string> | null
 ): boolean {
   if (assignment.locked || assignment.source === "MANUAL") {
     return true;
@@ -16,26 +30,54 @@ function shouldKeepAssignmentDuringRepair(
     return true;
   }
 
+  if (affectedSlotKeys) {
+    return !affectedSlotKeys.has(
+      slotKey(assignment.staffId, assignment.startTime)
+    );
+  }
+
   return !affectedStaffIds.has(assignment.staffId);
 }
 
 /**
- * Repairs only the part of a schedule affected by a call-out or another staff-level
- * disruption. Existing assignments for unaffected staff are converted to protected
- * assignments so the generator does not reshuffle a schedule that was already good.
+ * Repairs only the part of a schedule affected by a staff disruption.
+ *
+ * When affectedSlots is supplied, even as an empty array, the repair is
+ * slot-scoped: only assignments inside those staff/time cells may be replaced.
+ * Every unaffected assignment is temporarily protected while the generator fills
+ * the resulting client gaps. This prevents a call-out repair from reshuffling a
+ * schedule that was already working.
+ *
+ * The affectedStaffIds-only behavior is retained for older callers that need a
+ * whole-staff repair.
  */
 export function repairSchedule(
   input: SchedulerInput,
-  affectedStaffIds: string[]
+  affectedStaffIds: string[],
+  affectedSlots?: RepairAffectedSlot[]
 ): SchedulerResult {
   const affectedStaffIdSet = new Set(affectedStaffIds);
+  const affectedSlotKeys = affectedSlots
+    ? new Set(
+        affectedSlots.map((slot) =>
+          slotKey(slot.staffId, slot.startTime)
+        )
+      )
+    : null;
 
   const assignmentsToPreserve = input.existingAssignments
     .filter((assignment) =>
-      shouldKeepAssignmentDuringRepair(assignment, affectedStaffIdSet)
+      shouldKeepAssignmentDuringRepair(
+        assignment,
+        affectedStaffIdSet,
+        affectedSlotKeys
+      )
     )
     .map((assignment) => ({
       ...assignment,
+      // This lock exists only inside this repair calculation. The route keeps
+      // the original database records untouched, so unaffected AUTO cells do not
+      // become permanently locked after a repair.
       locked: true,
     }));
 
