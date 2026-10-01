@@ -3,7 +3,6 @@ import type { ReactNode } from "react";
 
 import "./globals.css";
 import "./management.css";
-import "./auth.css";
 import "./navigation.css";
 import "./scheduler-enhancements.css";
 import "./responsive-management.css";

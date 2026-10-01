@@ -26,7 +26,3 @@ jobs:
         run: npm run build
         env:
           MONGODB_URI: mongodb://127.0.0.1:27017/sos_scheduler_build
-          AUTH_SECRET: build-only-auth-secret-not-used-at-runtime
-          SETUP_KEY: build-only-setup-key-not-used-at-runtime
-          GMAIL_USER: build@example.com
-          GMAIL_APP_PASSWORD: build-only-password

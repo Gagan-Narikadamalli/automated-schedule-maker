@@ -9,10 +9,9 @@ const AuditLogSchema = new Schema(
       index: true,
     },
     userId: {
-      // Keep the actor identifier as text so audit logging also works during
-      // temporary test-login mode. Production MongoDB user ObjectIds are stored
-      // as their string representation, while the temporary admin can use a
-      // descriptive identifier without causing ObjectId cast errors.
+      // Store a descriptive actor identifier as text. While the scheduler runs
+      // without individual user accounts, automated and manual changes use the
+      // shared scheduler-system actor so the activity history remains useful.
       type: String,
       required: true,
       index: true,
