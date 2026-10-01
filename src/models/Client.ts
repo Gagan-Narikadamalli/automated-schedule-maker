@@ -26,6 +26,33 @@ const AttendancePatternSchema = new Schema(
   }
 );
 
+const NapPatternSchema = new Schema(
+  {
+    name: {
+      type: String,
+      required: true,
+      trim: true,
+      default: "Nap",
+    },
+    days: {
+      type: [String],
+      required: true,
+      default: [],
+    },
+    startTime: {
+      type: String,
+      required: true,
+    },
+    endTime: {
+      type: String,
+      required: true,
+    },
+  },
+  {
+    _id: true,
+  }
+);
+
 const StaffRelationshipSchema = new Schema(
   {
     staffId: {
@@ -105,6 +132,10 @@ const ClientSchema = new Schema(
     },
     attendancePatterns: {
       type: [AttendancePatternSchema],
+      default: [],
+    },
+    napPatterns: {
+      type: [NapPatternSchema],
       default: [],
     },
     staffRelationships: {
