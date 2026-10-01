@@ -11,6 +11,18 @@ import { writeAuditLog } from "@/lib/api/audit";
 import { connectToDatabase } from "@/lib/db";
 import { Client } from "@/models/Client";
 
+type TimePatternRequest = {
+  name: string;
+  days: string[];
+  startTime: string;
+  endTime: string;
+};
+
+type StaffRelationshipRequest = {
+  staffId: string;
+  relationship: "PREFERRED" | "ALLOWED" | "HARD_RESTRICTION";
+};
+
 type ClientUpdateRequest = {
   fullName?: string;
   displayCode?: string;
@@ -23,16 +35,9 @@ type ClientUpdateRequest = {
   insurancePlan?: string;
   assignedBcbaId?: string | null;
   assignedInternIds?: string[];
-  attendancePatterns?: Array<{
-    name: string;
-    days: string[];
-    startTime: string;
-    endTime: string;
-  }>;
-  staffRelationships?: Array<{
-    staffId: string;
-    relationship: "PREFERRED" | "ALLOWED" | "HARD_RESTRICTION";
-  }>;
+  attendancePatterns?: TimePatternRequest[];
+  napPatterns?: TimePatternRequest[];
+  staffRelationships?: StaffRelationshipRequest[];
   active?: boolean;
 };
 
@@ -141,6 +146,10 @@ export async function PATCH(request: Request, context: RouteContext) {
 
     if (body.attendancePatterns !== undefined) {
       client.attendancePatterns = body.attendancePatterns;
+    }
+
+    if (body.napPatterns !== undefined) {
+      client.napPatterns = body.napPatterns;
     }
 
     if (body.staffRelationships !== undefined) {
