@@ -13,7 +13,10 @@ export type CandidateScoreContext = {
   rules: SchedulerRules;
 };
 
-function getPreviousHalfHour(startTime: string): string | null {
+function getPreviousSlot(
+  startTime: string,
+  slotLengthMinutes: number
+): string | null {
   const [hoursText, minutesText] = startTime.split(":");
   const hours = Number(hoursText);
   const minutes = Number(minutesText);
@@ -22,7 +25,7 @@ function getPreviousHalfHour(startTime: string): string | null {
     return null;
   }
 
-  const totalMinutes = hours * 60 + minutes - 30;
+  const totalMinutes = hours * 60 + minutes - slotLengthMinutes;
 
   if (totalMinutes < 0) {
     return null;
@@ -87,7 +90,7 @@ export function scoreCandidate({
   const relationship = client.staffRelationships[staffMember.id] ?? "ALLOWED";
 
   if (relationship === "PREFERRED") {
-    score += 100;
+    score += rules.preferredStaffPriority;
   }
 
   if (
@@ -96,10 +99,13 @@ export function scoreCandidate({
     client.teamId &&
     staffMember.teamId === client.teamId
   ) {
-    score += 40;
+    score += rules.sameTeamPriority;
   }
 
-  const previousStartTime = getPreviousHalfHour(startTime);
+  const previousStartTime = getPreviousSlot(
+    startTime,
+    rules.slotLengthMinutes
+  );
   const isRotationClient =
     client.supportLevel === "ROTATION" ||
     client.supportLevel === "HIGH_SUPPORT";
@@ -114,7 +120,7 @@ export function scoreCandidate({
     );
 
     if (previousAssignment) {
-      score += 35;
+      score += rules.continuityPriority;
     }
   }
 
@@ -125,7 +131,10 @@ export function scoreCandidate({
   );
 
   if (!isRotationClient && priorClientAssignments > 0) {
-    score += Math.min(priorClientAssignments * 4, 20);
+    score += Math.min(
+      priorClientAssignments * Math.max(rules.continuityPriority / 8, 1),
+      rules.continuityPriority
+    );
   }
 
   if (isRotationClient) {
@@ -140,16 +149,22 @@ export function scoreCandidate({
       clientStaffIds.size < desiredDifferentStaff &&
       !clientStaffIds.has(staffMember.id)
     ) {
-      score += client.supportLevel === "HIGH_SUPPORT" ? 80 : 55;
+      const highSupportMultiplier =
+        client.supportLevel === "HIGH_SUPPORT" ? 1.25 : 1;
+      score += rules.rotationPriority * highSupportMultiplier;
     }
 
     if (clientStaffIds.has(staffMember.id)) {
-      score -= Math.min(priorClientAssignments * 8, 40);
+      score -= Math.min(
+        priorClientAssignments * Math.max(rules.rotationPriority / 8, 1),
+        rules.rotationPriority
+      );
     }
   }
 
   const staffAssignedSlots = countStaffClientSlots(staffMember.id, assignments);
-  score -= staffAssignedSlots;
+  score -=
+    staffAssignedSlots * Math.max(rules.workloadBalancePriority / 10, 0);
 
   return score;
 }
