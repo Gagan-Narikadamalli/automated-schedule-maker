@@ -27,6 +27,16 @@ type RulesRequest = {
   continuityPriority?: number;
   rotationPriority?: number;
   workloadBalancePriority?: number;
+  scheduleStabilityPriority?: number;
+  weekdayTemplatePriority?: number;
+  weeklyHoursPriority?: number;
+  btCoveragePriority?: number;
+  internCoveragePriority?: number;
+  managerCoveragePriority?: number;
+  bcbaCoveragePriority?: number;
+  otherCoveragePriority?: number;
+  autoUseWeekdayTemplate?: boolean;
+  autoUsePreviousWeekdaySchedule?: boolean;
   supervisionPlanningTargetPercent?: number;
 };
 
@@ -54,6 +64,16 @@ function defaultRules(locationId: string) {
     continuityPriority: 35,
     rotationPriority: 60,
     workloadBalancePriority: 10,
+    scheduleStabilityPriority: 140,
+    weekdayTemplatePriority: 75,
+    weeklyHoursPriority: 12,
+    btCoveragePriority: 500,
+    internCoveragePriority: 300,
+    managerCoveragePriority: 125,
+    bcbaCoveragePriority: 25,
+    otherCoveragePriority: 75,
+    autoUseWeekdayTemplate: true,
+    autoUsePreviousWeekdaySchedule: true,
     supervisionPlanningTargetPercent: 5,
   };
 }
@@ -69,6 +89,10 @@ function serializeRules(rules: Record<string, unknown>) {
 
 function validatePriority(value: number | undefined): boolean {
   return value === undefined || (value >= 0 && value <= 200);
+}
+
+function validateRolePriority(value: number | undefined): boolean {
+  return value === undefined || (value >= 0 && value <= 1000);
 }
 
 export async function GET(request: Request) {
@@ -177,11 +201,29 @@ export async function PUT(request: Request) {
       body.continuityPriority,
       body.rotationPriority,
       body.workloadBalancePriority,
+      body.scheduleStabilityPriority,
+      body.weekdayTemplatePriority,
+      body.weeklyHoursPriority,
     ].every(validatePriority);
 
     if (!prioritiesAreValid) {
       return NextResponse.json(
         { error: "Scheduler priority values must be between 0 and 200." },
+        { status: 400 }
+      );
+    }
+
+    const rolePrioritiesAreValid = [
+      body.btCoveragePriority,
+      body.internCoveragePriority,
+      body.managerCoveragePriority,
+      body.bcbaCoveragePriority,
+      body.otherCoveragePriority,
+    ].every(validateRolePriority);
+
+    if (!rolePrioritiesAreValid) {
+      return NextResponse.json(
+        { error: "Role coverage priority values must be between 0 and 1000." },
         { status: 400 }
       );
     }
