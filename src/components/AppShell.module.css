@@ -1,0 +1,83 @@
+.shell {
+  grid-template-columns: 0 minmax(0, 1fr);
+  transition: grid-template-columns 180ms ease;
+}
+
+.shellOpen {
+  grid-template-columns: 245px minmax(0, 1fr);
+}
+
+.sidebar {
+  width: 245px;
+  height: 100vh;
+  min-height: 0;
+  position: sticky;
+  top: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  transform: translateX(-100%);
+  visibility: hidden;
+  transition:
+    transform 180ms ease,
+    visibility 180ms ease;
+}
+
+.sidebarOpen {
+  transform: translateX(0);
+  visibility: visible;
+}
+
+.toggleButton {
+  position: fixed;
+  top: 14px;
+  left: 14px;
+  z-index: 60;
+  width: 42px;
+  height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(18, 59, 93, 0.22);
+  border-radius: 9px;
+  background: #ffffff;
+  color: #123b5d;
+  box-shadow: 0 5px 18px rgba(18, 59, 93, 0.15);
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.toggleButton:hover,
+.toggleButton:focus-visible {
+  background: #eaf6fb;
+  outline: 2px solid rgba(28, 106, 150, 0.18);
+}
+
+.backdrop {
+  display: none;
+}
+
+@media (max-width: 800px) {
+  .shell,
+  .shellOpen {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 55;
+    width: min(82vw, 290px);
+    height: 100vh;
+    box-shadow: 12px 0 30px rgba(9, 36, 56, 0.22);
+  }
+
+  .backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: block;
+    border: 0;
+    background: rgba(9, 36, 56, 0.34);
+  }
+}
