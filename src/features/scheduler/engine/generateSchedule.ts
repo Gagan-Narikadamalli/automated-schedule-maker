@@ -90,11 +90,48 @@ function supportPriority(client: SchedulerClient): number {
   return 1;
 }
 
+function coverageRoleTier(staffMember: SchedulerStaff): number {
+  switch (staffMember.role) {
+    case "BT":
+    case "RBT":
+      return 0;
+    case "INTERN":
+      return 1;
+    case "OFFICE_MANAGER":
+      return 2;
+    case "OTHER":
+      return 3;
+    case "BCBA":
+      return 4;
+    default:
+      return 5;
+  }
+}
+
+function compareStaffCandidates(
+  left: { staffMember: SchedulerStaff; score: number },
+  right: { staffMember: SchedulerStaff; score: number }
+): number {
+  const roleDifference =
+    coverageRoleTier(left.staffMember) -
+    coverageRoleTier(right.staffMember);
+
+  if (roleDifference !== 0) {
+    return roleDifference;
+  }
+
+  if (right.score !== left.score) {
+    return right.score - left.score;
+  }
+
+  return left.staffMember.name.localeCompare(right.staffMember.name);
+}
+
 /**
- * The Excel schedules provided by the clinic generally keep a client with the
- * same technician across neighboring blocks. Processing the day in time order
- * lets the continuity score see the immediately preceding block instead of
- * assigning unrelated afternoon cells before morning cells.
+ * The clinic spreadsheets generally keep a client with the same technician
+ * across neighboring blocks. Processing the day in time order lets continuity
+ * scoring see the immediately preceding block instead of assigning unrelated
+ * afternoon cells first.
  *
  * Within each time slot, the clients with the fewest eligible technicians are
  * assigned first so flexible clients do not consume scarce staff.
@@ -183,13 +220,7 @@ function findBestStaffMember(
         score: number;
       } => candidate !== null
     )
-    .sort((left, right) => {
-      if (right.score !== left.score) {
-        return right.score - left.score;
-      }
-
-      return left.staffMember.name.localeCompare(right.staffMember.name);
-    });
+    .sort(compareStaffCandidates);
 
   return candidates[0]?.staffMember ?? null;
 }
@@ -263,7 +294,8 @@ function calculateCapacityMetrics(
   const callOutStaffIds = new Set(input.callOutStaffIds);
   const workingStaff = input.staff.filter(
     (staffMember) =>
-      !callOutStaffIds.has(staffMember.id) && staffMember.availableSlots.length > 0
+      !callOutStaffIds.has(staffMember.id) &&
+      staffMember.availableSlots.length > 0
   );
   const activeClients = input.clients.filter(
     (client) => client.requiredSlots.length > 0
@@ -392,7 +424,7 @@ function findBestSwap(
           score: number;
         } => candidate !== null
       )
-      .sort((left, right) => right.score - left.score);
+      .sort(compareStaffCandidates);
 
     const bestReplacement = replacementCandidates[0];
 
@@ -452,7 +484,12 @@ function attemptSingleSwapRepair(
     displacedClient,
     requirement.startTime
   );
-  assignments.push(createAutoAssignment(swap.uncoveredStaff, requirement));
+  assignments.push(
+    createAutoAssignment(
+      swap.uncoveredStaff,
+      requirement
+    )
+  );
 
   return true;
 }
@@ -479,7 +516,11 @@ export function generateSchedule(input: SchedulerInput): SchedulerResult {
   const initiallyUncovered: ClientRequirement[] = [];
 
   const requirementsToFill = allRequirements.filter(
-    (requirement) => !requirementIsAlreadyCovered(requirement, assignments)
+    (requirement) =>
+      !requirementIsAlreadyCovered(
+        requirement,
+        assignments
+      )
   );
 
   const sortedRequirements = sortRequirementsForClinicFlow(
@@ -502,7 +543,12 @@ export function generateSchedule(input: SchedulerInput): SchedulerResult {
       continue;
     }
 
-    assignments.push(createAutoAssignment(bestStaffMember, requirement));
+    assignments.push(
+      createAutoAssignment(
+        bestStaffMember,
+        requirement
+      )
+    );
   }
 
   const uncoveredRequirements: UncoveredRequirement[] = [];
