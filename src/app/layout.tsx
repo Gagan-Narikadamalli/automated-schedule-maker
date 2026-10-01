@@ -1,3 +1,22 @@
+import type { Metadata } from "next";
+import type { ReactNode } from "react";
+
 import "./globals.css";
-export const metadata={title:"SOS Schedule Maker",description:"Success On The Spectrum automated scheduling"};
-export default function RootLayout({children}:{children:React.ReactNode}){return <html lang="en"><body>{children}</body></html>}
+
+export const metadata: Metadata = {
+  title: "SOS Automated Schedule Maker",
+  description:
+    "Success On The Spectrum multi-location staff and client scheduling application.",
+};
+
+type RootLayoutProps = {
+  children: ReactNode;
+};
+
+export default function RootLayout({ children }: RootLayoutProps) {
+  return (
+    <html lang="en">
+      <body>{children}</body>
+    </html>
+  );
+}
