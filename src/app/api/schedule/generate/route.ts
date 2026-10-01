@@ -119,7 +119,11 @@ export async function POST(request: Request) {
       existingAssignments: protectedAssignments,
       referenceAssignments: schedulerInput.referenceAssignments,
       callOutStaffIds: schedulerInput.callOutStaffIds,
-      rules: dayData.extendedRules,
+      rules: {
+        ...dayData.extendedRules,
+        historicalBreakPriority:
+          schedulerInput.rules.historicalBreakPriority,
+      },
     });
 
     const result = generateSchedule({
