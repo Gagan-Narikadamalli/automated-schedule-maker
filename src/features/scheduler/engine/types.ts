@@ -6,15 +6,28 @@ export type SupportLevel =
   | "ROTATION"
   | "HIGH_SUPPORT";
 
+export type StaffRole =
+  | "BT"
+  | "RBT"
+  | "INTERN"
+  | "OFFICE_MANAGER"
+  | "BCBA"
+  | "OTHER";
+
 export type SchedulerStaff = {
   id: string;
   name: string;
+  role: StaffRole;
   teamId?: string;
   serviceSetting?: ServiceSetting;
   availableSlots: string[];
   minimumDailyHours?: number;
   targetDailyHours?: number;
   maximumDailyHours?: number;
+  minimumWeeklyHours?: number;
+  targetWeeklyHours?: number;
+  maximumWeeklyHours?: number;
+  scheduledWeeklyClientHoursBeforeDate?: number;
 };
 
 export type StaffRelationship =
@@ -70,7 +83,14 @@ export type SchedulerRules = {
   workloadBalancePriority: number;
   scheduleStabilityPriority: number;
   weekdayTemplatePriority: number;
+  weeklyHoursPriority: number;
+  btCoveragePriority: number;
+  internCoveragePriority: number;
+  managerCoveragePriority: number;
+  bcbaCoveragePriority: number;
+  otherCoveragePriority: number;
   autoUseWeekdayTemplate: boolean;
+  autoUsePreviousWeekdaySchedule: boolean;
 };
 
 export type SchedulerInput = {
