@@ -253,18 +253,35 @@ export function canAssignStaffToClient({
     }
   }
 
-  if (staffMember.maximumDailyHours !== undefined) {
-    const assignedSlotCount = getStaffAssignedSlotCount(
-      staffMember.id,
-      assignments
-    );
-    const assignedHours =
-      (assignedSlotCount * rules.slotLengthMinutes) / 60;
+  const assignedSlotCount = getStaffAssignedSlotCount(
+    staffMember.id,
+    assignments
+  );
+  const assignedHours =
+    (assignedSlotCount * rules.slotLengthMinutes) / 60;
 
-    if (assignedHours >= staffMember.maximumDailyHours) {
+  if (
+    staffMember.maximumDailyHours !== undefined &&
+    assignedHours >= staffMember.maximumDailyHours
+  ) {
+    return {
+      allowed: false,
+      reason: "Staff member has reached the maximum daily hour limit.",
+    };
+  }
+
+  if (staffMember.maximumWeeklyHours !== undefined) {
+    const previousWeekHours =
+      staffMember.scheduledWeeklyClientHoursBeforeDate ?? 0;
+    const projectedHoursAfterAssignment =
+      previousWeekHours +
+      assignedHours +
+      rules.slotLengthMinutes / 60;
+
+    if (projectedHoursAfterAssignment > staffMember.maximumWeeklyHours) {
       return {
         allowed: false,
-        reason: "Staff member has reached the maximum daily hour limit.",
+        reason: "Staff member would exceed the configured weekly hour limit.",
       };
     }
   }
