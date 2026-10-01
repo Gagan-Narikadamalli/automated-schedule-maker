@@ -1,10 +1,10 @@
 import { AppShell } from "@/components/AppShell";
-import { ScheduleWorkspace } from "@/features/scheduler/ScheduleWorkspace";
+import { ScheduleWorkspaceV2 } from "@/features/scheduler/ScheduleWorkspaceV2";
 
 export default function HomePage() {
   return (
     <AppShell>
-      <ScheduleWorkspace />
+      <ScheduleWorkspaceV2 />
     </AppShell>
   );
 }

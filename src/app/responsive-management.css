@@ -1,0 +1,75 @@
+.demo-mode-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px;
+  border: 1px solid #d9b466;
+  border-radius: 10px;
+  background: #fff7e5;
+  color: #6e4a0e;
+  font-size: 13px;
+}
+
+.demo-mode-banner strong {
+  flex: 0 0 auto;
+  color: #7d520a;
+}
+
+.management-layout,
+.section-page {
+  min-width: 0;
+}
+
+.management-layout .section-card,
+.section-page .section-card {
+  min-width: 0;
+}
+
+.team-card-grid {
+  max-height: min(68vh, 720px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding-right: 4px;
+}
+
+.day-selector {
+  max-height: 280px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  align-content: start;
+}
+
+.callout-staff-list {
+  max-height: 260px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+@media (max-width: 900px) {
+  .demo-mode-banner {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .team-card-grid {
+    max-height: 60dvh;
+  }
+
+  .day-selector {
+    max-height: 230px;
+  }
+}
+
+@media (max-width: 600px) {
+  .team-card-grid {
+    max-height: 55dvh;
+  }
+
+  .day-selector {
+    max-height: 200px;
+  }
+}
