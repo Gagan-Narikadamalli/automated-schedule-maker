@@ -44,6 +44,8 @@ type RulesRequest = {
   supervisionPlanningTargetPercent?: number;
 };
 
+type RuleValues = ReturnType<typeof defaultRules>;
+
 function defaultRules(locationId: string) {
   return {
     locationId,
@@ -84,6 +86,35 @@ function defaultRules(locationId: string) {
     autoUseHistoricalPatterns: true,
     supervisionPlanningTargetPercent: 5,
   };
+}
+
+function mergeRuleValues(
+  locationId: string,
+  existing: Record<string, unknown> | null,
+  body: RulesRequest
+): RuleValues {
+  const defaults = defaultRules(locationId);
+  const merged: Record<string, unknown> = {
+    ...defaults,
+  };
+
+  if (existing) {
+    for (const key of Object.keys(defaults)) {
+      if (existing[key] !== undefined) {
+        merged[key] = existing[key];
+      }
+    }
+  }
+
+  for (const [key, value] of Object.entries(body)) {
+    if (value !== undefined && key in defaults) {
+      merged[key] = value;
+    }
+  }
+
+  merged.locationId = locationId;
+
+  return merged as RuleValues;
 }
 
 function serializeRules(rules: Record<string, unknown>) {
@@ -253,11 +284,14 @@ export async function PUT(request: Request) {
     await connectToDatabase();
 
     const existing = await SchedulingRules.findOne({ locationId }).lean();
-    const changes = {
-      ...defaultRules(locationId),
-      ...body,
+    const existingRecord = existing
+      ? (existing as unknown as Record<string, unknown>)
+      : null;
+    const changes = mergeRuleValues(
       locationId,
-    };
+      existingRecord,
+      body
+    );
 
     const savedRules = await SchedulingRules.findOneAndUpdate(
       { locationId },
