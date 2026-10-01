@@ -70,6 +70,14 @@ export type SchedulerAssignment = {
   note?: string;
 };
 
+export type HistoricalPatternScores = {
+  sampleCount: number;
+  scheduleDayCount: number;
+  pairingScores: Record<string, number>;
+  exactSlotScores: Record<string, number>;
+  breakSlotScores: Record<string, number>;
+};
+
 export type SchedulerRules = {
   maximumClientsPerTechPerDay: number;
   maximumTechsPerClientPerDay: number;
@@ -84,6 +92,9 @@ export type SchedulerRules = {
   scheduleStabilityPriority: number;
   weekdayTemplatePriority: number;
   weeklyHoursPriority: number;
+  historicalPairingPriority: number;
+  historicalSlotPriority: number;
+  historicalBreakPriority: number;
   btCoveragePriority: number;
   internCoveragePriority: number;
   managerCoveragePriority: number;
@@ -91,6 +102,7 @@ export type SchedulerRules = {
   otherCoveragePriority: number;
   autoUseWeekdayTemplate: boolean;
   autoUsePreviousWeekdaySchedule: boolean;
+  autoUseHistoricalPatterns: boolean;
 };
 
 export type SchedulerInput = {
@@ -98,6 +110,7 @@ export type SchedulerInput = {
   clients: SchedulerClient[];
   existingAssignments: SchedulerAssignment[];
   referenceAssignments: SchedulerAssignment[];
+  historicalPatterns: HistoricalPatternScores;
   callOutStaffIds: string[];
   rules: SchedulerRules;
 };
