@@ -75,6 +75,12 @@ const SchedulingRulesSchema = new Schema(
       type: Boolean,
       default: true,
     },
+    supervisionPlanningTargetPercent: {
+      type: Number,
+      default: 5,
+      min: 0,
+      max: 100,
+    },
   },
   {
     timestamps: true,

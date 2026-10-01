@@ -28,6 +28,7 @@ type RulesRequest = {
   preferSameTeam?: boolean;
   preferStaffContinuity?: boolean;
   preserveManualOverrides?: boolean;
+  supervisionPlanningTargetPercent?: number;
 };
 
 function defaultRules(locationId: string) {
@@ -48,6 +49,7 @@ function defaultRules(locationId: string) {
     preferSameTeam: true,
     preferStaffContinuity: true,
     preserveManualOverrides: true,
+    supervisionPlanningTargetPercent: 5,
   };
 }
 
@@ -148,6 +150,17 @@ export async function PUT(request: Request) {
           error:
             "The current SOS Excel-compatible calendar requires 30-minute blocks.",
         },
+        { status: 400 }
+      );
+    }
+
+    if (
+      body.supervisionPlanningTargetPercent !== undefined &&
+      (body.supervisionPlanningTargetPercent < 0 ||
+        body.supervisionPlanningTargetPercent > 100)
+    ) {
+      return NextResponse.json(
+        { error: "Supervision planning target must be between 0 and 100 percent." },
         { status: 400 }
       );
     }

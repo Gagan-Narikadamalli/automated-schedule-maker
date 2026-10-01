@@ -1,6 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+
+type LocationOption = {
+  id: string;
+  name: string;
+};
 
 type RulesForm = {
   scheduleStartTime: string;
@@ -15,10 +20,10 @@ type RulesForm = {
   defaultBreakMinutes: number;
   breakWindowStart: string;
   breakWindowEnd: string;
-  staffLimit: number;
   preferSameTeam: boolean;
   preferStaffContinuity: boolean;
   preserveManualOverrides: boolean;
+  supervisionPlanningTargetPercent: number;
 };
 
 const DEFAULT_RULES: RulesForm = {
@@ -34,29 +39,114 @@ const DEFAULT_RULES: RulesForm = {
   defaultBreakMinutes: 30,
   breakWindowStart: "11:00",
   breakWindowEnd: "14:00",
-  staffLimit: 100,
   preferSameTeam: true,
   preferStaffContinuity: true,
   preserveManualOverrides: true,
+  supervisionPlanningTargetPercent: 5,
+};
+
+type LocationsResponse = {
+  locations?: LocationOption[];
+  error?: string;
+};
+
+type RulesResponse = {
+  rules?: Partial<RulesForm>;
+  error?: string;
 };
 
 export function SchedulingSettings() {
+  const [locations, setLocations] = useState<LocationOption[]>([]);
+  const [locationId, setLocationId] = useState("");
   const [rules, setRules] = useState<RulesForm>(DEFAULT_RULES);
-  const [message, setMessage] = useState(
-    "These defaults reflect the requested Excel-style scheduling workflow."
-  );
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("Loading clinic scheduling rules...");
 
-  function updateNumberField(
-    field: keyof RulesForm,
-    value: string
-  ) {
+  useEffect(() => {
+    void loadLocations();
+  }, []);
+
+  useEffect(() => {
+    if (locationId) {
+      void loadRules(locationId);
+    }
+  }, [locationId]);
+
+  async function loadLocations() {
+    try {
+      setLoading(true);
+
+      const response = await fetch("/api/locations", { cache: "no-store" });
+      const data = (await response.json()) as LocationsResponse;
+
+      if (!response.ok) {
+        throw new Error(data.error || "Locations could not be loaded.");
+      }
+
+      const nextLocations = data.locations ?? [];
+      setLocations(nextLocations);
+
+      if (nextLocations.length > 0) {
+        setLocationId(nextLocations[0].id);
+      } else {
+        setMessage("No clinic locations are available yet.");
+      }
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "Locations could not be loaded."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function loadRules(requestedLocationId: string) {
+    try {
+      setLoading(true);
+      setMessage("Loading saved rules...");
+
+      const response = await fetch(
+        `/api/scheduling-rules?locationId=${encodeURIComponent(
+          requestedLocationId
+        )}`,
+        { cache: "no-store" }
+      );
+      const data = (await response.json()) as RulesResponse;
+
+      if (!response.ok || !data.rules) {
+        throw new Error(data.error || "Scheduling rules could not be loaded.");
+      }
+
+      setRules({
+        ...DEFAULT_RULES,
+        ...data.rules,
+      });
+      setMessage("Saved clinic rules loaded from MongoDB.");
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Scheduling rules could not be loaded."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function updateNumberField(field: keyof RulesForm, value: string) {
     setRules((currentRules) => ({
       ...currentRules,
       [field]: Number(value),
     }));
   }
 
-  function saveRules() {
+  async function saveRules() {
+    if (!locationId) {
+      setMessage("Choose a clinic location before saving.");
+      return;
+    }
+
     if (rules.scheduleEndTime <= rules.scheduleStartTime) {
       setMessage("Schedule end time must be later than schedule start time.");
       return;
@@ -72,18 +162,76 @@ export function SchedulingSettings() {
 
     if (rules.slotLengthMinutes !== 30) {
       setMessage(
-        "The current calendar is designed around 30-minute blocks. Other slot lengths will be supported later, but the Excel-matching layout should remain at 30 minutes for now."
+        "The Excel-matching schedule currently requires 30-minute blocks."
       );
       return;
     }
 
-    setMessage(
-      "Scheduling rules validated. The MongoDB-backed save endpoint will persist these separately for Livingston and Parsippany."
-    );
+    try {
+      setSaving(true);
+      setMessage("Saving clinic scheduling rules...");
+
+      const response = await fetch("/api/scheduling-rules", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          locationId,
+          ...rules,
+        }),
+      });
+      const data = (await response.json()) as RulesResponse;
+
+      if (!response.ok || !data.rules) {
+        throw new Error(data.error || "Scheduling rules could not be saved.");
+      }
+
+      setRules({
+        ...DEFAULT_RULES,
+        ...data.rules,
+      });
+      setMessage("Scheduling rules saved. Auto Generate and Repair now use them.");
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Scheduling rules could not be saved."
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
     <div className="management-layout">
+      <section className="section-card">
+        <div className="panel-heading-row">
+          <div>
+            <h2>Location</h2>
+            <p>
+              Livingston and Parsippany keep separate scheduling rules while sharing
+              the same application.
+            </p>
+          </div>
+
+          <label className="form-field compact-field">
+            <span>Clinic location</span>
+            <select
+              value={locationId}
+              disabled={loading || saving}
+              onChange={(event) => setLocationId(event.target.value)}
+            >
+              {locations.map((location) => (
+                <option key={location.id} value={location.id}>
+                  {location.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </section>
+
       <section className="section-card">
         <h2>Calendar Rules</h2>
         <div className="form-grid">
@@ -119,23 +267,11 @@ export function SchedulingSettings() {
             <span>Minutes per block</span>
             <input
               type="number"
-              min="15"
-              step="15"
+              min="30"
+              step="30"
               value={rules.slotLengthMinutes}
               onChange={(event) =>
                 updateNumberField("slotLengthMinutes", event.target.value)
-              }
-            />
-          </label>
-
-          <label className="form-field">
-            <span>Maximum staff records</span>
-            <input
-              type="number"
-              min="1"
-              value={rules.staffLimit}
-              onChange={(event) =>
-                updateNumberField("staffLimit", event.target.value)
               }
             />
           </label>
@@ -212,10 +348,10 @@ export function SchedulingSettings() {
       </section>
 
       <section className="section-card">
-        <h2>Auto Schedule Rules</h2>
+        <h2>Automatic Scheduling Rules</h2>
         <div className="form-grid">
           <label className="form-field">
-            <span>Max clients per tech per day</span>
+            <span>Max clients per technician per day</span>
             <input
               type="number"
               min="1"
@@ -230,7 +366,7 @@ export function SchedulingSettings() {
           </label>
 
           <label className="form-field">
-            <span>Max techs per client per day</span>
+            <span>Max technicians per client per day</span>
             <input
               type="number"
               min="1"
@@ -284,6 +420,23 @@ export function SchedulingSettings() {
               }
             />
           </label>
+
+          <label className="form-field">
+            <span>Supervision planning target (%)</span>
+            <input
+              type="number"
+              min="0"
+              max="100"
+              step="0.1"
+              value={rules.supervisionPlanningTargetPercent}
+              onChange={(event) =>
+                updateNumberField(
+                  "supervisionPlanningTargetPercent",
+                  event.target.value
+                )
+              }
+            />
+          </label>
         </div>
 
         <div className="toggle-list">
@@ -316,8 +469,8 @@ export function SchedulingSettings() {
               }
             />
             <span>
-              Prefer continuity so a good schedule does not change staff/client
-              pairings unnecessarily.
+              Prefer continuity so a good schedule does not change pairings
+              unnecessarily.
             </span>
           </label>
 
@@ -341,9 +494,10 @@ export function SchedulingSettings() {
         <button
           type="button"
           className="button button-primary"
-          onClick={saveRules}
+          disabled={loading || saving || !locationId}
+          onClick={() => void saveRules()}
         >
-          Save Scheduling Rules
+          {saving ? "Saving..." : "Save Scheduling Rules"}
         </button>
 
         <div className="inline-message">{message}</div>
