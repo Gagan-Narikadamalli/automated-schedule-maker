@@ -129,6 +129,24 @@ const SchedulingRulesSchema = new Schema(
       min: 0,
       max: 200,
     },
+    historicalPairingPriority: {
+      type: Number,
+      default: 70,
+      min: 0,
+      max: 200,
+    },
+    historicalSlotPriority: {
+      type: Number,
+      default: 90,
+      min: 0,
+      max: 200,
+    },
+    historicalBreakPriority: {
+      type: Number,
+      default: 80,
+      min: 0,
+      max: 200,
+    },
     btCoveragePriority: {
       type: Number,
       default: 500,
@@ -164,6 +182,10 @@ const SchedulingRulesSchema = new Schema(
       default: true,
     },
     autoUsePreviousWeekdaySchedule: {
+      type: Boolean,
+      default: true,
+    },
+    autoUseHistoricalPatterns: {
       type: Boolean,
       default: true,
     },
