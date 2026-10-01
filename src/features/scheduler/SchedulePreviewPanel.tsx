@@ -16,6 +16,11 @@ type SlotCapacity = {
   difference: number;
 };
 
+type BuildForecast =
+  | "COMPLETE_EXPECTED"
+  | "PARTIAL_EXPECTED"
+  | "NO_CLIENTS";
+
 type Readiness = {
   staffCount: number;
   clientCount: number;
@@ -28,6 +33,9 @@ type Readiness = {
   surplusCoverageHours: number;
   peakConcurrentClients: number;
   peakAvailableStaff: number;
+  maximumConcurrentStaffShortage: number;
+  estimatedAdditionalStaffNeeded: number;
+  buildForecast: BuildForecast;
   shortageSlots: SlotCapacity[];
   warnings: string[];
 };
@@ -96,6 +104,19 @@ function formatHours(value: number | undefined): string {
 
 function formatPercent(value: number | undefined): string {
   return `${(value ?? 0).toFixed(1)}%`;
+}
+
+function formatBuildForecast(forecast: BuildForecast | undefined): string {
+  switch (forecast) {
+    case "COMPLETE_EXPECTED":
+      return "Complete build expected";
+    case "PARTIAL_EXPECTED":
+      return "Partial build expected";
+    case "NO_CLIENTS":
+      return "No client schedule needed";
+    default:
+      return "Forecast unavailable";
+  }
 }
 
 export function SchedulePreviewPanel() {
@@ -196,6 +217,7 @@ export function SchedulePreviewPanel() {
   const uncoveredRequirements = preview?.uncoveredRequirements ?? [];
   const coverageByRole = preview?.coverageByRole ?? {};
   const shortageSlots = readiness?.shortageSlots ?? [];
+  const readinessWarnings = readiness?.warnings ?? [];
 
   return (
     <div className={styles.panel}>
@@ -254,11 +276,17 @@ export function SchedulePreviewPanel() {
                 : styles.statusPartial
             }`}
           >
-            <strong>
-              {preview.completeCoverage
-                ? "Complete automatic build available"
-                : "Partial automatic build recommended"}
-            </strong>
+            <div className={styles.statusHeadingRow}>
+              <strong>
+                {preview.completeCoverage
+                  ? "Complete automatic build available"
+                  : "Partial automatic build recommended"}
+              </strong>
+              <span className={styles.forecastBadge}>
+                {formatBuildForecast(readiness.buildForecast)}
+              </span>
+            </div>
+
             <span>
               The preview does not write or delete any calendar assignments. It
               uses the same scheduling engine that Auto Generate uses.
@@ -291,6 +319,13 @@ export function SchedulePreviewPanel() {
             </article>
 
             <article className={styles.metricCard}>
+              <span className={styles.metricLabel}>Break-eligible staff</span>
+              <span className={styles.metricValue}>
+                {readiness.breakEligibleStaffCount}
+              </span>
+            </article>
+
+            <article className={styles.metricCard}>
               <span className={styles.metricLabel}>Planned break hours</span>
               <span className={styles.metricValue}>
                 {formatHours(readiness.plannedBreakHours)}
@@ -308,6 +343,34 @@ export function SchedulePreviewPanel() {
               <span className={styles.metricLabel}>Predicted coverage</span>
               <span className={styles.metricValue}>
                 {formatPercent(metrics.coveragePercent)}
+              </span>
+            </article>
+
+            <article className={styles.metricCard}>
+              <span className={styles.metricLabel}>Peak clients at once</span>
+              <span className={styles.metricValue}>
+                {readiness.peakConcurrentClients}
+              </span>
+            </article>
+
+            <article className={styles.metricCard}>
+              <span className={styles.metricLabel}>Peak staff available</span>
+              <span className={styles.metricValue}>
+                {readiness.peakAvailableStaff}
+              </span>
+            </article>
+
+            <article className={styles.metricCard}>
+              <span className={styles.metricLabel}>Largest simultaneous gap</span>
+              <span className={styles.metricValue}>
+                {readiness.maximumConcurrentStaffShortage}
+              </span>
+            </article>
+
+            <article className={styles.metricCard}>
+              <span className={styles.metricLabel}>Estimated added staff</span>
+              <span className={styles.metricValue}>
+                {readiness.estimatedAdditionalStaffNeeded}
               </span>
             </article>
 
@@ -372,7 +435,10 @@ export function SchedulePreviewPanel() {
                     <li
                       key={`${requirement.clientId}-${requirement.startTime}`}
                     >
-                      <strong>{requirement.clientCode}</strong> at {requirement.startTime}
+                      <strong>{requirement.clientCode}</strong> at{
+                      " "
+                    }
+                      {requirement.startTime}
                     </li>
                   ))}
                 </ul>
@@ -389,42 +455,64 @@ export function SchedulePreviewPanel() {
 
           <section className={styles.twoColumn}>
             <article className={styles.listCard}>
+              <h3>Scheduler readiness notes</h3>
+
+              {readinessWarnings.length === 0 ? (
+                <p className={styles.emptyMessage}>
+                  No readiness warnings were detected for this date.
+                </p>
+              ) : (
+                <ul>
+                  {readinessWarnings.map((warning) => (
+                    <li key={warning}>{warning}</li>
+                  ))}
+                </ul>
+              )}
+            </article>
+
+            <article className={styles.listCard}>
               <h3>Predicted direct client coverage by role</h3>
 
               {Object.keys(coverageByRole).length === 0 ? (
-                <p className={styles.emptyMessage}>No client coverage predicted.</p>
+                <p className={styles.emptyMessage}>
+                  No client coverage predicted.
+                </p>
               ) : (
                 <ul>
                   {Object.entries(coverageByRole)
                     .sort((left, right) => right[1] - left[1])
                     .map(([role, hours]) => (
                       <li key={role}>
-                        <strong>{role.replaceAll("_", " ")}</strong>: {hours.toFixed(1)} hrs
+                        <strong>{role.replaceAll("_", " ")}</strong>:{" "}
+                        {hours.toFixed(1)} hrs
                       </li>
                     ))}
                 </ul>
               )}
             </article>
+          </section>
 
-            <article className={styles.listCard}>
-              <h3>Pattern guidance used</h3>
-              <ul>
-                <li>
-                  Weekday template: {preview.autoTemplateName ?? "none available"}
-                </li>
-                <li>
-                  Previous same-weekday reference: {preview.previousReferenceDate ?? "none"}
-                </li>
-                <li>
-                  Imported history: {preview.importedTrainingScheduleDays ?? 0} day(s), {preview.importedTrainingRecords ?? 0} row(s)
-                </li>
-                <li>
-                  Livingston workbook trial: {preview.workbookTrainingApplied
-                    ? `${preview.workbookTrainingReferences ?? 0} matching reference observations`
-                    : "not applied"}
-                </li>
-              </ul>
-            </article>
+          <section className={styles.listCard}>
+            <h3>Pattern guidance used</h3>
+            <ul>
+              <li>
+                Weekday template: {preview.autoTemplateName ?? "none available"}
+              </li>
+              <li>
+                Previous same-weekday reference:{" "}
+                {preview.previousReferenceDate ?? "none"}
+              </li>
+              <li>
+                Imported history: {preview.importedTrainingScheduleDays ?? 0}{" "}
+                day(s), {preview.importedTrainingRecords ?? 0} row(s)
+              </li>
+              <li>
+                Livingston workbook trial:{" "}
+                {preview.workbookTrainingApplied
+                  ? `${preview.workbookTrainingReferences ?? 0} matching reference observations`
+                  : "not applied"}
+              </li>
+            </ul>
           </section>
 
           <div className={styles.trainingNote}>
