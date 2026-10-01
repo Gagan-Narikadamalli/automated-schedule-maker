@@ -22,10 +22,13 @@ import { Staff } from "@/models/Staff";
 
 type DatabaseRecord = Record<string, any>;
 
-type ExtendedSchedulerRules = SchedulerRules & {
+export type ExtendedSchedulerRules = SchedulerRules & {
   breakWindowStart: string;
   breakWindowEnd: string;
   defaultBreakMinutes: number;
+  breakEligibilityHours: number;
+  scheduleStartTime: string;
+  scheduleEndTime: string;
 };
 
 export type DaySchedulerData = {
@@ -112,9 +115,17 @@ function getDefaultRules(): ExtendedSchedulerRules {
     preferSameTeam: true,
     preferStaffContinuity: true,
     slotLengthMinutes: 30,
+    preferredStaffPriority: 100,
+    sameTeamPriority: 40,
+    continuityPriority: 35,
+    rotationPriority: 60,
+    workloadBalancePriority: 10,
     breakWindowStart: "11:00",
-    breakWindowEnd: "14:00",
+    breakWindowEnd: "13:30",
     defaultBreakMinutes: 30,
+    breakEligibilityHours: 6,
+    scheduleStartTime: "08:00",
+    scheduleEndTime: "18:00",
   };
 }
 
@@ -143,6 +154,21 @@ function mapRules(document: DatabaseRecord | null): ExtendedSchedulerRules {
     slotLengthMinutes: Number(
       document.slotLengthMinutes ?? defaults.slotLengthMinutes
     ),
+    preferredStaffPriority: Number(
+      document.preferredStaffPriority ?? defaults.preferredStaffPriority
+    ),
+    sameTeamPriority: Number(
+      document.sameTeamPriority ?? defaults.sameTeamPriority
+    ),
+    continuityPriority: Number(
+      document.continuityPriority ?? defaults.continuityPriority
+    ),
+    rotationPriority: Number(
+      document.rotationPriority ?? defaults.rotationPriority
+    ),
+    workloadBalancePriority: Number(
+      document.workloadBalancePriority ?? defaults.workloadBalancePriority
+    ),
     breakWindowStart: String(
       document.breakWindowStart ?? defaults.breakWindowStart
     ),
@@ -151,6 +177,15 @@ function mapRules(document: DatabaseRecord | null): ExtendedSchedulerRules {
     ),
     defaultBreakMinutes: Number(
       document.defaultBreakMinutes ?? defaults.defaultBreakMinutes
+    ),
+    breakEligibilityHours: Number(
+      document.breakEligibilityHours ?? defaults.breakEligibilityHours
+    ),
+    scheduleStartTime: String(
+      document.scheduleStartTime ?? defaults.scheduleStartTime
+    ),
+    scheduleEndTime: String(
+      document.scheduleEndTime ?? defaults.scheduleEndTime
     ),
   };
 }
@@ -222,6 +257,10 @@ function mapStaff(
         staffMember.shiftPatterns,
         date
       );
+      const availableSlots = removeBlockedSlots(
+        normalAvailableSlots,
+        unavailableRanges
+      );
 
       return {
         id: staffId,
@@ -230,10 +269,8 @@ function mapStaff(
           ? String(staffMember.teamId)
           : undefined,
         serviceSetting: normalizeServiceSetting(staffMember.serviceSetting),
-        availableSlots: removeBlockedSlots(
-          normalAvailableSlots,
-          unavailableRanges
-        ),
+        availableSlots,
+        maximumDailyHours: availableSlots.length / 2,
       };
     });
 }
@@ -406,8 +443,8 @@ export async function buildDaySchedulerInput(
   const fullDayCallOutStaffIds = partialCallOuts
     .filter((callOut) => {
       return (
-        callOut.startTime <= "08:00" &&
-        callOut.endTime >= "18:00"
+        callOut.startTime <= extendedRules.scheduleStartTime &&
+        callOut.endTime >= extendedRules.scheduleEndTime
       );
     })
     .map((callOut) => callOut.staffId);
@@ -426,6 +463,11 @@ export async function buildDaySchedulerInput(
       preferStaffContinuity:
         extendedRules.preferStaffContinuity,
       slotLengthMinutes: extendedRules.slotLengthMinutes,
+      preferredStaffPriority: extendedRules.preferredStaffPriority,
+      sameTeamPriority: extendedRules.sameTeamPriority,
+      continuityPriority: extendedRules.continuityPriority,
+      rotationPriority: extendedRules.rotationPriority,
+      workloadBalancePriority: extendedRules.workloadBalancePriority,
     },
   };
 

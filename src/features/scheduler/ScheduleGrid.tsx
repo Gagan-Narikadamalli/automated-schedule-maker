@@ -12,6 +12,7 @@ import {
 
 import { DAILY_TIME_SLOTS } from "./constants";
 import type { DemoGridCell } from "./demoData";
+import styles from "./ScheduleGrid.module.css";
 import {
   createEmptyScheduleCell,
   createPresetScheduleCell,
@@ -53,6 +54,37 @@ type HistoryEntry = {
   mutations: ScheduleGridMutation[];
 };
 
+type GridColumn = StaffColumn & {
+  temporary?: boolean;
+};
+
+const SCRATCH_COLUMNS: GridColumn[] = [
+  {
+    id: "__scratch-1",
+    name: "Scratch 1",
+    color: "#EEF2F4",
+    temporary: true,
+  },
+  {
+    id: "__scratch-2",
+    name: "Scratch 2",
+    color: "#EEF2F4",
+    temporary: true,
+  },
+  {
+    id: "__scratch-3",
+    name: "Scratch 3",
+    color: "#EEF2F4",
+    temporary: true,
+  },
+  {
+    id: "__scratch-4",
+    name: "Scratch 4",
+    color: "#EEF2F4",
+    temporary: true,
+  },
+];
+
 function normalizeSelection(selection: Selection) {
   return {
     firstRow: Math.min(selection.anchor.row, selection.focus.row),
@@ -64,6 +96,24 @@ function normalizeSelection(selection: Selection) {
 
 function cloneGrid(grid: DemoGridCell[][]): DemoGridCell[][] {
   return grid.map((row) => row.map((cell) => ({ ...cell })));
+}
+
+function createScratchCell(): DemoGridCell {
+  return {
+    text: "",
+    assignmentType: "EMPTY",
+  };
+}
+
+function addScratchColumns(initialGrid: DemoGridCell[][]): DemoGridCell[][] {
+  return DAILY_TIME_SLOTS.map((_, rowIndex) => {
+    const scheduleRow = initialGrid[rowIndex] ?? [];
+
+    return [
+      ...scheduleRow.map((cell) => ({ ...cell })),
+      ...SCRATCH_COLUMNS.map(() => createScratchCell()),
+    ];
+  });
 }
 
 function cellClassName(cell: DemoGridCell, selected: boolean): string {
@@ -117,7 +167,13 @@ export function ScheduleGrid({
   onDisplacedAssignment,
   onMutations,
 }: ScheduleGridProps) {
-  const [grid, setGrid] = useState<DemoGridCell[][]>(initialGrid);
+  const columns = useMemo<GridColumn[]>(
+    () => [...staff, ...SCRATCH_COLUMNS],
+    [staff]
+  );
+  const [grid, setGrid] = useState<DemoGridCell[][]>(() =>
+    addScratchColumns(initialGrid)
+  );
   const [selection, setSelection] = useState<Selection>({
     anchor: { row: 0, column: 0 },
     focus: { row: 0, column: 0 },
@@ -139,6 +195,10 @@ export function ScheduleGrid({
   );
 
   const selectedCell = grid[selection.focus.row]?.[selection.focus.column];
+
+  function isScratchColumn(column: number): boolean {
+    return Boolean(columns[column]?.temporary);
+  }
 
   function isCellSelected(row: number, column: number): boolean {
     return (
@@ -169,7 +229,7 @@ export function ScheduleGrid({
     return {
       row,
       column,
-      staffId: staff[column].id,
+      staffId: columns[column].id,
       startTime: DAILY_TIME_SLOTS[row].startTime,
       previousCell,
       nextCell,
@@ -189,7 +249,11 @@ export function ScheduleGrid({
     const previousGrid = grid;
     setGrid(nextGrid);
 
-    if (!onMutations) {
+    const persistentMutations = mutations.filter(
+      (mutation) => !isScratchColumn(mutation.column)
+    );
+
+    if (!onMutations || persistentMutations.length === 0) {
       if (recordHistory) {
         setUndoStack((current) => [...current, { mutations }].slice(-50));
         setRedoStack([]);
@@ -199,7 +263,7 @@ export function ScheduleGrid({
 
     try {
       setSaving(true);
-      const saved = await onMutations(mutations, force);
+      const saved = await onMutations(persistentMutations, force);
 
       if (!saved) {
         setGrid(previousGrid);
@@ -293,6 +357,13 @@ export function ScheduleGrid({
 
   async function placeExternalAssignment(row: number, column: number) {
     if (!placementCell || saving) {
+      return;
+    }
+
+    if (isScratchColumn(column)) {
+      onConflict(
+        "Unplaced client assignments must be placed into a real staff column. Scratch columns are temporary only."
+      );
       return;
     }
 
@@ -391,7 +462,7 @@ export function ScheduleGrid({
     );
     const nextColumn = Math.max(
       0,
-      Math.min(staff.length - 1, selection.focus.column + columnDelta)
+      Math.min(columns.length - 1, selection.focus.column + columnDelta)
     );
 
     if (extendSelection) {
@@ -510,7 +581,7 @@ export function ScheduleGrid({
           continue;
         }
 
-        if (currentCell.text) {
+        if (currentCell.text && !isScratchColumn(column)) {
           displaced.push(currentCell.text);
         }
 
@@ -644,7 +715,7 @@ export function ScheduleGrid({
         const targetRow = startRow + pastedRowIndex;
         const targetColumn = startColumn + pastedColumnIndex;
 
-        if (targetRow >= nextGrid.length || targetColumn >= staff.length) {
+        if (targetRow >= nextGrid.length || targetColumn >= columns.length) {
           return;
         }
 
@@ -671,7 +742,8 @@ export function ScheduleGrid({
         if (
           manualMode &&
           isOccupied(existingCell) &&
-          existingCell.text !== pastedCell.text
+          existingCell.text !== pastedCell.text &&
+          !isScratchColumn(targetColumn)
         ) {
           displaced.push(existingCell.text);
         }
@@ -732,12 +804,20 @@ export function ScheduleGrid({
       isOccupied(currentCell) &&
       currentCell.text !== updatedCell.text;
 
-    if (replacing && !confirmReplacement(1)) {
+    if (
+      replacing &&
+      !isScratchColumn(column) &&
+      !confirmReplacement(1)
+    ) {
       setEditingCell(null);
       return;
     }
 
-    if (replacing && currentCell.text) {
+    if (
+      replacing &&
+      currentCell.text &&
+      !isScratchColumn(column)
+    ) {
       onDisplacedAssignment(currentCell.text);
     }
 
@@ -766,6 +846,8 @@ export function ScheduleGrid({
 
     const sourceCell = grid[source.row][source.column];
     const targetCell = grid[target.row][target.column];
+    const sourceIsScratch = isScratchColumn(source.column);
+    const targetIsScratch = isScratchColumn(target.column);
 
     if (sourceCell.assignmentType === "EMPTY") {
       onConflict("Select an assignment before choosing Move Selected.");
@@ -781,12 +863,43 @@ export function ScheduleGrid({
       return;
     }
 
-    if (isOccupied(targetCell) && !confirmReplacement(1)) {
+    if (targetIsScratch && !sourceIsScratch) {
+      const nextGrid = cloneGrid(grid);
+      const nextCell: DemoGridCell = {
+        ...sourceCell,
+        source: "MANUAL",
+        locked: false,
+      };
+
+      nextGrid[target.row][target.column] = nextCell;
+
+      await commitMutations(
+        nextGrid,
+        [
+          mutationForCell(
+            target.row,
+            target.column,
+            targetCell,
+            nextCell
+          ),
+        ],
+        false
+      );
+
+      selectSingleCell(target.row, target.column);
+      setMoveSource(null);
+      onConflict(
+        "Copied to temporary Scratch space. The original scheduled assignment was left unchanged. Scratch cells are not saved to MongoDB."
+      );
+      return;
+    }
+
+    if (isOccupied(targetCell) && !targetIsScratch && !confirmReplacement(1)) {
       setMoveSource(null);
       return;
     }
 
-    if (isOccupied(targetCell) && targetCell.text) {
+    if (isOccupied(targetCell) && targetCell.text && !targetIsScratch) {
       onDisplacedAssignment(targetCell.text);
     }
 
@@ -794,17 +907,10 @@ export function ScheduleGrid({
     nextGrid[target.row][target.column] = {
       ...sourceCell,
       source: "MANUAL",
-      locked: true,
+      locked: !targetIsScratch,
     };
-    nextGrid[source.row][source.column] = createEmptyScheduleCell();
 
-    const mutations = [
-      mutationForCell(
-        source.row,
-        source.column,
-        sourceCell,
-        nextGrid[source.row][source.column]
-      ),
+    const mutations: ScheduleGridMutation[] = [
       mutationForCell(
         target.row,
         target.column,
@@ -812,6 +918,18 @@ export function ScheduleGrid({
         nextGrid[target.row][target.column]
       ),
     ];
+
+    if (!sourceIsScratch) {
+      nextGrid[source.row][source.column] = createEmptyScheduleCell();
+      mutations.unshift(
+        mutationForCell(
+          source.row,
+          source.column,
+          sourceCell,
+          nextGrid[source.row][source.column]
+        )
+      );
+    }
 
     await commitMutations(nextGrid, mutations, true);
     selectSingleCell(target.row, target.column);
@@ -837,7 +955,7 @@ export function ScheduleGrid({
     }
 
     setDraggedCell({ row, column });
-    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.effectAllowed = "copyMove";
     event.dataTransfer.setData("text/plain", cell.text);
   }
 
@@ -978,7 +1096,7 @@ export function ScheduleGrid({
       </div>
 
       <div
-        className={`schedule-grid-wrapper ${
+        className={`schedule-grid-wrapper ${styles.scrollWindow} ${
           moveSource || placementCell ? "schedule-grid-move-mode" : ""
         }`}
         tabIndex={0}
@@ -993,9 +1111,21 @@ export function ScheduleGrid({
           <thead>
             <tr>
               <th className="schedule-time-column">Time</th>
-              {staff.map((staffMember) => (
-                <th key={staffMember.id} className="schedule-staff-heading">
-                  {staffMember.name}
+              {columns.map((column, columnIndex) => (
+                <th
+                  key={column.id}
+                  className={`schedule-staff-heading ${
+                    column.temporary ? styles.scratchHeader : ""
+                  } ${
+                    columnIndex === staff.length ? styles.scratchDivider : ""
+                  }`}
+                  title={
+                    column.temporary
+                      ? "Temporary Excel-like scratch space. Scratch cells are kept only in this browser view and are not saved to MongoDB."
+                      : undefined
+                  }
+                >
+                  {column.name}
                 </th>
               ))}
             </tr>
@@ -1006,18 +1136,23 @@ export function ScheduleGrid({
               <tr key={timeSlot.startTime}>
                 <th className="schedule-time-column">{timeSlot.label}</th>
 
-                {staff.map((staffMember, columnIndex) => {
+                {columns.map((column, columnIndex) => {
                   const cell = grid[rowIndex][columnIndex];
                   const selected = isCellSelected(rowIndex, columnIndex);
                   const dragTarget = isDragTarget(rowIndex, columnIndex);
                   const isEditing =
                     editingCell?.row === rowIndex &&
                     editingCell?.column === columnIndex;
+                  const scratchColumn = Boolean(column.temporary);
 
                   return (
                     <td
-                      key={`${timeSlot.startTime}-${staffMember.id}`}
+                      key={`${timeSlot.startTime}-${column.id}`}
                       className={`${cellClassName(cell, selected)} ${
+                        scratchColumn ? styles.scratchCell : ""
+                      } ${
+                        columnIndex === staff.length ? styles.scratchDivider : ""
+                      } ${
                         dragTarget ? "schedule-cell-drop-target" : ""
                       }`}
                       style={{ backgroundColor: cell.color }}
@@ -1071,7 +1206,9 @@ export function ScheduleGrid({
                       onDragOver={(event) => {
                         if (manualMode) {
                           event.preventDefault();
-                          event.dataTransfer.dropEffect = "move";
+                          event.dataTransfer.dropEffect = scratchColumn
+                            ? "copy"
+                            : "move";
                         }
                       }}
                       onDrop={(event) =>

@@ -1,5 +1,5 @@
 export const SCHEDULE_START_MINUTES = 8 * 60;
-export const SCHEDULE_END_MINUTES = 18 * 60;
+export const SCHEDULE_END_MINUTES = 20 * 60;
 export const SLOT_LENGTH_MINUTES = 30;
 
 export type TimeSlot = {

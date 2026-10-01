@@ -43,13 +43,19 @@ const SchedulingRulesSchema = new Schema(
       default: 30,
       min: 0,
     },
+    breakEligibilityHours: {
+      type: Number,
+      default: 6,
+      min: 0,
+      max: 24,
+    },
     breakWindowStart: {
       type: String,
       default: "11:00",
     },
     breakWindowEnd: {
       type: String,
-      default: "14:00",
+      default: "13:30",
     },
     scheduleStartTime: {
       type: String,
@@ -57,7 +63,7 @@ const SchedulingRulesSchema = new Schema(
     },
     scheduleEndTime: {
       type: String,
-      default: "18:00",
+      default: "20:00",
     },
     slotLengthMinutes: {
       type: Number,
@@ -74,6 +80,36 @@ const SchedulingRulesSchema = new Schema(
     preserveManualOverrides: {
       type: Boolean,
       default: true,
+    },
+    preferredStaffPriority: {
+      type: Number,
+      default: 100,
+      min: 0,
+      max: 200,
+    },
+    sameTeamPriority: {
+      type: Number,
+      default: 40,
+      min: 0,
+      max: 200,
+    },
+    continuityPriority: {
+      type: Number,
+      default: 35,
+      min: 0,
+      max: 200,
+    },
+    rotationPriority: {
+      type: Number,
+      default: 60,
+      min: 0,
+      max: 200,
+    },
+    workloadBalancePriority: {
+      type: Number,
+      default: 10,
+      min: 0,
+      max: 200,
     },
     supervisionPlanningTargetPercent: {
       type: Number,

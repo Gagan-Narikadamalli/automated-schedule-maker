@@ -61,6 +61,11 @@ export type SchedulerRules = {
   preferSameTeam: boolean;
   preferStaffContinuity: boolean;
   slotLengthMinutes: number;
+  preferredStaffPriority: number;
+  sameTeamPriority: number;
+  continuityPriority: number;
+  rotationPriority: number;
+  workloadBalancePriority: number;
 };
 
 export type SchedulerInput = {
@@ -83,7 +88,8 @@ export type SchedulerWarning = {
     | "LOCKED_CONFLICT"
     | "NO_ELIGIBLE_STAFF"
     | "CLIENT_TECH_LIMIT"
-    | "STAFF_HOUR_LIMIT";
+    | "STAFF_HOUR_LIMIT"
+    | "CAPACITY_SHORTAGE";
   message: string;
 };
 
@@ -92,9 +98,18 @@ export type SchedulerResult = {
   uncoveredRequirements: UncoveredRequirement[];
   warnings: SchedulerWarning[];
   metrics: {
+    staffCount: number;
+    clientCount: number;
     requiredClientSlots: number;
     coveredClientSlots: number;
     uncoveredClientSlots: number;
     coveragePercent: number;
+    requiredClientHours: number;
+    coveredClientHours: number;
+    uncoveredClientHours: number;
+    staffAvailableHours: number;
+    breakHoursReserved: number;
+    netStaffCoverageHours: number;
+    additionalLaborHoursNeeded: number;
   };
 };
