@@ -1,3 +1,3 @@
 # SOS Automated Schedule Maker
 
-Authentication cleanup in progress.
+A multi-location scheduling application for Success On The Spectrum that keeps the familiar Excel-style clinic workflow while adding automatic scheduling, validation, call-outs, templates, reporting, and flexible schedule editing.
