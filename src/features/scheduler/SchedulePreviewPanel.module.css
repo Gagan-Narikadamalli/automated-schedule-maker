@@ -66,12 +66,20 @@
 
 .statusCard {
   display: grid;
-  gap: 5px;
+  gap: 7px;
   padding: 17px 18px;
   border: 1px solid #d7e5eb;
   border-radius: 14px;
   background: #ffffff;
   box-shadow: 0 4px 14px rgba(18, 59, 93, 0.05);
+}
+
+.statusHeadingRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .statusCard strong {
@@ -83,6 +91,20 @@
   color: #607887;
   font-size: 13px;
   line-height: 1.5;
+}
+
+.forecastBadge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 29px;
+  padding: 5px 10px;
+  border: 1px solid #c9dfe8;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.78);
+  color: #315a70 !important;
+  font-size: 11px !important;
+  font-weight: 850;
+  white-space: nowrap;
 }
 
 .statusComplete {
@@ -202,6 +224,11 @@
   .summaryGrid,
   .twoColumn {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .statusHeadingRow {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .metricCard {
