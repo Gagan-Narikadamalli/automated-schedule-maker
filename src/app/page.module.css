@@ -1,0 +1,8 @@
+.page :global(.schedule-page .page-subtitle) {
+  font-size: 0;
+}
+
+.page :global(.schedule-page .page-subtitle)::after {
+  content: "Excel-style 30-minute scheduling from 8:00 AM to 8:00 PM";
+  font-size: 14px;
+}

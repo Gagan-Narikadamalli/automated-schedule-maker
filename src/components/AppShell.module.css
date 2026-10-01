@@ -7,6 +7,10 @@
   grid-template-columns: 245px minmax(0, 1fr);
 }
 
+.shell :global(.main-content) {
+  padding-top: 72px;
+}
+
 .sidebar {
   width: 245px;
   height: 100vh;
@@ -61,6 +65,10 @@
   .shell,
   .shellOpen {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .shell :global(.main-content) {
+    padding-top: 66px;
   }
 
   .sidebar {
