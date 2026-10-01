@@ -32,6 +32,8 @@ type ClientUpdateRequest = {
   color?: string;
   serviceSetting?: "IN_CENTER" | "IN_HOME" | "BOTH";
   supportLevel?: "STANDARD" | "ONE_TO_ONE" | "ROTATION" | "HIGH_SUPPORT";
+  maxConsecutiveBlocksWithSameStaff?: number | null;
+  desiredDifferentStaffPerDay?: number | null;
   insurancePlan?: string;
   assignedBcbaId?: string | null;
   assignedInternIds?: string[];
@@ -46,6 +48,21 @@ type RouteContext = {
     id: string;
   }>;
 };
+
+function readOptionalPositiveInteger(
+  value: number | null | undefined,
+  maximum: number
+): number | null | "INVALID" {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  if (!Number.isInteger(value) || value < 1 || value > maximum) {
+    return "INVALID";
+  }
+
+  return value;
+}
 
 export async function PATCH(request: Request, context: RouteContext) {
   const auth = await requireApiSession();
@@ -130,6 +147,44 @@ export async function PATCH(request: Request, context: RouteContext) {
 
     if (body.supportLevel !== undefined) {
       client.supportLevel = body.supportLevel;
+    }
+
+    if (body.maxConsecutiveBlocksWithSameStaff !== undefined) {
+      const value = readOptionalPositiveInteger(
+        body.maxConsecutiveBlocksWithSameStaff,
+        20
+      );
+
+      if (value === "INVALID") {
+        return NextResponse.json(
+          {
+            error:
+              "Maximum consecutive blocks must be a whole number between 1 and 20, or blank for the automatic default.",
+          },
+          { status: 400 }
+        );
+      }
+
+      client.maxConsecutiveBlocksWithSameStaff = value;
+    }
+
+    if (body.desiredDifferentStaffPerDay !== undefined) {
+      const value = readOptionalPositiveInteger(
+        body.desiredDifferentStaffPerDay,
+        20
+      );
+
+      if (value === "INVALID") {
+        return NextResponse.json(
+          {
+            error:
+              "Desired staff per day must be a whole number between 1 and 20, or blank for the automatic default.",
+          },
+          { status: 400 }
+        );
+      }
+
+      client.desiredDifferentStaffPerDay = value;
     }
 
     if (body.insurancePlan !== undefined) {

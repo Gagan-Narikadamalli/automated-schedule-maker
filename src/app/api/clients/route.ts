@@ -33,6 +33,8 @@ type ClientRequest = {
   color?: string;
   serviceSetting?: "IN_CENTER" | "IN_HOME" | "BOTH";
   supportLevel?: "STANDARD" | "ONE_TO_ONE" | "ROTATION" | "HIGH_SUPPORT";
+  maxConsecutiveBlocksWithSameStaff?: number | null;
+  desiredDifferentStaffPerDay?: number | null;
   insurancePlan?: string;
   assignedBcbaId?: string | null;
   assignedInternIds?: string[];
@@ -55,6 +57,21 @@ function serializeClient(client: Record<string, unknown>) {
       ? client.assignedInternIds.map((internId) => String(internId))
       : [],
   };
+}
+
+function readOptionalPositiveInteger(
+  value: number | null | undefined,
+  maximum: number
+): number | null | "INVALID" {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  if (!Number.isInteger(value) || value < 1 || value > maximum) {
+    return "INVALID";
+  }
+
+  return value;
 }
 
 export async function GET(request: Request) {
@@ -135,6 +152,28 @@ export async function POST(request: Request) {
       return forbiddenResponse("You do not have access to this location.");
     }
 
+    const maxConsecutiveBlocksWithSameStaff = readOptionalPositiveInteger(
+      body.maxConsecutiveBlocksWithSameStaff,
+      20
+    );
+    const desiredDifferentStaffPerDay = readOptionalPositiveInteger(
+      body.desiredDifferentStaffPerDay,
+      20
+    );
+
+    if (
+      maxConsecutiveBlocksWithSameStaff === "INVALID" ||
+      desiredDifferentStaffPerDay === "INVALID"
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Rotation settings must be whole numbers between 1 and 20, or left blank to use the automatic support-level defaults.",
+        },
+        { status: 400 }
+      );
+    }
+
     await connectToDatabase();
 
     const duplicate = await Client.findOne({
@@ -163,6 +202,8 @@ export async function POST(request: Request) {
       color: body.color || "#D9F4EE",
       serviceSetting: body.serviceSetting || "IN_CENTER",
       supportLevel: body.supportLevel || "ONE_TO_ONE",
+      maxConsecutiveBlocksWithSameStaff,
+      desiredDifferentStaffPerDay,
       insurancePlan: body.insurancePlan?.trim() || "",
       assignedBcbaId: body.assignedBcbaId || null,
       assignedInternIds: body.assignedInternIds ?? [],

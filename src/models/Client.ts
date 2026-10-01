@@ -116,6 +116,18 @@ const ClientSchema = new Schema(
       enum: ["STANDARD", "ONE_TO_ONE", "ROTATION", "HIGH_SUPPORT"],
       default: "ONE_TO_ONE",
     },
+    maxConsecutiveBlocksWithSameStaff: {
+      type: Number,
+      default: null,
+      min: 1,
+      max: 20,
+    },
+    desiredDifferentStaffPerDay: {
+      type: Number,
+      default: null,
+      min: 1,
+      max: 20,
+    },
     insurancePlan: {
       type: String,
       default: "",
