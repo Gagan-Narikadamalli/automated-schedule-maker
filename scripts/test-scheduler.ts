@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 
 import { generateSchedule } from "../src/features/scheduler/engine/generateSchedule";
+import { buildHistoricalPatternScores } from "../src/features/scheduler/engine/historicalPatterns";
 import { reserveStaffBreaks } from "../src/features/scheduler/engine/reserveBreaks";
 import type {
+  HistoricalPatternScores,
   SchedulerAssignment,
   SchedulerClient,
   SchedulerInput,
@@ -24,6 +26,9 @@ const DEFAULT_RULES: SchedulerRules = {
   scheduleStabilityPriority: 140,
   weekdayTemplatePriority: 75,
   weeklyHoursPriority: 12,
+  historicalPairingPriority: 70,
+  historicalSlotPriority: 90,
+  historicalBreakPriority: 80,
   btCoveragePriority: 500,
   internCoveragePriority: 300,
   managerCoveragePriority: 125,
@@ -31,6 +36,7 @@ const DEFAULT_RULES: SchedulerRules = {
   otherCoveragePriority: 75,
   autoUseWeekdayTemplate: true,
   autoUsePreviousWeekdaySchedule: true,
+  autoUseHistoricalPatterns: true,
 };
 
 function createStaff(
@@ -74,13 +80,15 @@ function createInput(
   staff: SchedulerStaff[],
   clients: SchedulerClient[],
   existingAssignments: SchedulerAssignment[] = [],
-  referenceAssignments: SchedulerAssignment[] = []
+  referenceAssignments: SchedulerAssignment[] = [],
+  historicalPatterns?: HistoricalPatternScores
 ): SchedulerInput {
   return {
     staff,
     clients,
     existingAssignments,
     referenceAssignments,
+    historicalPatterns,
     callOutStaffIds: [],
     rules: {
       ...DEFAULT_RULES,
@@ -114,15 +122,25 @@ function createHistoricalReference(
   };
 }
 
+function createHistoricalBreakReference(
+  id: string,
+  staffId: string,
+  startTime: string
+): SchedulerAssignment {
+  return {
+    id,
+    staffId,
+    startTime,
+    assignmentType: "BREAK",
+    source: "COPIED",
+    locked: false,
+  };
+}
+
 function testRoleCoverageOrder() {
   const staff = [
     createStaff("bt-1", "Primary BT", "BT", ["08:00"]),
-    createStaff(
-      "intern-1",
-      "Intern",
-      "INTERN",
-      ["08:00"]
-    ),
+    createStaff("intern-1", "Intern", "INTERN", ["08:00"]),
     createStaff(
       "manager-1",
       "Manager",
@@ -137,9 +155,7 @@ function testRoleCoverageOrder() {
     },
   });
 
-  const result = generateSchedule(
-    createInput(staff, [client])
-  );
+  const result = generateSchedule(createInput(staff, [client]));
   const assignment = clientAssignments(result.assignments)[0];
 
   assert.equal(
@@ -215,6 +231,61 @@ function testHistoricalSameWeekdayPatternGuidesMatching() {
   );
 }
 
+function testImportedHistoricalPatternGuidesMatching() {
+  const staff = [
+    createStaff("bt-1", "BT One", "BT", ["08:00"]),
+    createStaff("bt-2", "BT Two", "BT", ["08:00"]),
+  ];
+  const client = createClient("client-1", "AA", ["08:00"]);
+  const historicalPatterns = buildHistoricalPatternScores([
+    {
+      scheduleDate: "2026-09-07",
+      staffId: "bt-2",
+      clientId: "client-1",
+      startTime: "08:00",
+      assignmentType: "CLIENT_1_TO_1",
+    },
+    {
+      scheduleDate: "2026-09-14",
+      staffId: "bt-2",
+      clientId: "client-1",
+      startTime: "08:00",
+      assignmentType: "CLIENT_1_TO_1",
+    },
+    {
+      scheduleDate: "2026-09-21",
+      staffId: "bt-2",
+      clientId: "client-1",
+      startTime: "08:00",
+      assignmentType: "CLIENT_1_TO_1",
+    },
+    {
+      scheduleDate: "2026-09-28",
+      staffId: "bt-2",
+      clientId: "client-1",
+      startTime: "08:00",
+      assignmentType: "CLIENT_1_TO_1",
+    },
+  ]);
+
+  const result = generateSchedule(
+    createInput(
+      staff,
+      [client],
+      [],
+      [],
+      historicalPatterns
+    )
+  );
+  const assignment = clientAssignments(result.assignments)[0];
+
+  assert.equal(
+    assignment.staffId,
+    "bt-2",
+    "Imported Excel history should guide same-role matching when the repeated pairing is valid."
+  );
+}
+
 function testPartialBuildKeepsSafeCoverage() {
   const staff = [
     createStaff("bt-1", "BT One", "BT", ["08:00"]),
@@ -226,9 +297,7 @@ function testPartialBuildKeepsSafeCoverage() {
     createClient("client-3", "CC", ["08:00"]),
   ];
 
-  const result = generateSchedule(
-    createInput(staff, clients)
-  );
+  const result = generateSchedule(createInput(staff, clients));
 
   assert.equal(
     result.metrics.coveredClientSlots,
@@ -267,11 +336,7 @@ function testManualAssignmentsStayProtected() {
   };
 
   const result = generateSchedule(
-    createInput(
-      staff,
-      clients,
-      [manualAssignment]
-    )
+    createInput(staff, clients, [manualAssignment])
   );
   const preserved = result.assignments.find(
     (assignment) => assignment.id === "manual-1"
@@ -289,31 +354,19 @@ function testManualAssignmentsStayProtected() {
 }
 
 function testHigherSupportClientRotates() {
-  const slots = [
-    "08:00",
-    "08:30",
-    "09:00",
-    "09:30",
-  ];
+  const slots = ["08:00", "08:30", "09:00", "09:30"];
   const staff = [
     createStaff("bt-1", "BT One", "BT", slots),
     createStaff("bt-2", "BT Two", "BT", slots),
     createStaff("bt-3", "BT Three", "BT", slots),
   ];
-  const client = createClient(
-    "client-1",
-    "HS",
-    slots,
-    {
-      supportLevel: "HIGH_SUPPORT",
-      maxConsecutiveBlocksWithSameStaff: 2,
-      desiredDifferentStaffPerDay: 3,
-    }
-  );
+  const client = createClient("client-1", "HS", slots, {
+    supportLevel: "HIGH_SUPPORT",
+    maxConsecutiveBlocksWithSameStaff: 2,
+    desiredDifferentStaffPerDay: 3,
+  });
 
-  const result = generateSchedule(
-    createInput(staff, [client])
-  );
+  const result = generateSchedule(createInput(staff, [client]));
   const usedStaffIds = new Set(
     clientAssignments(result.assignments).map(
       (assignment) => assignment.staffId
@@ -336,11 +389,7 @@ function testWeeklyMaximumIsHardLimit() {
   staffMember.maximumWeeklyHours = 40;
   staffMember.scheduledWeeklyClientHoursBeforeDate = 40;
 
-  const client = createClient(
-    "client-1",
-    "AA",
-    ["08:00"]
-  );
+  const client = createClient("client-1", "AA", ["08:00"]);
 
   const result = generateSchedule(
     createInput([staffMember], [client])
@@ -363,11 +412,7 @@ function testTemplateReferenceGuidesStableMatching() {
     createStaff("bt-1", "BT One", "BT", ["08:00"]),
     createStaff("bt-2", "BT Two", "BT", ["08:00"]),
   ];
-  const client = createClient(
-    "client-1",
-    "AA",
-    ["08:00"]
-  );
+  const client = createClient("client-1", "AA", ["08:00"]);
   const reference: SchedulerAssignment = {
     id: "template-reference",
     staffId: "bt-2",
@@ -379,12 +424,7 @@ function testTemplateReferenceGuidesStableMatching() {
   };
 
   const result = generateSchedule(
-    createInput(
-      staff,
-      [client],
-      [],
-      [reference]
-    )
+    createInput(staff, [client], [], [reference])
   );
   const assignment = clientAssignments(result.assignments)[0];
 
@@ -451,20 +491,65 @@ function testBreakPlanningUsesReliefCapacity() {
   );
 }
 
+function testRepeatedBreakHistoryGuidesPlacement() {
+  const slots = ["11:30", "12:00", "12:30"];
+  const staff = [
+    createStaff("bt-1", "BT One", "BT", slots),
+    createStaff("bt-2", "BT Two", "BT", slots),
+    createStaff(
+      "manager-1",
+      "Manager",
+      "OFFICE_MANAGER",
+      slots
+    ),
+  ];
+  const clients = [createClient("client-1", "AA", slots)];
+  const history = [
+    createHistoricalBreakReference("break-1", "bt-1", "12:00"),
+    createHistoricalBreakReference("break-2", "bt-1", "12:00"),
+    createHistoricalBreakReference("break-3", "bt-1", "12:00"),
+  ];
+
+  const breaks = reserveStaffBreaks({
+    staff,
+    clients,
+    existingAssignments: [],
+    referenceAssignments: history,
+    callOutStaffIds: [],
+    rules: {
+      breakWindowStart: "11:00",
+      breakWindowEnd: "13:30",
+      defaultBreakMinutes: 30,
+      breakEligibilityHours: 0,
+      slotLengthMinutes: 30,
+    },
+  });
+
+  const btOneBreak = breaks.find(
+    (assignment) => assignment.staffId === "bt-1"
+  );
+
+  assert.equal(
+    btOneBreak?.startTime,
+    "12:00",
+    "Repeated prior break timing should guide break placement when capacity is equally safe."
+  );
+}
+
 function runSchedulerRegressionScenarios() {
   testRoleCoverageOrder();
   testHistoricalPreferenceCannotJumpRoleTier();
   testHistoricalSameWeekdayPatternGuidesMatching();
+  testImportedHistoricalPatternGuidesMatching();
   testPartialBuildKeepsSafeCoverage();
   testManualAssignmentsStayProtected();
   testHigherSupportClientRotates();
   testWeeklyMaximumIsHardLimit();
   testTemplateReferenceGuidesStableMatching();
   testBreakPlanningUsesReliefCapacity();
+  testRepeatedBreakHistoryGuidesPlacement();
 
-  console.log(
-    "Automatic scheduler regression scenarios passed."
-  );
+  console.log("Automatic scheduler regression scenarios passed.");
 }
 
 runSchedulerRegressionScenarios();
