@@ -9,10 +9,15 @@ import {
 } from "@/features/scheduler/training/livingstonWorkbookTrial";
 import { connectToDatabase } from "@/lib/db";
 import { Location } from "@/models/Location";
+import { SchedulingRules } from "@/models/SchedulingRules";
 
 type LocationRecord = {
   name?: string;
   code?: string;
+};
+
+type HistoricalRuleRecord = {
+  autoUseHistoricalPatterns?: boolean;
 };
 
 export type LivingstonWorkbookTrainingResult = {
@@ -81,9 +86,34 @@ export async function applyLivingstonWorkbookTrial(
 
   await connectToDatabase();
 
-  const locationResult = await Location.findById(locationId)
-    .select("name code")
-    .lean();
+  const [locationResult, ruleResult] = await Promise.all([
+    Location.findById(locationId)
+      .select("name code")
+      .lean(),
+    SchedulingRules.findOne({ locationId })
+      .select("autoUseHistoricalPatterns")
+      .lean(),
+  ]);
+
+  const historicalRule = ruleResult && !Array.isArray(ruleResult)
+    ? (ruleResult as unknown as HistoricalRuleRecord)
+    : null;
+
+  if (historicalRule?.autoUseHistoricalPatterns === false) {
+    return {
+      input: {
+        ...input,
+        rules: {
+          ...input.rules,
+          autoUseHistoricalPatterns: false,
+        },
+      },
+      applied: false,
+      referenceCount: 0,
+      sourceWeekStart: null,
+      sourceWeekEnd: null,
+    };
+  }
 
   if (!locationResult || Array.isArray(locationResult)) {
     return {
@@ -136,6 +166,10 @@ export async function applyLivingstonWorkbookTrial(
         ...input.referenceAssignments,
         ...trialReferences,
       ],
+      rules: {
+        ...input.rules,
+        autoUseHistoricalPatterns: true,
+      },
     },
     applied: true,
     referenceCount: trialReferences.length,
