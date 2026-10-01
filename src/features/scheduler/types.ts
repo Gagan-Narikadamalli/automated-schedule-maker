@@ -2,6 +2,7 @@ export type AssignmentType =
   | "CLIENT_1_TO_1"
   | "BREAK"
   | "BREAK_NAP"
+  | "BREAK_SPEECH"
   | "NAP"
   | "SPEECH"
   | "UNAVAILABLE"
