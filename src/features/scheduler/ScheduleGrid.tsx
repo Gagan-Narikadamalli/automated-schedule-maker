@@ -21,12 +21,25 @@ import {
 } from "./schedulePresets";
 import type { CellPosition, StaffColumn } from "./types";
 
+export type ScheduleGridMutation = {
+  row: number;
+  column: number;
+  staffId: string;
+  startTime: string;
+  previousCell: DemoGridCell;
+  nextCell: DemoGridCell;
+};
+
 type ScheduleGridProps = {
   staff: StaffColumn[];
   initialGrid: DemoGridCell[][];
   manualMode: boolean;
   onConflict: (message: string) => void;
   onDisplacedAssignment: (assignment: string) => void;
+  onMutations?: (
+    mutations: ScheduleGridMutation[],
+    force: boolean
+  ) => Promise<boolean>;
 };
 
 type Selection = {
@@ -41,6 +54,10 @@ function normalizeSelection(selection: Selection) {
     firstColumn: Math.min(selection.anchor.column, selection.focus.column),
     lastColumn: Math.max(selection.anchor.column, selection.focus.column),
   };
+}
+
+function cloneGrid(grid: DemoGridCell[][]): DemoGridCell[][] {
+  return grid.map((row) => row.map((cell) => ({ ...cell })));
 }
 
 function cellClassName(cell: DemoGridCell, selected: boolean): string {
@@ -77,12 +94,20 @@ function cellClassName(cell: DemoGridCell, selected: boolean): string {
   return classNames.join(" ");
 }
 
+function isOccupied(cell: DemoGridCell): boolean {
+  return (
+    cell.assignmentType !== "EMPTY" &&
+    cell.assignmentType !== "UNAVAILABLE"
+  );
+}
+
 export function ScheduleGrid({
   staff,
   initialGrid,
   manualMode,
   onConflict,
   onDisplacedAssignment,
+  onMutations,
 }: ScheduleGridProps) {
   const [grid, setGrid] = useState<DemoGridCell[][]>(initialGrid);
   const [selection, setSelection] = useState<Selection>({
@@ -94,6 +119,7 @@ export function ScheduleGrid({
   const [dragOverCell, setDragOverCell] = useState<CellPosition | null>(null);
   const [moveSource, setMoveSource] = useState<CellPosition | null>(null);
   const [dragSelecting, setDragSelecting] = useState(false);
+  const [saving, setSaving] = useState(false);
   const scheduleAreaRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<HTMLInputElement | null>(null);
 
@@ -124,14 +150,77 @@ export function ScheduleGrid({
     });
   }
 
+  function mutationForCell(
+    row: number,
+    column: number,
+    previousCell: DemoGridCell,
+    nextCell: DemoGridCell
+  ): ScheduleGridMutation {
+    return {
+      row,
+      column,
+      staffId: staff[column].id,
+      startTime: DAILY_TIME_SLOTS[row].startTime,
+      previousCell,
+      nextCell,
+    };
+  }
+
+  async function commitMutations(
+    nextGrid: DemoGridCell[][],
+    mutations: ScheduleGridMutation[],
+    force: boolean
+  ) {
+    if (mutations.length === 0) {
+      return;
+    }
+
+    const previousGrid = grid;
+    setGrid(nextGrid);
+
+    if (!onMutations) {
+      return;
+    }
+
+    try {
+      setSaving(true);
+      const saved = await onMutations(mutations, force);
+
+      if (!saved) {
+        setGrid(previousGrid);
+      }
+    } catch {
+      setGrid(previousGrid);
+      onConflict(
+        "The schedule change could not be saved, so the grid was restored."
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function confirmReplacement(count: number): boolean {
+    if (count <= 0) {
+      return true;
+    }
+
+    return window.confirm(
+      `${count} occupied schedule block${count === 1 ? "" : "s"} will be replaced. The displaced assignment(s) will be listed in the Unplaced Assignments tray. Continue?`
+    );
+  }
+
   function handleCellMouseDown(
     event: MouseEvent<HTMLTableCellElement>,
     row: number,
     column: number
   ) {
+    if (saving) {
+      return;
+    }
+
     if (moveSource) {
       event.preventDefault();
-      moveAssignment(moveSource, { row, column });
+      void moveAssignment(moveSource, { row, column });
       return;
     }
 
@@ -148,7 +237,7 @@ export function ScheduleGrid({
   }
 
   function handleCellMouseEnter(row: number, column: number) {
-    if (!dragSelecting || moveSource) {
+    if (!dragSelecting || moveSource || saving) {
       return;
     }
 
@@ -190,82 +279,126 @@ export function ScheduleGrid({
     selectSingleCell(nextRow, nextColumn);
   }
 
-  function applyPresetToSelection(preset: SchedulePreset) {
+  async function applyPresetToSelection(preset: SchedulePreset) {
+    const nextGrid = cloneGrid(grid);
+    const mutations: ScheduleGridMutation[] = [];
+    const displaced: string[] = [];
     let protectedCells = 0;
     let unavailableCells = 0;
 
-    setGrid((currentGrid) =>
-      currentGrid.map((row, rowIndex) =>
-        row.map((cell, columnIndex) => {
-          if (!isCellSelected(rowIndex, columnIndex)) {
-            return cell;
-          }
+    for (
+      let row = normalizedSelection.firstRow;
+      row <= normalizedSelection.lastRow;
+      row += 1
+    ) {
+      for (
+        let column = normalizedSelection.firstColumn;
+        column <= normalizedSelection.lastColumn;
+        column += 1
+      ) {
+        const currentCell = grid[row][column];
 
-          if (cell.assignmentType === "UNAVAILABLE") {
-            unavailableCells += 1;
-            return cell;
-          }
+        if (currentCell.assignmentType === "UNAVAILABLE") {
+          unavailableCells += 1;
+          continue;
+        }
 
-          if (
-            !manualMode &&
-            cell.assignmentType !== "EMPTY" &&
-            cell.text !== preset.text
-          ) {
-            protectedCells += 1;
-            return cell;
-          }
+        if (
+          !manualMode &&
+          isOccupied(currentCell) &&
+          currentCell.text !== preset.text
+        ) {
+          protectedCells += 1;
+          continue;
+        }
 
-          if (
-            manualMode &&
-            cell.assignmentType !== "EMPTY" &&
-            cell.text &&
-            cell.text !== preset.text
-          ) {
-            onDisplacedAssignment(cell.text);
-          }
+        const nextCell = createPresetScheduleCell(preset, currentCell);
 
-          return createPresetScheduleCell(preset);
-        })
-      )
-    );
+        if (
+          manualMode &&
+          isOccupied(currentCell) &&
+          currentCell.text !== nextCell.text
+        ) {
+          displaced.push(currentCell.text);
+        }
+
+        nextGrid[row][column] = nextCell;
+        mutations.push(
+          mutationForCell(row, column, currentCell, nextCell)
+        );
+      }
+    }
+
+    if (displaced.length > 0 && !confirmReplacement(displaced.length)) {
+      return;
+    }
+
+    displaced.forEach(onDisplacedAssignment);
+    await commitMutations(nextGrid, mutations, manualMode);
 
     if (unavailableCells > 0) {
       onConflict(
-        "Unavailable staff blocks were left unchanged. Staff who are off shift or called out cannot receive schedule assignments."
+        "Unavailable staff blocks were left unchanged because the staff member is off shift or called out."
       );
       return;
     }
 
     if (protectedCells > 0) {
       onConflict(
-        "Some occupied cells were protected by Auto-safe mode. Turn on Manual Mode if you need to replace existing assignments."
+        "Some occupied cells were protected by Auto-safe mode. Turn on Manual Mode to replace them."
       );
     }
   }
 
-  function clearSelectedCells() {
+  async function clearSelectedCells() {
+    const nextGrid = cloneGrid(grid);
+    const mutations: ScheduleGridMutation[] = [];
+    const displaced: string[] = [];
     let protectedCells = 0;
 
-    setGrid((currentGrid) =>
-      currentGrid.map((row, rowIndex) =>
-        row.map((cell, columnIndex) => {
-          if (!isCellSelected(rowIndex, columnIndex)) {
-            return cell;
-          }
+    for (
+      let row = normalizedSelection.firstRow;
+      row <= normalizedSelection.lastRow;
+      row += 1
+    ) {
+      for (
+        let column = normalizedSelection.firstColumn;
+        column <= normalizedSelection.lastColumn;
+        column += 1
+      ) {
+        const currentCell = grid[row][column];
 
-          if (cell.assignmentType === "UNAVAILABLE") {
-            return cell;
-          }
+        if (currentCell.assignmentType === "UNAVAILABLE") {
+          continue;
+        }
 
-          if (!manualMode && cell.assignmentType !== "EMPTY") {
-            protectedCells += 1;
-            return cell;
-          }
+        if (!manualMode && isOccupied(currentCell)) {
+          protectedCells += 1;
+          continue;
+        }
 
-          return createEmptyScheduleCell();
-        })
-      )
-    );
+        if (currentCell.assignmentType === "EMPTY") {
+          continue;
+        }
+
+        if (currentCell.text) {
+          displaced.push(currentCell.text);
+        }
+
+        const nextCell = createEmptyScheduleCell();
+        nextGrid[row][column] = nextCell;
+        mutations.push(
+          mutationForCell(row, column, currentCell, nextCell)
+        );
+      }
+    }
+
+    if (displaced.length > 0 && manualMode && !confirmReplacement(displaced.length)) {
+      return;
+    }
+
+    displaced.forEach(onDisplacedAssignment);
+    await commitMutations(nextGrid, mutations, manualMode);
 
     if (protectedCells > 0) {
       onConflict(
@@ -275,7 +408,7 @@ export function ScheduleGrid({
   }
 
   function handleGridKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (editingCell) {
+    if (editingCell || saving) {
       return;
     }
 
@@ -305,7 +438,7 @@ export function ScheduleGrid({
       case "Delete":
       case "Backspace":
         event.preventDefault();
-        clearSelectedCells();
+        void clearSelectedCells();
         break;
       case "Escape":
         setMoveSource(null);
@@ -340,10 +473,10 @@ export function ScheduleGrid({
     event.preventDefault();
   }
 
-  function handlePaste(event: ClipboardEvent<HTMLDivElement>) {
+  async function handlePaste(event: ClipboardEvent<HTMLDivElement>) {
     const clipboardText = event.clipboardData.getData("text/plain");
 
-    if (!clipboardText) {
+    if (!clipboardText || saving) {
       return;
     }
 
@@ -355,54 +488,67 @@ export function ScheduleGrid({
 
     const startRow = selection.focus.row;
     const startColumn = selection.focus.column;
+    const nextGrid = cloneGrid(grid);
+    const mutations: ScheduleGridMutation[] = [];
+    const displaced: string[] = [];
     let protectedCellEncountered = false;
 
-    setGrid((currentGrid) => {
-      const nextGrid = currentGrid.map((row) =>
-        row.map((cell) => ({ ...cell }))
-      );
+    pastedRows.forEach((pastedRow, pastedRowIndex) => {
+      pastedRow.forEach((pastedValue, pastedColumnIndex) => {
+        const targetRow = startRow + pastedRowIndex;
+        const targetColumn = startColumn + pastedColumnIndex;
 
-      pastedRows.forEach((pastedRow, pastedRowIndex) => {
-        pastedRow.forEach((pastedValue, pastedColumnIndex) => {
-          const targetRow = startRow + pastedRowIndex;
-          const targetColumn = startColumn + pastedColumnIndex;
+        if (targetRow >= nextGrid.length || targetColumn >= staff.length) {
+          return;
+        }
 
-          if (targetRow >= nextGrid.length || targetColumn >= staff.length) {
-            return;
-          }
+        const existingCell = nextGrid[targetRow][targetColumn];
+        const pastedCell = createScheduleCellFromText(
+          pastedValue,
+          existingCell
+        );
 
-          const existingCell = nextGrid[targetRow][targetColumn];
-          const pastedCell = createScheduleCellFromText(pastedValue);
+        if (existingCell.assignmentType === "UNAVAILABLE") {
+          protectedCellEncountered = true;
+          return;
+        }
 
-          if (existingCell.assignmentType === "UNAVAILABLE") {
-            protectedCellEncountered = true;
-            return;
-          }
+        if (
+          !manualMode &&
+          isOccupied(existingCell) &&
+          existingCell.text !== pastedCell.text
+        ) {
+          protectedCellEncountered = true;
+          return;
+        }
 
-          if (
-            !manualMode &&
-            existingCell.assignmentType !== "EMPTY" &&
-            existingCell.text !== pastedCell.text
-          ) {
-            protectedCellEncountered = true;
-            return;
-          }
+        if (
+          manualMode &&
+          isOccupied(existingCell) &&
+          existingCell.text !== pastedCell.text
+        ) {
+          displaced.push(existingCell.text);
+        }
 
-          if (
-            manualMode &&
-            existingCell.assignmentType !== "EMPTY" &&
-            existingCell.text &&
-            existingCell.text !== pastedCell.text
-          ) {
-            onDisplacedAssignment(existingCell.text);
-          }
-
-          nextGrid[targetRow][targetColumn] = pastedCell;
-        });
+        nextGrid[targetRow][targetColumn] = pastedCell;
+        mutations.push(
+          mutationForCell(
+            targetRow,
+            targetColumn,
+            existingCell,
+            pastedCell
+          )
+        );
       });
-
-      return nextGrid;
     });
+
+    if (displaced.length > 0 && !confirmReplacement(displaced.length)) {
+      event.preventDefault();
+      return;
+    }
+
+    displaced.forEach(onDisplacedAssignment);
+    await commitMutations(nextGrid, mutations, manualMode);
 
     if (protectedCellEncountered) {
       onConflict(
@@ -413,9 +559,9 @@ export function ScheduleGrid({
     event.preventDefault();
   }
 
-  function saveEditedCell(row: number, column: number, text: string) {
+  async function saveEditedCell(row: number, column: number, text: string) {
     const currentCell = grid[row][column];
-    const updatedCell = createScheduleCellFromText(text);
+    const updatedCell = createScheduleCellFromText(text, currentCell);
 
     if (currentCell.assignmentType === "UNAVAILABLE") {
       onConflict("Unavailable staff blocks cannot be edited.");
@@ -425,41 +571,42 @@ export function ScheduleGrid({
 
     if (
       !manualMode &&
-      currentCell.assignmentType !== "EMPTY" &&
+      isOccupied(currentCell) &&
       currentCell.text !== updatedCell.text
     ) {
       onConflict(
-        "This cell already contains an assignment. Auto-safe mode will not replace it. Turn on Manual Mode if you need to force the change."
+        "This cell already contains an assignment. Auto-safe mode will not replace it. Turn on Manual Mode to force the change."
       );
       setEditingCell(null);
       return;
     }
 
-    if (
+    const replacing =
       manualMode &&
-      currentCell.assignmentType !== "EMPTY" &&
-      currentCell.text &&
-      currentCell.text !== updatedCell.text
-    ) {
+      isOccupied(currentCell) &&
+      currentCell.text !== updatedCell.text;
+
+    if (replacing && !confirmReplacement(1)) {
+      setEditingCell(null);
+      return;
+    }
+
+    if (replacing && currentCell.text) {
       onDisplacedAssignment(currentCell.text);
     }
 
-    setGrid((currentGrid) =>
-      currentGrid.map((gridRow, rowIndex) =>
-        gridRow.map((cell, columnIndex) => {
-          if (rowIndex === row && columnIndex === column) {
-            return updatedCell;
-          }
-
-          return cell;
-        })
-      )
-    );
-
+    const nextGrid = cloneGrid(grid);
+    nextGrid[row][column] = updatedCell;
     setEditingCell(null);
+
+    await commitMutations(
+      nextGrid,
+      [mutationForCell(row, column, currentCell, updatedCell)],
+      manualMode
+    );
   }
 
-  function moveAssignment(source: CellPosition, target: CellPosition) {
+  async function moveAssignment(source: CellPosition, target: CellPosition) {
     if (!manualMode) {
       onConflict("Turn on Manual Mode before moving assignments.");
       setMoveSource(null);
@@ -488,23 +635,39 @@ export function ScheduleGrid({
       return;
     }
 
-    if (targetCell.assignmentType !== "EMPTY" && targetCell.text) {
+    if (isOccupied(targetCell) && !confirmReplacement(1)) {
+      setMoveSource(null);
+      return;
+    }
+
+    if (isOccupied(targetCell) && targetCell.text) {
       onDisplacedAssignment(targetCell.text);
     }
 
-    setGrid((currentGrid) => {
-      const nextGrid = currentGrid.map((row) =>
-        row.map((cell) => ({ ...cell }))
-      );
+    const nextGrid = cloneGrid(grid);
+    nextGrid[target.row][target.column] = {
+      ...sourceCell,
+      source: "MANUAL",
+      locked: true,
+    };
+    nextGrid[source.row][source.column] = createEmptyScheduleCell();
 
-      nextGrid[target.row][target.column] = {
-        ...sourceCell,
-      };
-      nextGrid[source.row][source.column] = createEmptyScheduleCell();
+    const mutations = [
+      mutationForCell(
+        source.row,
+        source.column,
+        sourceCell,
+        nextGrid[source.row][source.column]
+      ),
+      mutationForCell(
+        target.row,
+        target.column,
+        targetCell,
+        nextGrid[target.row][target.column]
+      ),
+    ];
 
-      return nextGrid;
-    });
-
+    await commitMutations(nextGrid, mutations, true);
     selectSingleCell(target.row, target.column);
     setMoveSource(null);
   }
@@ -518,6 +681,7 @@ export function ScheduleGrid({
 
     if (
       !manualMode ||
+      saving ||
       cell.assignmentType === "EMPTY" ||
       cell.assignmentType === "UNAVAILABLE"
     ) {
@@ -537,11 +701,11 @@ export function ScheduleGrid({
   ) {
     event.preventDefault();
 
-    if (!manualMode || !draggedCell) {
+    if (!manualMode || !draggedCell || saving) {
       return;
     }
 
-    moveAssignment(draggedCell, {
+    void moveAssignment(draggedCell, {
       row: targetRow,
       column: targetColumn,
     });
@@ -595,6 +759,7 @@ export function ScheduleGrid({
           <strong>Selected cell actions</strong>
           <span>
             Set Break, Nap, Speech, or a combined Break activity without typing.
+            {saving ? " Saving changes..." : ""}
           </span>
         </div>
 
@@ -604,7 +769,8 @@ export function ScheduleGrid({
               key={preset.assignmentType}
               type="button"
               className="quick-action-button"
-              onClick={() => applyPresetToSelection(preset)}
+              disabled={saving}
+              onClick={() => void applyPresetToSelection(preset)}
             >
               {preset.label}
             </button>
@@ -613,7 +779,8 @@ export function ScheduleGrid({
           <button
             type="button"
             className="quick-action-button"
-            onClick={clearSelectedCells}
+            disabled={saving}
+            onClick={() => void clearSelectedCells()}
           >
             Clear
           </button>
@@ -623,6 +790,7 @@ export function ScheduleGrid({
             className={`quick-action-button ${
               moveSource ? "quick-action-button-active" : ""
             }`}
+            disabled={saving}
             onClick={moveSource ? () => setMoveSource(null) : beginMoveSelected}
           >
             {moveSource ? "Cancel Move" : "Move Selected"}
@@ -645,7 +813,7 @@ export function ScheduleGrid({
         tabIndex={0}
         onKeyDown={handleGridKeyDown}
         onCopy={handleCopy}
-        onPaste={handlePaste}
+        onPaste={(event) => void handlePaste(event)}
         onMouseUp={stopDragSelection}
         onMouseLeave={stopDragSelection}
         aria-label="SOS schedule spreadsheet"
@@ -684,6 +852,7 @@ export function ScheduleGrid({
                       style={{ backgroundColor: cell.color }}
                       draggable={
                         manualMode &&
+                        !saving &&
                         cell.assignmentType !== "EMPTY" &&
                         cell.assignmentType !== "UNAVAILABLE"
                       }
@@ -694,6 +863,10 @@ export function ScheduleGrid({
                         handleCellMouseEnter(rowIndex, columnIndex)
                       }
                       onDoubleClick={() => {
+                        if (saving) {
+                          return;
+                        }
+
                         if (cell.assignmentType === "UNAVAILABLE") {
                           onConflict("Unavailable staff blocks cannot be edited.");
                           return;
@@ -739,7 +912,7 @@ export function ScheduleGrid({
                           className="schedule-cell-editor"
                           defaultValue={cell.text}
                           onBlur={(event) =>
-                            saveEditedCell(
+                            void saveEditedCell(
                               rowIndex,
                               columnIndex,
                               event.currentTarget.value
@@ -748,7 +921,7 @@ export function ScheduleGrid({
                           onKeyDown={(event) => {
                             if (event.key === "Enter") {
                               event.preventDefault();
-                              saveEditedCell(
+                              void saveEditedCell(
                                 rowIndex,
                                 columnIndex,
                                 event.currentTarget.value

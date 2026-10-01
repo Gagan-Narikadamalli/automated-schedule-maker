@@ -8,7 +8,10 @@ import {
   DEMO_STAFF,
   type DemoGridCell,
 } from "./demoData";
-import { ScheduleGrid } from "./ScheduleGrid";
+import {
+  ScheduleGrid,
+  type ScheduleGridMutation,
+} from "./ScheduleGrid";
 import type { AssignmentType, StaffColumn } from "./types";
 
 type LocationOption = {
@@ -66,9 +69,38 @@ type GenerateMetrics = {
 type GenerateResponse = {
   success?: boolean;
   metrics?: GenerateMetrics;
-  warnings?: string[];
+  warnings?: unknown[];
   uncoveredRequirements?: unknown[];
   affectedStaffIds?: string[];
+  error?: string;
+};
+
+type GenerateRangeResponse = {
+  success?: boolean;
+  results?: Array<{
+    date: string;
+    skipped: boolean;
+    metrics?: GenerateMetrics;
+    warningCount?: number;
+  }>;
+  error?: string;
+};
+
+type BatchResponse = {
+  success?: boolean;
+  updatedCount?: number;
+  forced?: boolean;
+  conflicts?: Array<{
+    code: string;
+    message: string;
+  }>;
+  error?: string;
+};
+
+type CopyDayResponse = {
+  success?: boolean;
+  copiedCount?: number;
+  warnings?: string[];
   error?: string;
 };
 
@@ -109,6 +141,20 @@ function getTodayForDateInput(): string {
   return localTime.toISOString().slice(0, 10);
 }
 
+function addDays(dateText: string, numberOfDays: number): string {
+  const date = new Date(`${dateText}T12:00:00`);
+  date.setDate(date.getDate() + numberOfDays);
+  return date.toISOString().slice(0, 10);
+}
+
+function getMonday(dateText: string): string {
+  const date = new Date(`${dateText}T12:00:00`);
+  const day = date.getDay();
+  const offset = day === 0 ? -6 : 1 - day;
+  date.setDate(date.getDate() + offset);
+  return date.toISOString().slice(0, 10);
+}
+
 async function readJson<T>(response: Response): Promise<T> {
   const data = (await response.json()) as T;
 
@@ -132,45 +178,67 @@ function createUnavailableCell(): DemoGridCell {
     text: "",
     assignmentType: "UNAVAILABLE",
     color: "#8D8D8D",
+    locked: true,
   };
 }
 
 function clientFromAssignment(
   assignment: ScheduleAssignment
 ): PopulatedClient | null {
-  if (
-    assignment.clientId &&
-    typeof assignment.clientId === "object"
-  ) {
+  if (assignment.clientId && typeof assignment.clientId === "object") {
     return assignment.clientId;
   }
 
   return null;
 }
 
+function clientIdFromAssignment(assignment: ScheduleAssignment): string | null {
+  if (!assignment.clientId) {
+    return null;
+  }
+
+  if (typeof assignment.clientId === "string") {
+    return assignment.clientId;
+  }
+
+  return String(assignment.clientId._id ?? assignment.clientId.id ?? "") || null;
+}
+
 function assignmentToGridCell(
   assignment: ScheduleAssignment
 ): DemoGridCell {
   const client = clientFromAssignment(assignment);
+  const clientId = clientIdFromAssignment(assignment);
+  const clientCode = client?.displayCode ?? null;
+  const common = {
+    clientId,
+    clientCode,
+    source: assignment.source,
+    locked: assignment.locked || assignment.manuallyOverridden,
+  };
 
   switch (assignment.assignmentType) {
     case "CLIENT_1_TO_1":
       return {
-        text: client?.displayCode
-          ? `${client.displayCode} 1:1`
-          : "Client 1:1",
+        ...common,
+        text: clientCode ? `${clientCode} 1:1` : "Client 1:1",
         assignmentType: "CLIENT_1_TO_1",
         color: client?.color || "#D9F4EE",
       };
 
     case "BREAK":
       return {
+        ...common,
+        clientId: null,
+        clientCode: null,
         text: "Break",
         assignmentType: "BREAK",
+        color: "#FFFFFF",
       };
 
     case "BREAK_NAP":
       return {
+        ...common,
         text: "Break/Nap",
         assignmentType: "BREAK_NAP",
         color: "#FFF3D6",
@@ -178,6 +246,7 @@ function assignmentToGridCell(
 
     case "BREAK_SPEECH":
       return {
+        ...common,
         text: "Break/Speech",
         assignmentType: "BREAK_SPEECH",
         color: "#E4F1FA",
@@ -185,18 +254,16 @@ function assignmentToGridCell(
 
     case "NAP":
       return {
-        text: client?.displayCode
-          ? `${client.displayCode} Nap`
-          : "Nap",
+        ...common,
+        text: clientCode ? `${clientCode} Nap` : "Nap",
         assignmentType: "NAP",
         color: "#F4EFE3",
       };
 
     case "SPEECH":
       return {
-        text: client?.displayCode
-          ? `${client.displayCode} Speech`
-          : "Speech",
+        ...common,
+        text: clientCode ? `${clientCode} Speech` : "Speech",
         assignmentType: "SPEECH",
         color: "#DCE9F8",
       };
@@ -282,6 +349,10 @@ export function ScheduleWorkspaceV2() {
   const [unplacedAssignments, setUnplacedAssignments] = useState<string[]>([]);
   const [showCallOutPanel, setShowCallOutPanel] = useState(false);
   const [callOutStaffIds, setCallOutStaffIds] = useState<string[]>([]);
+  const [showCopyPanel, setShowCopyPanel] = useState(false);
+  const [copySourceDate, setCopySourceDate] = useState(() =>
+    addDays(getTodayForDateInput(), -1)
+  );
 
   const demoMode = locationId.startsWith("demo-");
 
@@ -326,7 +397,7 @@ export function ScheduleWorkspaceV2() {
         setLocations(DEMO_LOCATIONS);
         setLocationId(DEMO_LOCATIONS[0].id);
         setStatusMessage(
-          "Demo mode is active because the database is not available yet. You can test the schedule grid, manual mode, break/nap/speech controls, moving, copy/paste, scrolling, and focus view without saving clinic data."
+          "Preview mode is active because the live clinic database could not be loaded. Grid interactions remain available but are not saved."
         );
       }
     }
@@ -354,9 +425,6 @@ export function ScheduleWorkspaceV2() {
     setRequiredClientSlots(countDemoClientBlocks(nextGrid));
     setGridVersion((currentVersion) => currentVersion + 1);
     setLoading(false);
-    setStatusMessage(
-      "Demo schedule loaded. Manual changes stay in the browser only until MongoDB is connected."
-    );
   }
 
   async function loadSchedule(
@@ -399,12 +467,14 @@ export function ScheduleWorkspaceV2() {
           nextAssignments.length === 1 ? "" : "s"
         }. ${data.requiredClientSlots ?? 0} client blocks require coverage.`
       );
-    } catch {
+    } catch (error) {
       setLocations(DEMO_LOCATIONS);
       setLocationId(DEMO_LOCATIONS[0].id);
       loadDemoSchedule();
       setStatusMessage(
-        "The live database schedule could not be loaded, so the calendar switched to demo mode. Your test edits are local and will not change clinic records."
+        error instanceof Error
+          ? `${error.message} Preview mode has been enabled.`
+          : "The live database schedule could not be loaded. Preview mode has been enabled."
       );
     } finally {
       setLoading(false);
@@ -417,7 +487,7 @@ export function ScheduleWorkspaceV2() {
 
       setStatusMessage(
         nextMode
-          ? "Manual Mode is on. You can move or replace assignments. Replaced items go to the Unplaced Assignments tray."
+          ? "Manual Mode is on. Replacements require confirmation and are saved as locked manager overrides."
           : "Auto-safe mode is on. Existing assignments are protected from accidental replacement."
       );
 
@@ -434,10 +504,64 @@ export function ScheduleWorkspaceV2() {
       ...currentAssignments,
       assignment,
     ]);
+  }
 
-    setStatusMessage(
-      `${assignment} was displaced and moved to the Unplaced Assignments tray.`
-    );
+  async function persistGridMutations(
+    mutations: ScheduleGridMutation[],
+    force: boolean
+  ): Promise<boolean> {
+    if (demoMode) {
+      setStatusMessage(
+        `${mutations.length} preview cell change(s) applied locally. Preview changes are not saved.`
+      );
+      return true;
+    }
+
+    try {
+      const response = await fetch("/api/schedule/batch", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          locationId,
+          date: selectedDate,
+          force,
+          changes: mutations.map((mutation) => ({
+            staffId: mutation.staffId,
+            startTime: mutation.startTime,
+            assignmentType: mutation.nextCell.assignmentType,
+            text: mutation.nextCell.text,
+            clientId: mutation.nextCell.clientId ?? null,
+          })),
+        }),
+      });
+      const data = await readJson<BatchResponse>(response);
+
+      if (!response.ok) {
+        const conflictMessage = data.conflicts?.[0]?.message;
+        setStatusMessage(
+          conflictMessage || data.error || "The schedule change could not be saved."
+        );
+        return false;
+      }
+
+      const conflictSuffix = data.conflicts?.length
+        ? ` ${data.conflicts.length} conflict(s) were acknowledged as manual overrides.`
+        : "";
+
+      setStatusMessage(
+        `${data.updatedCount ?? mutations.length} schedule cell change(s) saved to MongoDB.${conflictSuffix}`
+      );
+      return true;
+    } catch (error) {
+      setStatusMessage(
+        error instanceof Error
+          ? error.message
+          : "The schedule change could not be saved."
+      );
+      return false;
+    }
   }
 
   function toggleCallOutStaff(staffId: string) {
@@ -454,9 +578,7 @@ export function ScheduleWorkspaceV2() {
     if (demoMode) {
       setShowCallOutPanel(false);
       setCallOutStaffIds([]);
-      setStatusMessage(
-        "Call-out persistence is disabled in demo mode. Once MongoDB is connected, call-outs will be saved and Repair Schedule will use them as hard constraints."
-      );
+      setStatusMessage("Call-outs are not persisted in preview mode.");
       return;
     }
 
@@ -498,7 +620,7 @@ export function ScheduleWorkspaceV2() {
       setStatusMessage(
         `${savedCount} call-out${
           savedCount === 1 ? "" : "s"
-        } saved for ${selectedDate}. Use Repair Schedule to refill affected coverage.`
+        } saved. Use Repair Schedule to refill affected coverage.`
       );
     } catch (error) {
       setStatusMessage(
@@ -514,20 +636,14 @@ export function ScheduleWorkspaceV2() {
   async function requestAutoGenerate() {
     if (demoMode) {
       loadDemoSchedule();
-      setStatusMessage(
-        "A sample schedule was regenerated locally for preview. Live Auto Generate will use staff shifts, client attendance, speech/nap blocks, breaks, call-outs, relationships, teams, and clinic rules after MongoDB is connected."
-      );
-      return;
-    }
-
-    if (!locationId) {
+      setStatusMessage("A sample day was regenerated locally in preview mode.");
       return;
     }
 
     try {
       setWorking(true);
       setStatusMessage(
-        "Generating the schedule from staff shifts, client attendance, speech/nap blocks, call-outs, relationships, hours, teams, and clinic rules..."
+        "Generating the day from shifts, attendance, call-outs, fixed events, relationships, breaks, teams, and clinic rules..."
       );
 
       const response = await fetch("/api/schedule/generate", {
@@ -565,22 +681,65 @@ export function ScheduleWorkspaceV2() {
     }
   }
 
-  async function requestRepair() {
+  async function requestGenerateWeek() {
     if (demoMode) {
-      setStatusMessage(
-        "Repair Schedule is available in the preview UI. Live repair will preserve unaffected assignments and only refill holes caused by call-outs or new constraints after MongoDB is connected."
-      );
+      setStatusMessage("Week generation is disabled in preview mode.");
       return;
     }
 
-    if (!locationId) {
+    const startDate = getMonday(selectedDate);
+    const endDate = addDays(startDate, 4);
+
+    try {
+      setWorking(true);
+      setStatusMessage(`Generating work week ${startDate} through ${endDate}...`);
+
+      const response = await fetch("/api/schedule/generate-range", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          locationId,
+          startDate,
+          endDate,
+        }),
+      });
+      const data = await readJson<GenerateRangeResponse>(response);
+
+      if (!response.ok) {
+        throw new Error(data.error || "The work week could not be generated.");
+      }
+
+      const generatedDays =
+        data.results?.filter((result) => !result.skipped).length ?? 0;
+      await loadSchedule();
+      setStatusMessage(
+        `${generatedDays} work-day schedule(s) generated for ${startDate} through ${endDate}. Manual locked assignments were preserved.`
+      );
+    } catch (error) {
+      setStatusMessage(
+        error instanceof Error
+          ? error.message
+          : "The work week could not be generated."
+      );
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function requestRepair() {
+    if (demoMode) {
+      setStatusMessage(
+        "Repair Schedule is available only with live clinic data."
+      );
       return;
     }
 
     try {
       setWorking(true);
       setStatusMessage(
-        "Repairing only the schedule areas affected by recorded staff call-outs..."
+        "Repairing only schedule areas affected by recorded staff call-outs..."
       );
 
       const response = await fetch("/api/schedule/repair", {
@@ -610,6 +769,60 @@ export function ScheduleWorkspaceV2() {
         error instanceof Error
           ? error.message
           : "The schedule could not be repaired."
+      );
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function copyDay() {
+    if (demoMode) {
+      setStatusMessage("Copy Day is disabled in preview mode.");
+      return;
+    }
+
+    if (!copySourceDate) {
+      setStatusMessage("Choose a source date to copy.");
+      return;
+    }
+
+    try {
+      setWorking(true);
+      setStatusMessage(
+        `Copying ${copySourceDate} into ${selectedDate} and revalidating constraints...`
+      );
+
+      const response = await fetch("/api/schedule/copy", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          locationId,
+          sourceDate: copySourceDate,
+          targetDate: selectedDate,
+        }),
+      });
+      const data = await readJson<CopyDayResponse>(response);
+
+      if (!response.ok) {
+        throw new Error(data.error || "The schedule day could not be copied.");
+      }
+
+      setShowCopyPanel(false);
+      await loadSchedule();
+      setStatusMessage(
+        `${data.copiedCount ?? 0} block(s) copied from ${copySourceDate}.${
+          data.warnings?.length
+            ? ` ${data.warnings.length} block(s) were skipped during target-date revalidation.`
+            : ""
+        }`
+      );
+    } catch (error) {
+      setStatusMessage(
+        error instanceof Error
+          ? error.message
+          : "The schedule day could not be copied."
       );
     } finally {
       setWorking(false);
@@ -660,8 +873,8 @@ export function ScheduleWorkspaceV2() {
         <section className="demo-mode-banner">
           <strong>Preview / Demo Mode</strong>
           <span>
-            MongoDB clinic data is not connected yet. The calendar remains fully
-            interactive for UI testing, but changes are not saved.
+            The live clinic database is unavailable. Grid edits are local until a
+            live location can be loaded.
           </span>
         </section>
       )}
@@ -690,13 +903,7 @@ export function ScheduleWorkspaceV2() {
             type="button"
             className="button button-secondary"
             disabled={working || loading}
-            onClick={() =>
-              setStatusMessage(
-                demoMode
-                  ? "Copy Day is visible in demo mode. Live Copy Day will copy a source date, preserve manual locks, and revalidate the target date."
-                  : "Copy Day is the next calendar operation being connected. It will copy a selected source date and revalidate it against the target date."
-              )
-            }
+            onClick={() => setShowCopyPanel((open) => !open)}
           >
             Copy Day
           </button>
@@ -716,14 +923,64 @@ export function ScheduleWorkspaceV2() {
 
           <button
             type="button"
+            className="button button-secondary"
+            disabled={working || loading || staff.length === 0}
+            onClick={() => void requestGenerateWeek()}
+          >
+            Auto Generate Week
+          </button>
+
+          <button
+            type="button"
             className="button button-primary"
             disabled={working || loading || staff.length === 0}
             onClick={() => void requestAutoGenerate()}
           >
-            {working ? "Working..." : "Auto Generate"}
+            {working ? "Working..." : "Auto Generate Day"}
           </button>
         </div>
       </section>
+
+      {showCopyPanel && (
+        <section className="callout-panel">
+          <div className="panel-heading-row">
+            <div>
+              <h2>Copy Schedule into {selectedDate}</h2>
+              <p>
+                The copied day is revalidated against the target date. Protected
+                manual target cells are not overwritten.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="button button-secondary"
+              onClick={() => setShowCopyPanel(false)}
+            >
+              Close
+            </button>
+          </div>
+
+          <div className="form-grid form-grid-compact">
+            <label className="form-field">
+              <span>Copy from date</span>
+              <input
+                type="date"
+                value={copySourceDate}
+                onChange={(event) => setCopySourceDate(event.target.value)}
+              />
+            </label>
+          </div>
+
+          <button
+            type="button"
+            className="button button-primary"
+            disabled={working || !copySourceDate}
+            onClick={() => void copyDay()}
+          >
+            Copy and Revalidate
+          </button>
+        </section>
+      )}
 
       {showCallOutPanel && (
         <section className="callout-panel">
@@ -731,8 +988,8 @@ export function ScheduleWorkspaceV2() {
             <div>
               <h2>Call Outs for {selectedDate}</h2>
               <p>
-                Select staff who are unavailable for the clinic day. In live
-                mode, the call-out becomes a hard scheduling constraint.
+                Select staff who are unavailable for the clinic day. Saved call-outs
+                become hard automatic-scheduling constraints.
               </p>
             </div>
             <button
@@ -773,7 +1030,7 @@ export function ScheduleWorkspaceV2() {
       <section className="schedule-status-bar" aria-live="polite">
         <strong>{locationName}</strong>
         <span>{selectedDate}</span>
-        <span>{requiredClientSlots} client blocks shown</span>
+        <span>{requiredClientSlots} client blocks required</span>
         <span>{manualMode ? "Manual override enabled" : "Auto-safe enabled"}</span>
         <span>{statusMessage}</span>
       </section>
@@ -804,6 +1061,7 @@ export function ScheduleWorkspaceV2() {
               manualMode={manualMode}
               onConflict={handleConflict}
               onDisplacedAssignment={handleDisplacedAssignment}
+              onMutations={persistGridMutations}
             />
           )}
         </section>
@@ -811,9 +1069,8 @@ export function ScheduleWorkspaceV2() {
         <aside className="unplaced-tray">
           <h2>Unplaced Assignments</h2>
           <p>
-            In Manual Mode, an assignment replaced by drag-and-drop, Move
-            Selected, typing, or a quick action is kept here instead of being
-            silently deleted.
+            In Manual Mode, replaced entries are held here so the manager can see
+            what still needs coverage instead of losing the displaced assignment.
           </p>
 
           {unplacedAssignments.length === 0 ? (

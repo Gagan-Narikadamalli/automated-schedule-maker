@@ -1,10 +1,14 @@
-import type { AssignmentType, StaffColumn } from "./types";
+import type { AssignmentSource, AssignmentType, StaffColumn } from "./types";
 import { DAILY_TIME_SLOTS } from "./constants";
 
 export type DemoGridCell = {
   text: string;
   assignmentType: AssignmentType | "EMPTY";
   color?: string;
+  clientId?: string | null;
+  clientCode?: string | null;
+  source?: AssignmentSource;
+  locked?: boolean;
 };
 
 export const DEMO_STAFF: StaffColumn[] = [
@@ -45,6 +49,9 @@ function clientCell(clientCode: string): DemoGridCell {
     text: `${clientCode} 1:1`,
     assignmentType: "CLIENT_1_TO_1",
     color: CLIENT_COLORS[clientCode],
+    clientCode,
+    source: "AUTO",
+    locked: false,
   };
 }
 
@@ -56,6 +63,7 @@ export function createDemoGrid(): DemoGridCell[][] {
           text: "",
           assignmentType: "UNAVAILABLE",
           color: "#8D8D8D",
+          locked: true,
         };
       }
 
@@ -63,6 +71,8 @@ export function createDemoGrid(): DemoGridCell[][] {
         return {
           text: "Break",
           assignmentType: "BREAK",
+          source: "AUTO",
+          locked: true,
         };
       }
 
@@ -70,23 +80,21 @@ export function createDemoGrid(): DemoGridCell[][] {
         return {
           text: "Break/Nap",
           assignmentType: "BREAK_NAP",
+          clientCode: "CaMe",
           color: "#FFF3D6",
+          source: "MANUAL",
+          locked: true,
         };
       }
 
       if (rowIndex === 9 && columnIndex === 5) {
         return {
-          text: "Speech",
-          assignmentType: "SPEECH",
-          color: "#DCE9F8",
-        };
-      }
-
-      if (rowIndex === 10 && columnIndex === 6) {
-        return {
           text: "Break/Speech",
           assignmentType: "BREAK_SPEECH",
+          clientCode: "EyNa",
           color: "#E4F1FA",
+          source: "MANUAL",
+          locked: true,
         };
       }
 

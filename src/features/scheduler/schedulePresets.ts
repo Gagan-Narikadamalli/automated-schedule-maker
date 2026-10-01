@@ -48,17 +48,33 @@ export function createEmptyScheduleCell(): DemoGridCell {
   };
 }
 
+function activityKeepsClient(assignmentType: AssignmentType | "EMPTY"): boolean {
+  return ["NAP", "SPEECH", "BREAK_NAP", "BREAK_SPEECH"].includes(
+    assignmentType
+  );
+}
+
 export function createPresetScheduleCell(
-  preset: SchedulePreset
+  preset: SchedulePreset,
+  previousCell?: DemoGridCell
 ): DemoGridCell {
+  const keepClient = activityKeepsClient(preset.assignmentType);
+
   return {
     text: preset.text,
     assignmentType: preset.assignmentType,
     color: preset.color,
+    clientId: keepClient ? previousCell?.clientId ?? null : null,
+    clientCode: keepClient ? previousCell?.clientCode ?? null : null,
+    source: "MANUAL",
+    locked: true,
   };
 }
 
-export function createScheduleCellFromText(text: string): DemoGridCell {
+export function createScheduleCellFromText(
+  text: string,
+  previousCell?: DemoGridCell
+): DemoGridCell {
   const normalizedText = text.trim();
   const normalizedKey = normalizedText.toLowerCase().replaceAll(" ", "");
 
@@ -67,15 +83,15 @@ export function createScheduleCellFromText(text: string): DemoGridCell {
   }
 
   if (normalizedKey === "break" || normalizedKey === "brk") {
-    return createPresetScheduleCell(SCHEDULE_PRESETS[0]);
+    return createPresetScheduleCell(SCHEDULE_PRESETS[0], previousCell);
   }
 
   if (normalizedKey === "nap") {
-    return createPresetScheduleCell(SCHEDULE_PRESETS[1]);
+    return createPresetScheduleCell(SCHEDULE_PRESETS[1], previousCell);
   }
 
   if (normalizedKey === "speech") {
-    return createPresetScheduleCell(SCHEDULE_PRESETS[2]);
+    return createPresetScheduleCell(SCHEDULE_PRESETS[2], previousCell);
   }
 
   if (
@@ -83,7 +99,7 @@ export function createScheduleCellFromText(text: string): DemoGridCell {
     normalizedKey === "brk/nap" ||
     normalizedKey === "break+nap"
   ) {
-    return createPresetScheduleCell(SCHEDULE_PRESETS[3]);
+    return createPresetScheduleCell(SCHEDULE_PRESETS[3], previousCell);
   }
 
   if (
@@ -91,7 +107,7 @@ export function createScheduleCellFromText(text: string): DemoGridCell {
     normalizedKey === "brk/speech" ||
     normalizedKey === "break+speech"
   ) {
-    return createPresetScheduleCell(SCHEDULE_PRESETS[4]);
+    return createPresetScheduleCell(SCHEDULE_PRESETS[4], previousCell);
   }
 
   if (normalizedKey === "unavailable" || normalizedKey === "out") {
@@ -99,12 +115,22 @@ export function createScheduleCellFromText(text: string): DemoGridCell {
       text: "",
       assignmentType: "UNAVAILABLE",
       color: "#8D8D8D",
+      source: "MANUAL",
+      locked: true,
     };
   }
+
+  const clientCode = normalizedText.replace(/\s+1:1$/i, "").split(/\s+/)[0];
+  const sameClient =
+    previousCell?.clientCode?.toLowerCase() === clientCode.toLowerCase();
 
   return {
     text: normalizedText,
     assignmentType: "CLIENT_1_TO_1",
-    color: "#D9F4EE",
+    color: sameClient ? previousCell?.color ?? "#D9F4EE" : "#D9F4EE",
+    clientId: sameClient ? previousCell?.clientId ?? null : null,
+    clientCode,
+    source: "MANUAL",
+    locked: true,
   };
 }
