@@ -99,7 +99,7 @@ export async function POST(request: Request) {
     const staffId = body.staffId?.trim();
     const date = body.date?.trim();
     const startTime = body.startTime?.trim() || "08:00";
-    const endTime = body.endTime?.trim() || "18:00";
+    const endTime = body.endTime?.trim() || "20:00";
 
     if (!locationId || !staffId || !date) {
       return NextResponse.json(
