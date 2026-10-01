@@ -7,7 +7,8 @@ A multi-location scheduling application for Success On The Spectrum that keeps t
 - Next.js 16 + TypeScript
 - MongoDB Atlas + Mongoose
 - Vercel deployment
-- Gmail OTP login through a Google App Password
+- Temporary username/password access for current testing
+- Full password + Gmail OTP authentication retained for later production enablement
 - Custom constraint-based scheduling engine
 
 The project intentionally uses readable TypeScript instead of compressed one-line code. Scheduling logic, database models, authentication, UI components, and reporting are kept in separate folders so each part can be understood and changed independently.
@@ -18,7 +19,7 @@ The project intentionally uses readable TypeScript instead of compressed one-lin
 - 30-minute blocks
 - Staff displayed as columns
 - Client assignments displayed inside cells
-- Break, Break/Nap, Speech, Unavailable, and open blocks
+- Break, Nap, Speech, Break/Nap, Break/Speech, Unavailable, and open blocks
 - Keyboard arrow navigation
 - Shift + arrow/click multi-selection
 - Ctrl/Cmd+C and Ctrl/Cmd+V spreadsheet copy/paste
@@ -26,6 +27,7 @@ The project intentionally uses readable TypeScript instead of compressed one-lin
 - Auto-safe mode prevents accidental replacement of occupied assignments
 - Manual Mode allows drag-and-drop replacement
 - Displaced assignments are kept in an Unplaced Assignments tray instead of being silently deleted
+- Responsive scroll/focus views for smaller browsers and tablets
 
 ## Locations
 
@@ -33,27 +35,11 @@ The same application supports Livingston and Parsippany. Staff, clients, teams, 
 
 ## Automatic scheduler
 
-The scheduling engine currently separates hard constraints from preferences.
+Hard constraints include staff availability, call-outs, occupied/locked cells, hard staff-client restrictions, client and technician limits, and manual overrides.
 
-Hard constraints include:
+Soft preferences include preferred staff-client relationships, same-team matching, continuity, workload balance, and stable scheduling.
 
-- Staff availability
-- Staff call-outs
-- Existing occupied time slots
-- Hard staff/client restrictions
-- Maximum clients per technician per day
-- Maximum technicians per client per day
-- Maximum staff hour limits
-- Locked/manual assignments
-
-Soft preferences include:
-
-- Preferred staff/client relationships
-- Matching staff and clients from the same team
-- Keeping staff/client continuity across consecutive blocks
-- Fairer distribution of client blocks among eligible staff
-
-The generator processes the most constrained client requirements first. A separate Repair Schedule flow is designed to fix affected blocks after a call-out without rearranging the rest of a manager-approved schedule.
+The generator processes the most constrained client requirements first. Repair Schedule preserves unaffected assignments and refills holes caused by call-outs or new constraints.
 
 ## Main sections
 
@@ -67,39 +53,37 @@ The generator processes the most constrained client requirements first. A separa
 - Supervision
 - Clinic Settings
 
-## Database models
+## Current production-connected modules
 
-The application includes MongoDB models for:
-
-- Locations
-- Users
-- Staff
-- Clients
-- Teams
-- Schedule assignments
-- Schedule templates
-- Call-outs
-- Speech sessions
-- Scheduling rules
-- Verification codes
-- Audit logs
-- Supervision records
-
-Historical staff and clients should normally be archived rather than permanently deleted so old schedules and reports remain valid.
+- MongoDB-backed staff management
+- MongoDB-backed client management
+- MongoDB-backed teams
+- Live daily schedule loading and generation
+- Call-outs and targeted repair
+- Break/Nap/Speech combined schedule states
+- Schedule templates captured from saved days
+- Template application with target-date revalidation
+- Copy Day API with target-date revalidation
+- Location-specific Clinic Settings saved to MongoDB
+- Weekly Overview calculated from saved schedules and staff availability
+- Activity & Changes backed by AuditLog
+- Supervision planning backed by saved schedule/service-hour data
+- Location-specific supervision planning target
 
 ## Authentication
 
-Protected application pages require a signed server-side session. Login uses:
+Temporary test login is currently enabled through Vercel environment variables:
 
-1. Username or email
-2. Password
-3. Six-digit one-time verification code sent to the email on the account
+```text
+TEMP_LOGIN_USERNAME=...
+TEMP_LOGIN_PASSWORD=...
+```
 
-Passwords are stored as salted scrypt hashes. OTP values are stored as hashes and expire after 10 minutes. Session cookies are HttpOnly, SameSite=Lax, and Secure in production.
+Do not commit their values to GitHub.
 
-## Required environment variables
+The full authentication foundation remains in the codebase for later production enablement and supports password hashing, Gmail OTP verification, and signed HTTP-only sessions.
 
-Create `.env.local` for local development and add the same secrets in Vercel Environment Variables.
+## Environment variables
 
 ```text
 MONGODB_URI=...
@@ -107,22 +91,11 @@ AUTH_SECRET=...
 SETUP_KEY=...
 GMAIL_USER=...
 GMAIL_APP_PASSWORD=...
+TEMP_LOGIN_USERNAME=...
+TEMP_LOGIN_PASSWORD=...
 ```
 
-Never commit the real values to GitHub.
-
-`AUTH_SECRET` should be a long random secret. `SETUP_KEY` is used only for first administrator setup. `GMAIL_APP_PASSWORD` must be a Google App Password for the Gmail account used to send OTP codes, not the normal Gmail account password.
-
-## First administrator setup
-
-After the environment variables are configured and the app is deployed:
-
-1. Open `/setup`.
-2. Enter the private `SETUP_KEY`.
-3. Create the first administrator username, email, and password.
-4. The setup endpoint creates Livingston and Parsippany if they do not exist.
-5. After one user exists, the initial setup endpoint refuses to create another first admin.
-6. Sign in through `/login` and complete the email OTP step.
+Never commit real values to GitHub.
 
 ## Local development
 
@@ -131,25 +104,13 @@ npm install
 npm run dev
 ```
 
-For a production-style validation run:
+Production-style validation:
 
 ```bash
 npm run build
 npm start
 ```
 
-## Implementation status
+## Development rule
 
-The following foundations are implemented:
-
-- Vercel-compatible MongoDB connection
-- SOS theme and responsive application shell
-- Excel-style interactive schedule grid
-- Staff, client, team, template, overview, activity, supervision, and settings interfaces
-- MongoDB schemas for the scheduling domain
-- Automatic scheduling constraint/scoring engine
-- Targeted schedule repair engine
-- Password + Gmail OTP authentication foundation
-- Location-aware user permissions model
-
-The management screens and calendar still use demonstration/local state in several places while the MongoDB API layer is being connected. The next implementation phase is to replace those temporary data sources with authenticated location-scoped APIs, then connect Generate/Repair directly to persisted schedules.
+Changes are intentionally implemented in readable batches and verified with the GitHub production build before relying on Vercel deployment. This avoids shipping compressed or difficult-to-maintain code and reduces deployment failures.
