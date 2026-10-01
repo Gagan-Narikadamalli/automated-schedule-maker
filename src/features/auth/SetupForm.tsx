@@ -49,7 +49,7 @@ export function SetupForm() {
 
       setMessage(data.message ?? "Setup complete.");
       window.setTimeout(() => {
-        router.push("/login");
+        router.push("/");
       }, 700);
     } catch {
       setMessage("Unable to contact the setup service.");
