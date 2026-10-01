@@ -1,117 +1,70 @@
 import { NextResponse } from "next/server";
 
-import { sendLoginOtpEmail } from "@/lib/auth/email";
-import {
-  generateOneTimeCode,
-  hashOneTimeCode,
-} from "@/lib/auth/otp";
-import { verifyPassword } from "@/lib/auth/passwords";
-import { connectToDatabase } from "@/lib/db";
-import { User } from "@/models/User";
-import { VerificationCode } from "@/models/VerificationCode";
+import { createSessionCookie } from "@/lib/auth/session";
 
 type LoginRequest = {
   usernameOrEmail?: string;
   password?: string;
 };
 
-function maskEmail(email: string): string {
-  const [localPart, domain] = email.split("@");
+function getTemporaryCredentials() {
+  const username = process.env.TEMP_LOGIN_USERNAME;
+  const password = process.env.TEMP_LOGIN_PASSWORD;
 
-  if (!localPart || !domain) {
-    return "your email";
+  if (!username || !password) {
+    throw new Error(
+      "Temporary login is not configured. Add TEMP_LOGIN_USERNAME and TEMP_LOGIN_PASSWORD in Vercel."
+    );
   }
 
-  const visibleCharacters = localPart.slice(0, Math.min(2, localPart.length));
-  const maskedCharacters = "*".repeat(Math.max(localPart.length - 2, 3));
-
-  return `${visibleCharacters}${maskedCharacters}@${domain}`;
+  return {
+    username,
+    password,
+  };
 }
 
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as LoginRequest;
-    const usernameOrEmail = body.usernameOrEmail?.trim();
-    const password = body.password ?? "";
+    const enteredUsername = body.usernameOrEmail?.trim() ?? "";
+    const enteredPassword = body.password ?? "";
 
-    if (!usernameOrEmail || !password) {
+    if (!enteredUsername || !enteredPassword) {
       return NextResponse.json(
-        { error: "Username/email and password are required." },
+        { error: "Username and password are required." },
         { status: 400 }
       );
     }
 
-    await connectToDatabase();
+    const temporaryCredentials = getTemporaryCredentials();
 
-    const user = await User.findOne({
-      active: true,
-      $or: [
-        { username: usernameOrEmail },
-        { email: usernameOrEmail.toLowerCase() },
-      ],
-    }).select("+passwordHash");
-
-    if (!user || !verifyPassword(password, user.passwordHash)) {
+    if (
+      enteredUsername !== temporaryCredentials.username ||
+      enteredPassword !== temporaryCredentials.password
+    ) {
       return NextResponse.json(
-        { error: "Invalid username/email or password." },
+        { error: "Invalid temporary username or password." },
         { status: 401 }
       );
     }
 
-    const oneMinuteAgo = new Date(Date.now() - 60_000);
-    const recentChallenge = await VerificationCode.findOne({
-      userId: user._id,
-      purpose: "LOGIN",
-      usedAt: null,
-      createdAt: { $gte: oneMinuteAgo },
+    await createSessionCookie({
+      userId: "temporary-test-admin",
+      username: temporaryCredentials.username,
+      email: "temporary@sos-scheduler.local",
+      role: "ADMIN",
+      locationIds: [],
     });
-
-    if (recentChallenge) {
-      return NextResponse.json(
-        {
-          error:
-            "A verification code was already sent recently. Wait a moment before requesting another code.",
-        },
-        { status: 429 }
-      );
-    }
-
-    await VerificationCode.deleteMany({
-      userId: user._id,
-      purpose: "LOGIN",
-      usedAt: null,
-    });
-
-    const oneTimeCode = generateOneTimeCode();
-    const challenge = await VerificationCode.create({
-      userId: user._id,
-      codeHash: hashOneTimeCode(oneTimeCode),
-      purpose: "LOGIN",
-      expiresAt: new Date(Date.now() + 10 * 60_000),
-      usedAt: null,
-      attemptCount: 0,
-    });
-
-    try {
-      await sendLoginOtpEmail(user.email, oneTimeCode);
-    } catch (emailError) {
-      await VerificationCode.deleteOne({ _id: challenge._id });
-      throw emailError;
-    }
 
     return NextResponse.json({
       success: true,
-      challengeId: String(challenge._id),
-      email: maskEmail(user.email),
+      temporaryMode: true,
     });
   } catch (error) {
-    console.error("Login request failed:", error);
+    console.error("Temporary login failed:", error);
 
     return NextResponse.json(
-      {
-        error:
-          "Sign-in could not be completed. Confirm the server email settings and try again.",
-      },
+      { error: "Temporary sign-in could not be completed." },
       { status: 500 }
     );
   }
