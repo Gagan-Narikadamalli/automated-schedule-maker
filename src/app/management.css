@@ -1,0 +1,286 @@
+.management-layout {
+  display: grid;
+  gap: 16px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.form-grid-compact {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 260px));
+}
+
+.form-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.form-field-wide {
+  grid-column: 1 / -1;
+}
+
+.form-field span {
+  color: var(--sos-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.form-field input,
+.form-field select,
+.form-field textarea {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid var(--sos-line);
+  border-radius: 8px;
+  background: var(--sos-white);
+  color: var(--sos-ink);
+}
+
+.form-field input[type="color"] {
+  min-height: 40px;
+  padding: 4px;
+}
+
+.form-field textarea {
+  resize: vertical;
+}
+
+.form-field input:focus,
+.form-field select:focus,
+.form-field textarea:focus {
+  border-color: var(--sos-blue);
+  outline: 2px solid rgba(28, 106, 150, 0.12);
+}
+
+.subsection {
+  margin: 18px 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--sos-line-light);
+}
+
+.subsection h3 {
+  margin: 0 0 10px;
+  color: var(--sos-navy);
+  font-size: 15px;
+}
+
+.day-selector {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.form-actions,
+.table-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.button-small {
+  min-height: 32px;
+  padding: 6px 9px;
+  font-size: 12px;
+}
+
+.inline-message {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px solid #c9dfe9;
+  border-radius: 8px;
+  background: var(--sos-sky);
+  color: #294b5d;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.helper-text {
+  margin: 0 0 12px;
+  color: var(--sos-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.color-dot {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 7px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 50%;
+  vertical-align: -1px;
+}
+
+.relationship-list,
+.toggle-list {
+  display: grid;
+  gap: 8px;
+}
+
+.relationship-row,
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--sos-line-light);
+  border-radius: 8px;
+  background: #fbfdfe;
+  font-size: 13px;
+}
+
+.relationship-row select {
+  min-width: 170px;
+  height: 36px;
+  padding: 0 8px;
+  border: 1px solid var(--sos-line);
+  border-radius: 7px;
+  background: var(--sos-white);
+}
+
+.toggle-row {
+  justify-content: flex-start;
+  line-height: 1.5;
+}
+
+.toggle-row input {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+}
+
+.team-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.team-card {
+  padding: 14px;
+  border: 1px solid var(--sos-line-light);
+  border-radius: 10px;
+  background: #fbfdfe;
+}
+
+.team-card p {
+  margin: 8px 0;
+  color: var(--sos-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.team-card-heading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.team-card-heading h3 {
+  margin: 0;
+  color: var(--sos-navy);
+  font-size: 16px;
+}
+
+.team-color-swatch {
+  width: 20px;
+  height: 20px;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 6px;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.metric-card {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+  border: 1px solid var(--sos-line-light);
+  border-radius: 12px;
+  background: var(--sos-white);
+  box-shadow: var(--sos-shadow);
+}
+
+.metric-card span {
+  color: var(--sos-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.metric-card strong {
+  color: var(--sos-navy);
+  font-size: 26px;
+}
+
+.notice {
+  padding: 14px;
+  border-radius: 9px;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.notice p {
+  margin: 5px 0 0;
+}
+
+.warning-notice {
+  border: 1px solid #e1bd7e;
+  background: #fff7e7;
+  color: #6d4a12;
+}
+
+@media (max-width: 800px) {
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .form-field-wide {
+    grid-column: auto;
+  }
+
+  .relationship-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .relationship-row select {
+    width: 100%;
+  }
+}
+
+@media print {
+  .sidebar,
+  .toolbar-group,
+  .button {
+    display: none !important;
+  }
+
+  .app-shell {
+    display: block;
+  }
+
+  .main-content {
+    padding: 0;
+  }
+
+  .section-card,
+  .metric-card {
+    box-shadow: none;
+  }
+}
