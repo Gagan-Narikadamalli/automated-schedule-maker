@@ -208,6 +208,7 @@ function findBestStaffMember(
           startTime: requirement.startTime,
           assignments,
           referenceAssignments: input.referenceAssignments,
+          historicalPatterns: input.historicalPatterns,
           rules: input.rules,
         }),
       };
@@ -412,6 +413,7 @@ function findBestSwap(
             startTime: requirement.startTime,
             assignments: assignmentsWithoutCurrent,
             referenceAssignments: input.referenceAssignments,
+            historicalPatterns: input.historicalPatterns,
             rules: input.rules,
           }),
         };
@@ -438,6 +440,7 @@ function findBestSwap(
       startTime: requirement.startTime,
       assignments: assignmentsWithoutCurrent,
       referenceAssignments: input.referenceAssignments,
+      historicalPatterns: input.historicalPatterns,
       rules: input.rules,
     });
 
