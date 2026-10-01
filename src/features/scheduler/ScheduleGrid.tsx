@@ -11,8 +11,15 @@ import {
 } from "react";
 
 import { DAILY_TIME_SLOTS } from "./constants";
-import type { CellPosition, StaffColumn } from "./types";
 import type { DemoGridCell } from "./demoData";
+import {
+  createEmptyScheduleCell,
+  createPresetScheduleCell,
+  createScheduleCellFromText,
+  SCHEDULE_PRESETS,
+  type SchedulePreset,
+} from "./schedulePresets";
+import type { CellPosition, StaffColumn } from "./types";
 
 type ScheduleGridProps = {
   staff: StaffColumn[];
@@ -36,67 +43,31 @@ function normalizeSelection(selection: Selection) {
   };
 }
 
-function createCellFromText(text: string): DemoGridCell {
-  const normalizedText = text.trim();
-  const lowerText = normalizedText.toLowerCase();
-
-  if (!normalizedText) {
-    return {
-      text: "",
-      assignmentType: "EMPTY",
-    };
-  }
-
-  if (lowerText === "break") {
-    return {
-      text: "Break",
-      assignmentType: "BREAK",
-    };
-  }
-
-  if (lowerText === "break/nap" || lowerText === "brk/nap") {
-    return {
-      text: "Break/Nap",
-      assignmentType: "BREAK_NAP",
-    };
-  }
-
-  if (lowerText === "speech" || lowerText === "brk/speech") {
-    return {
-      text: "Speech",
-      assignmentType: "SPEECH",
-      color: "#DCE9F8",
-    };
-  }
-
-  if (lowerText === "unavailable" || lowerText === "out") {
-    return {
-      text: "",
-      assignmentType: "UNAVAILABLE",
-      color: "#8D8D8D",
-    };
-  }
-
-  return {
-    text: normalizedText,
-    assignmentType: "CLIENT_1_TO_1",
-    color: "#D9F4EE",
-  };
-}
-
 function cellClassName(cell: DemoGridCell, selected: boolean): string {
   const classNames = ["schedule-cell"];
 
-  if (cell.assignmentType === "BREAK" || cell.assignmentType === "BREAK_NAP") {
+  if (cell.assignmentType === "BREAK") {
     classNames.push("schedule-cell-break");
   }
 
-  if (cell.assignmentType === "UNAVAILABLE") {
-    classNames.push("schedule-cell-unavailable");
+  if (cell.assignmentType === "NAP") {
+    classNames.push("schedule-cell-nap");
   }
 
   if (cell.assignmentType === "SPEECH") {
     classNames.push("schedule-cell-speech");
+  }
+
+  if (cell.assignmentType === "BREAK_NAP") {
+    classNames.push("schedule-cell-break-nap");
+  }
+
+  if (cell.assignmentType === "BREAK_SPEECH") {
+    classNames.push("schedule-cell-break-speech");
+  }
+
+  if (cell.assignmentType === "UNAVAILABLE") {
+    classNames.push("schedule-cell-unavailable");
   }
 
   if (selected) {
@@ -120,13 +91,18 @@ export function ScheduleGrid({
   });
   const [editingCell, setEditingCell] = useState<CellPosition | null>(null);
   const [draggedCell, setDraggedCell] = useState<CellPosition | null>(null);
+  const [dragOverCell, setDragOverCell] = useState<CellPosition | null>(null);
+  const [moveSource, setMoveSource] = useState<CellPosition | null>(null);
   const [dragSelecting, setDragSelecting] = useState(false);
+  const scheduleAreaRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<HTMLInputElement | null>(null);
 
   const normalizedSelection = useMemo(
     () => normalizeSelection(selection),
     [selection]
   );
+
+  const selectedCell = grid[selection.focus.row]?.[selection.focus.column];
 
   function isCellSelected(row: number, column: number): boolean {
     return (
@@ -135,6 +111,10 @@ export function ScheduleGrid({
       column >= normalizedSelection.firstColumn &&
       column <= normalizedSelection.lastColumn
     );
+  }
+
+  function isDragTarget(row: number, column: number): boolean {
+    return dragOverCell?.row === row && dragOverCell?.column === column;
   }
 
   function selectSingleCell(row: number, column: number) {
@@ -149,6 +129,12 @@ export function ScheduleGrid({
     row: number,
     column: number
   ) {
+    if (moveSource) {
+      event.preventDefault();
+      moveAssignment(moveSource, { row, column });
+      return;
+    }
+
     if (event.shiftKey) {
       setSelection((currentSelection) => ({
         ...currentSelection,
@@ -162,7 +148,7 @@ export function ScheduleGrid({
   }
 
   function handleCellMouseEnter(row: number, column: number) {
-    if (!dragSelecting) {
+    if (!dragSelecting || moveSource) {
       return;
     }
 
@@ -204,7 +190,10 @@ export function ScheduleGrid({
     selectSingleCell(nextRow, nextColumn);
   }
 
-  function clearSelectedCells() {
+  function applyPresetToSelection(preset: SchedulePreset) {
+    let protectedCells = 0;
+    let unavailableCells = 0;
+
     setGrid((currentGrid) =>
       currentGrid.map((row, rowIndex) =>
         row.map((cell, columnIndex) => {
@@ -212,18 +201,75 @@ export function ScheduleGrid({
             return cell;
           }
 
-          if (!manualMode && cell.assignmentType !== "EMPTY") {
+          if (cell.assignmentType === "UNAVAILABLE") {
+            unavailableCells += 1;
             return cell;
           }
 
-          return createCellFromText("");
+          if (
+            !manualMode &&
+            cell.assignmentType !== "EMPTY" &&
+            cell.text !== preset.text
+          ) {
+            protectedCells += 1;
+            return cell;
+          }
+
+          if (
+            manualMode &&
+            cell.assignmentType !== "EMPTY" &&
+            cell.text &&
+            cell.text !== preset.text
+          ) {
+            onDisplacedAssignment(cell.text);
+          }
+
+          return createPresetScheduleCell(preset);
         })
       )
     );
 
-    if (!manualMode) {
+    if (unavailableCells > 0) {
       onConflict(
-        "Auto-safe mode protects occupied assignments. Turn on Manual Mode to clear or replace assigned cells."
+        "Unavailable staff blocks were left unchanged. Staff who are off shift or called out cannot receive schedule assignments."
+      );
+      return;
+    }
+
+    if (protectedCells > 0) {
+      onConflict(
+        "Some occupied cells were protected by Auto-safe mode. Turn on Manual Mode if you need to replace existing assignments."
+      );
+    }
+  }
+
+  function clearSelectedCells() {
+    let protectedCells = 0;
+
+    setGrid((currentGrid) =>
+      currentGrid.map((row, rowIndex) =>
+        row.map((cell, columnIndex) => {
+          if (!isCellSelected(rowIndex, columnIndex)) {
+            return cell;
+          }
+
+          if (cell.assignmentType === "UNAVAILABLE") {
+            return cell;
+          }
+
+          if (!manualMode && cell.assignmentType !== "EMPTY") {
+            protectedCells += 1;
+            return cell;
+          }
+
+          return createEmptyScheduleCell();
+        })
+      )
+    );
+
+    if (protectedCells > 0) {
+      onConflict(
+        "Auto-safe mode protects occupied assignments. Turn on Manual Mode to clear assigned cells."
       );
     }
   }
@@ -260,6 +306,9 @@ export function ScheduleGrid({
       case "Backspace":
         event.preventDefault();
         clearSelectedCells();
+        break;
+      case "Escape":
+        setMoveSource(null);
         break;
       default:
         break;
@@ -309,22 +358,26 @@ export function ScheduleGrid({
     let protectedCellEncountered = false;
 
     setGrid((currentGrid) => {
-      const nextGrid = currentGrid.map((row) => row.map((cell) => ({ ...cell })));
+      const nextGrid = currentGrid.map((row) =>
+        row.map((cell) => ({ ...cell }))
+      );
 
       pastedRows.forEach((pastedRow, pastedRowIndex) => {
         pastedRow.forEach((pastedValue, pastedColumnIndex) => {
           const targetRow = startRow + pastedRowIndex;
           const targetColumn = startColumn + pastedColumnIndex;
 
-          if (
-            targetRow >= nextGrid.length ||
-            targetColumn >= staff.length
-          ) {
+          if (targetRow >= nextGrid.length || targetColumn >= staff.length) {
             return;
           }
 
           const existingCell = nextGrid[targetRow][targetColumn];
-          const pastedCell = createCellFromText(pastedValue);
+          const pastedCell = createScheduleCellFromText(pastedValue);
+
+          if (existingCell.assignmentType === "UNAVAILABLE") {
+            protectedCellEncountered = true;
+            return;
+          }
 
           if (
             !manualMode &&
@@ -333,6 +386,15 @@ export function ScheduleGrid({
           ) {
             protectedCellEncountered = true;
             return;
+          }
+
+          if (
+            manualMode &&
+            existingCell.assignmentType !== "EMPTY" &&
+            existingCell.text &&
+            existingCell.text !== pastedCell.text
+          ) {
+            onDisplacedAssignment(existingCell.text);
           }
 
           nextGrid[targetRow][targetColumn] = pastedCell;
@@ -344,7 +406,7 @@ export function ScheduleGrid({
 
     if (protectedCellEncountered) {
       onConflict(
-        "Some pasted cells were skipped because Auto-safe mode will not replace existing assignments. Turn on Manual Mode to force replacements."
+        "Some pasted cells were skipped because they are unavailable or protected by Auto-safe mode."
       );
     }
 
@@ -353,7 +415,13 @@ export function ScheduleGrid({
 
   function saveEditedCell(row: number, column: number, text: string) {
     const currentCell = grid[row][column];
-    const updatedCell = createCellFromText(text);
+    const updatedCell = createScheduleCellFromText(text);
+
+    if (currentCell.assignmentType === "UNAVAILABLE") {
+      onConflict("Unavailable staff blocks cannot be edited.");
+      setEditingCell(null);
+      return;
+    }
 
     if (
       !manualMode &&
@@ -365,6 +433,15 @@ export function ScheduleGrid({
       );
       setEditingCell(null);
       return;
+    }
+
+    if (
+      manualMode &&
+      currentCell.assignmentType !== "EMPTY" &&
+      currentCell.text &&
+      currentCell.text !== updatedCell.text
+    ) {
+      onDisplacedAssignment(currentCell.text);
     }
 
     setGrid((currentGrid) =>
@@ -382,18 +459,75 @@ export function ScheduleGrid({
     setEditingCell(null);
   }
 
+  function moveAssignment(source: CellPosition, target: CellPosition) {
+    if (!manualMode) {
+      onConflict("Turn on Manual Mode before moving assignments.");
+      setMoveSource(null);
+      return;
+    }
+
+    if (source.row === target.row && source.column === target.column) {
+      setMoveSource(null);
+      return;
+    }
+
+    const sourceCell = grid[source.row][source.column];
+    const targetCell = grid[target.row][target.column];
+
+    if (sourceCell.assignmentType === "EMPTY") {
+      onConflict("Select an assignment before choosing Move Selected.");
+      setMoveSource(null);
+      return;
+    }
+
+    if (targetCell.assignmentType === "UNAVAILABLE") {
+      onConflict(
+        "That destination is unavailable because the staff member is off shift or called out."
+      );
+      setMoveSource(null);
+      return;
+    }
+
+    if (targetCell.assignmentType !== "EMPTY" && targetCell.text) {
+      onDisplacedAssignment(targetCell.text);
+    }
+
+    setGrid((currentGrid) => {
+      const nextGrid = currentGrid.map((row) =>
+        row.map((cell) => ({ ...cell }))
+      );
+
+      nextGrid[target.row][target.column] = {
+        ...sourceCell,
+      };
+      nextGrid[source.row][source.column] = createEmptyScheduleCell();
+
+      return nextGrid;
+    });
+
+    selectSingleCell(target.row, target.column);
+    setMoveSource(null);
+  }
+
   function handleDragStart(
     event: DragEvent<HTMLTableCellElement>,
     row: number,
     column: number
   ) {
-    if (!manualMode || grid[row][column].assignmentType === "EMPTY") {
+    const cell = grid[row][column];
+
+    if (
+      !manualMode ||
+      cell.assignmentType === "EMPTY" ||
+      cell.assignmentType === "UNAVAILABLE"
+    ) {
       event.preventDefault();
       return;
     }
 
     setDraggedCell({ row, column });
     event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", cell.text);
   }
 
   function handleDrop(
@@ -407,141 +541,237 @@ export function ScheduleGrid({
       return;
     }
 
-    if (
-      draggedCell.row === targetRow &&
-      draggedCell.column === targetColumn
-    ) {
-      setDraggedCell(null);
+    moveAssignment(draggedCell, {
+      row: targetRow,
+      column: targetColumn,
+    });
+    setDraggedCell(null);
+    setDragOverCell(null);
+  }
+
+  function beginMoveSelected() {
+    if (!manualMode) {
+      onConflict("Turn on Manual Mode to move assignments.");
       return;
     }
 
-    const sourceCell = grid[draggedCell.row][draggedCell.column];
-    const targetCell = grid[targetRow][targetColumn];
-
-    if (
-      targetCell.assignmentType !== "EMPTY" &&
-      targetCell.assignmentType !== "UNAVAILABLE" &&
-      targetCell.text
-    ) {
-      onDisplacedAssignment(targetCell.text);
+    if (!selectedCell || selectedCell.assignmentType === "EMPTY") {
+      onConflict("Select an assignment first, then choose Move Selected.");
+      return;
     }
 
-    setGrid((currentGrid) => {
-      const nextGrid = currentGrid.map((row) => row.map((cell) => ({ ...cell })));
+    if (selectedCell.assignmentType === "UNAVAILABLE") {
+      onConflict("Unavailable blocks cannot be moved.");
+      return;
+    }
 
-      nextGrid[targetRow][targetColumn] = {
-        ...sourceCell,
-      };
-      nextGrid[draggedCell.row][draggedCell.column] = createCellFromText("");
+    setMoveSource(selection.focus);
+    onConflict(
+      "Move mode is active. Click or tap the destination cell. Press Escape or Cancel Move to stop."
+    );
+  }
 
-      return nextGrid;
-    });
+  async function toggleFocusView() {
+    const scheduleArea = scheduleAreaRef.current;
 
-    selectSingleCell(targetRow, targetColumn);
-    setDraggedCell(null);
+    if (!scheduleArea) {
+      return;
+    }
+
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+      return;
+    }
+
+    if (scheduleArea.requestFullscreen) {
+      await scheduleArea.requestFullscreen();
+    }
   }
 
   return (
-    <div
-      className="schedule-grid-wrapper"
-      tabIndex={0}
-      onKeyDown={handleGridKeyDown}
-      onCopy={handleCopy}
-      onPaste={handlePaste}
-      onMouseUp={stopDragSelection}
-      onMouseLeave={stopDragSelection}
-      aria-label="SOS schedule spreadsheet"
-    >
-      <table className="schedule-grid">
-        <thead>
-          <tr>
-            <th className="schedule-time-column">Time</th>
-            {staff.map((staffMember) => (
-              <th key={staffMember.id} className="schedule-staff-heading">
-                {staffMember.name}
-              </th>
-            ))}
-          </tr>
-        </thead>
+    <div ref={scheduleAreaRef} className="schedule-grid-area">
+      <div className="schedule-grid-tools" aria-label="Selected cell actions">
+        <div className="schedule-grid-tools-label">
+          <strong>Selected cell actions</strong>
+          <span>
+            Set Break, Nap, Speech, or a combined Break activity without typing.
+          </span>
+        </div>
 
-        <tbody>
-          {DAILY_TIME_SLOTS.map((timeSlot, rowIndex) => (
-            <tr key={timeSlot.startTime}>
-              <th className="schedule-time-column">{timeSlot.label}</th>
+        <div className="schedule-grid-tools-actions">
+          {SCHEDULE_PRESETS.map((preset) => (
+            <button
+              key={preset.assignmentType}
+              type="button"
+              className="quick-action-button"
+              onClick={() => applyPresetToSelection(preset)}
+            >
+              {preset.label}
+            </button>
+          ))}
 
-              {staff.map((staffMember, columnIndex) => {
-                const cell = grid[rowIndex][columnIndex];
-                const selected = isCellSelected(rowIndex, columnIndex);
-                const isEditing =
-                  editingCell?.row === rowIndex &&
-                  editingCell?.column === columnIndex;
+          <button
+            type="button"
+            className="quick-action-button"
+            onClick={clearSelectedCells}
+          >
+            Clear
+          </button>
 
-                return (
-                  <td
-                    key={`${timeSlot.startTime}-${staffMember.id}`}
-                    className={cellClassName(cell, selected)}
-                    style={{ backgroundColor: cell.color }}
-                    draggable={manualMode && cell.assignmentType !== "EMPTY"}
-                    onMouseDown={(event) =>
-                      handleCellMouseDown(event, rowIndex, columnIndex)
-                    }
-                    onMouseEnter={() =>
-                      handleCellMouseEnter(rowIndex, columnIndex)
-                    }
-                    onDoubleClick={() => {
-                      setEditingCell({ row: rowIndex, column: columnIndex });
-                      window.setTimeout(() => editorRef.current?.focus(), 0);
-                    }}
-                    onDragStart={(event) =>
-                      handleDragStart(event, rowIndex, columnIndex)
-                    }
-                    onDragOver={(event) => {
-                      if (manualMode) {
-                        event.preventDefault();
+          <button
+            type="button"
+            className={`quick-action-button ${
+              moveSource ? "quick-action-button-active" : ""
+            }`}
+            onClick={moveSource ? () => setMoveSource(null) : beginMoveSelected}
+          >
+            {moveSource ? "Cancel Move" : "Move Selected"}
+          </button>
+
+          <button
+            type="button"
+            className="quick-action-button quick-action-button-focus"
+            onClick={() => void toggleFocusView()}
+          >
+            Focus View
+          </button>
+        </div>
+      </div>
+
+      <div
+        className={`schedule-grid-wrapper ${
+          moveSource ? "schedule-grid-move-mode" : ""
+        }`}
+        tabIndex={0}
+        onKeyDown={handleGridKeyDown}
+        onCopy={handleCopy}
+        onPaste={handlePaste}
+        onMouseUp={stopDragSelection}
+        onMouseLeave={stopDragSelection}
+        aria-label="SOS schedule spreadsheet"
+      >
+        <table className="schedule-grid">
+          <thead>
+            <tr>
+              <th className="schedule-time-column">Time</th>
+              {staff.map((staffMember) => (
+                <th key={staffMember.id} className="schedule-staff-heading">
+                  {staffMember.name}
+                </th>
+              ))}
+            </tr>
+          </thead>
+
+          <tbody>
+            {DAILY_TIME_SLOTS.map((timeSlot, rowIndex) => (
+              <tr key={timeSlot.startTime}>
+                <th className="schedule-time-column">{timeSlot.label}</th>
+
+                {staff.map((staffMember, columnIndex) => {
+                  const cell = grid[rowIndex][columnIndex];
+                  const selected = isCellSelected(rowIndex, columnIndex);
+                  const dragTarget = isDragTarget(rowIndex, columnIndex);
+                  const isEditing =
+                    editingCell?.row === rowIndex &&
+                    editingCell?.column === columnIndex;
+
+                  return (
+                    <td
+                      key={`${timeSlot.startTime}-${staffMember.id}`}
+                      className={`${cellClassName(cell, selected)} ${
+                        dragTarget ? "schedule-cell-drop-target" : ""
+                      }`}
+                      style={{ backgroundColor: cell.color }}
+                      draggable={
+                        manualMode &&
+                        cell.assignmentType !== "EMPTY" &&
+                        cell.assignmentType !== "UNAVAILABLE"
                       }
-                    }}
-                    onDrop={(event) =>
-                      handleDrop(event, rowIndex, columnIndex)
-                    }
-                  >
-                    {isEditing ? (
-                      <input
-                        ref={editorRef}
-                        className="schedule-cell-editor"
-                        defaultValue={cell.text}
-                        onBlur={(event) =>
-                          saveEditedCell(
-                            rowIndex,
-                            columnIndex,
-                            event.currentTarget.value
-                          )
+                      onMouseDown={(event) =>
+                        handleCellMouseDown(event, rowIndex, columnIndex)
+                      }
+                      onMouseEnter={() =>
+                        handleCellMouseEnter(rowIndex, columnIndex)
+                      }
+                      onDoubleClick={() => {
+                        if (cell.assignmentType === "UNAVAILABLE") {
+                          onConflict("Unavailable staff blocks cannot be edited.");
+                          return;
                         }
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") {
-                            event.preventDefault();
+
+                        setEditingCell({
+                          row: rowIndex,
+                          column: columnIndex,
+                        });
+                        window.setTimeout(
+                          () => editorRef.current?.focus(),
+                          0
+                        );
+                      }}
+                      onDragStart={(event) =>
+                        handleDragStart(event, rowIndex, columnIndex)
+                      }
+                      onDragEnd={() => {
+                        setDraggedCell(null);
+                        setDragOverCell(null);
+                      }}
+                      onDragEnter={() => {
+                        if (manualMode && draggedCell) {
+                          setDragOverCell({
+                            row: rowIndex,
+                            column: columnIndex,
+                          });
+                        }
+                      }}
+                      onDragOver={(event) => {
+                        if (manualMode) {
+                          event.preventDefault();
+                          event.dataTransfer.dropEffect = "move";
+                        }
+                      }}
+                      onDrop={(event) =>
+                        handleDrop(event, rowIndex, columnIndex)
+                      }
+                    >
+                      {isEditing ? (
+                        <input
+                          ref={editorRef}
+                          className="schedule-cell-editor"
+                          defaultValue={cell.text}
+                          onBlur={(event) =>
                             saveEditedCell(
                               rowIndex,
                               columnIndex,
                               event.currentTarget.value
-                            );
+                            )
                           }
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              saveEditedCell(
+                                rowIndex,
+                                columnIndex,
+                                event.currentTarget.value
+                              );
+                            }
 
-                          if (event.key === "Escape") {
-                            event.preventDefault();
-                            setEditingCell(null);
-                          }
-                        }}
-                      />
-                    ) : (
-                      cell.text
-                    )}
-                  </td>
-                );
-              })}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+                            if (event.key === "Escape") {
+                              event.preventDefault();
+                              setEditingCell(null);
+                            }
+                          }}
+                        />
+                      ) : (
+                        cell.text
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
