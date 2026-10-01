@@ -8,7 +8,10 @@ export type SchedulerStaff = {
   maximumDailyHours?: number;
 };
 
-export type StaffRelationship = "PREFERRED" | "ALLOWED" | "HARD_RESTRICTION";
+export type StaffRelationship =
+  | "PREFERRED"
+  | "ALLOWED"
+  | "HARD_RESTRICTION";
 
 export type SchedulerClient = {
   id: string;
@@ -22,8 +25,10 @@ export type SchedulerAssignmentType =
   | "CLIENT_1_TO_1"
   | "BREAK"
   | "BREAK_NAP"
+  | "NAP"
   | "SPEECH"
-  | "UNAVAILABLE";
+  | "UNAVAILABLE"
+  | "OPEN";
 
 export type SchedulerAssignment = {
   id: string;
