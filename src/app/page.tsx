@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 import { AppShell } from "@/components/AppShell";
-import { ScheduleWorkspaceV2 } from "@/features/scheduler/ScheduleWorkspaceV2";
+import { ScheduleWorkspaceShell } from "@/features/scheduler/ScheduleWorkspaceShell";
 
 import styles from "./page.module.css";
 
@@ -88,7 +88,7 @@ export default function HomePage() {
         </section>
 
         <div id="daily-schedule-workspace" className={styles.scheduleWorkspace}>
-          <ScheduleWorkspaceV2 />
+          <ScheduleWorkspaceShell />
         </div>
       </div>
     </AppShell>
