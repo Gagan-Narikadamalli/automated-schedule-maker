@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { ScheduleWorkspaceV2 } from "./ScheduleWorkspaceV2";
 import styles from "./ScheduleWorkspaceShell.module.css";
@@ -80,10 +80,13 @@ function readSavedPreferences(): WorkspacePreferences {
 }
 
 export function ScheduleWorkspaceShell() {
+  const workspaceRef = useRef<HTMLDivElement | null>(null);
   const [preferences, setPreferences] = useState<WorkspacePreferences>(
     DEFAULT_PREFERENCES
   );
   const [preferencesLoaded, setPreferencesLoaded] = useState(false);
+  const [searchText, setSearchText] = useState("");
+  const [searchMatchCount, setSearchMatchCount] = useState(0);
 
   useEffect(() => {
     setPreferences(readSavedPreferences());
@@ -111,6 +114,56 @@ export function ScheduleWorkspaceShell() {
     }));
   }
 
+  function clearSearchHighlights() {
+    const workspace = workspaceRef.current;
+
+    if (!workspace) {
+      return;
+    }
+
+    workspace
+      .querySelectorAll(`.${styles.searchMatch}`)
+      .forEach((element) => element.classList.remove(styles.searchMatch));
+
+    setSearchMatchCount(0);
+  }
+
+  function clearSearch() {
+    setSearchText("");
+    clearSearchHighlights();
+  }
+
+  function findInSchedule() {
+    const workspace = workspaceRef.current;
+    const normalizedSearch = searchText.trim().toLowerCase();
+
+    clearSearchHighlights();
+
+    if (!workspace || !normalizedSearch) {
+      return;
+    }
+
+    const candidates = Array.from(
+      workspace.querySelectorAll<HTMLElement>(
+        ".schedule-grid thead th, .schedule-grid tbody td"
+      )
+    );
+
+    const matches = candidates.filter((element) => {
+      const cellText = element.textContent?.trim().toLowerCase() ?? "";
+      return cellText.length > 0 && cellText.includes(normalizedSearch);
+    });
+
+    matches.forEach((element) => element.classList.add(styles.searchMatch));
+    setSearchMatchCount(matches.length);
+
+    matches[0]?.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+      inline: "center",
+    });
+  }
+
   const workspaceClassName = [
     styles.workspace,
     preferences.compactRows ? styles.compactRows : "",
@@ -121,7 +174,7 @@ export function ScheduleWorkspaceShell() {
     .join(" ");
 
   return (
-    <div className={workspaceClassName}>
+    <div ref={workspaceRef} className={workspaceClassName}>
       <section className={styles.displayBar} aria-label="Schedule display options">
         <div className={styles.displayHeading}>
           <div>
@@ -182,6 +235,59 @@ export function ScheduleWorkspaceShell() {
           >
             Compact Rows
           </button>
+        </div>
+      </section>
+
+      <section className={styles.findBar} aria-label="Find in schedule">
+        <div className={styles.findLabel}>
+          <span className={styles.displayEyebrow}>FIND IN GRID</span>
+          <strong>Jump to a staff member or client code</strong>
+        </div>
+
+        <div className={styles.findControls}>
+          <input
+            type="search"
+            value={searchText}
+            placeholder="Example: Areyana or CaGr"
+            aria-label="Find staff member or client code in schedule"
+            onChange={(event) => {
+              setSearchText(event.target.value);
+
+              if (!event.target.value.trim()) {
+                clearSearchHighlights();
+              }
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                findInSchedule();
+              }
+            }}
+          />
+
+          <button
+            type="button"
+            className={styles.findButton}
+            disabled={!searchText.trim()}
+            onClick={findInSchedule}
+          >
+            Find
+          </button>
+
+          <button
+            type="button"
+            className={styles.clearButton}
+            disabled={!searchText && searchMatchCount === 0}
+            onClick={clearSearch}
+          >
+            Clear
+          </button>
+
+          <span className={styles.matchCount} aria-live="polite">
+            {searchMatchCount > 0
+              ? `${searchMatchCount} match${searchMatchCount === 1 ? "" : "es"}`
+              : "No highlighted matches"}
+          </span>
         </div>
       </section>
 
