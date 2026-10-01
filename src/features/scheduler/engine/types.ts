@@ -1,7 +1,16 @@
+export type ServiceSetting = "IN_CENTER" | "IN_HOME" | "BOTH";
+
+export type SupportLevel =
+  | "STANDARD"
+  | "ONE_TO_ONE"
+  | "ROTATION"
+  | "HIGH_SUPPORT";
+
 export type SchedulerStaff = {
   id: string;
   name: string;
   teamId?: string;
+  serviceSetting?: ServiceSetting;
   availableSlots: string[];
   minimumDailyHours?: number;
   targetDailyHours?: number;
@@ -17,8 +26,12 @@ export type SchedulerClient = {
   id: string;
   displayCode: string;
   teamId?: string;
+  serviceSetting?: ServiceSetting;
+  supportLevel?: SupportLevel;
   requiredSlots: string[];
   staffRelationships: Record<string, StaffRelationship>;
+  maxConsecutiveBlocksWithSameStaff?: number;
+  desiredDifferentStaffPerDay?: number;
 };
 
 export type SchedulerAssignmentType =

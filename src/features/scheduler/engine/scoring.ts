@@ -60,6 +60,21 @@ function countStaffClientSlots(
   ).length;
 }
 
+function getClientStaffIds(
+  clientId: string,
+  assignments: SchedulerAssignment[]
+): Set<string> {
+  return new Set(
+    assignments
+      .filter(
+        (assignment) =>
+          assignment.clientId === clientId &&
+          assignment.assignmentType === "CLIENT_1_TO_1"
+      )
+      .map((assignment) => assignment.staffId)
+  );
+}
+
 export function scoreCandidate({
   staffMember,
   client,
@@ -85,8 +100,11 @@ export function scoreCandidate({
   }
 
   const previousStartTime = getPreviousHalfHour(startTime);
+  const isRotationClient =
+    client.supportLevel === "ROTATION" ||
+    client.supportLevel === "HIGH_SUPPORT";
 
-  if (rules.preferStaffContinuity && previousStartTime) {
+  if (rules.preferStaffContinuity && previousStartTime && !isRotationClient) {
     const previousAssignment = assignments.find(
       (assignment) =>
         assignment.staffId === staffMember.id &&
@@ -106,14 +124,31 @@ export function scoreCandidate({
     assignments
   );
 
-  if (priorClientAssignments > 0) {
+  if (!isRotationClient && priorClientAssignments > 0) {
     score += Math.min(priorClientAssignments * 4, 20);
   }
 
-  const staffAssignedSlots = countStaffClientSlots(staffMember.id, assignments);
+  if (isRotationClient) {
+    const clientStaffIds = getClientStaffIds(client.id, assignments);
+    const desiredDifferentStaff = Math.max(
+      client.desiredDifferentStaffPerDay ??
+        (client.supportLevel === "HIGH_SUPPORT" ? 3 : 2),
+      1
+    );
 
-  // Small fairness preference: when candidates are otherwise similar,
-  // assign the person with fewer client blocks first.
+    if (
+      clientStaffIds.size < desiredDifferentStaff &&
+      !clientStaffIds.has(staffMember.id)
+    ) {
+      score += client.supportLevel === "HIGH_SUPPORT" ? 80 : 55;
+    }
+
+    if (clientStaffIds.has(staffMember.id)) {
+      score -= Math.min(priorClientAssignments * 8, 40);
+    }
+  }
+
+  const staffAssignedSlots = countStaffClientSlots(staffMember.id, assignments);
   score -= staffAssignedSlots;
 
   return score;

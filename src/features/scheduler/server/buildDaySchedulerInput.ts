@@ -8,7 +8,9 @@ import type {
   SchedulerInput,
   SchedulerRules,
   SchedulerStaff,
+  ServiceSetting,
   StaffRelationship,
+  SupportLevel,
 } from "@/features/scheduler/engine/types";
 import { connectToDatabase } from "@/lib/db";
 import { CallOut } from "@/models/CallOut";
@@ -18,11 +20,6 @@ import { SchedulingRules } from "@/models/SchedulingRules";
 import { SpeechSession } from "@/models/SpeechSession";
 import { Staff } from "@/models/Staff";
 
-/*
- * The scheduling engine should not know anything about Mongoose documents.
- * This file converts MongoDB records into small plain objects first, then hands
- * those plain objects to the scheduling engine.
- */
 type DatabaseRecord = Record<string, any>;
 
 type ExtendedSchedulerRules = SchedulerRules & {
@@ -85,11 +82,7 @@ function getPatternSlots(
     const startTime = String(pattern.startTime ?? "");
     const endTime = String(pattern.endTime ?? "");
 
-    if (
-      !startTime ||
-      !endTime ||
-      !patternMatchesDate(days, date)
-    ) {
+    if (!startTime || !endTime || !patternMatchesDate(days, date)) {
       continue;
     }
 
@@ -162,6 +155,47 @@ function mapRules(document: DatabaseRecord | null): ExtendedSchedulerRules {
   };
 }
 
+function normalizeServiceSetting(value: unknown): ServiceSetting {
+  if (value === "IN_HOME" || value === "BOTH") {
+    return value;
+  }
+
+  return "IN_CENTER";
+}
+
+function normalizeSupportLevel(value: unknown): SupportLevel {
+  if (
+    value === "STANDARD" ||
+    value === "ROTATION" ||
+    value === "HIGH_SUPPORT"
+  ) {
+    return value;
+  }
+
+  return "ONE_TO_ONE";
+}
+
+function defaultRotationRules(supportLevel: SupportLevel) {
+  if (supportLevel === "HIGH_SUPPORT") {
+    return {
+      maxConsecutiveBlocksWithSameStaff: 2,
+      desiredDifferentStaffPerDay: 3,
+    };
+  }
+
+  if (supportLevel === "ROTATION") {
+    return {
+      maxConsecutiveBlocksWithSameStaff: 4,
+      desiredDifferentStaffPerDay: 2,
+    };
+  }
+
+  return {
+    maxConsecutiveBlocksWithSameStaff: 0,
+    desiredDifferentStaffPerDay: 1,
+  };
+}
+
 function mapStaff(
   staffDocuments: DatabaseRecord[],
   callOuts: DaySchedulerData["partialCallOuts"],
@@ -195,6 +229,7 @@ function mapStaff(
         teamId: staffMember.teamId
           ? String(staffMember.teamId)
           : undefined,
+        serviceSetting: normalizeServiceSetting(staffMember.serviceSetting),
         availableSlots: removeBlockedSlots(
           normalAvailableSlots,
           unavailableRanges
@@ -265,15 +300,36 @@ function mapClients(
         }
       }
 
+      const supportLevel = normalizeSupportLevel(client.supportLevel);
+      const defaults = defaultRotationRules(supportLevel);
+      const configuredMaxConsecutive = Number(
+        client.maxConsecutiveBlocksWithSameStaff ??
+          defaults.maxConsecutiveBlocksWithSameStaff
+      );
+      const configuredDesiredDifferentStaff = Number(
+        client.desiredDifferentStaffPerDay ??
+          defaults.desiredDifferentStaffPerDay
+      );
+
       return {
         id: clientId,
         displayCode: String(client.displayCode ?? ""),
         teamId: client.teamId ? String(client.teamId) : undefined,
+        serviceSetting: normalizeServiceSetting(client.serviceSetting),
+        supportLevel,
         requiredSlots: removeBlockedSlots(attendanceSlots, [
           ...napRanges,
           ...speechRanges,
         ]),
         staffRelationships,
+        maxConsecutiveBlocksWithSameStaff:
+          configuredMaxConsecutive > 0
+            ? configuredMaxConsecutive
+            : undefined,
+        desiredDifferentStaffPerDay: Math.max(
+          configuredDesiredDifferentStaff,
+          1
+        ),
       };
     });
 }

@@ -3,6 +3,7 @@ import type {
   SchedulerClient,
   SchedulerRules,
   SchedulerStaff,
+  ServiceSetting,
 } from "./types";
 
 export type CandidateCheckContext = {
@@ -18,31 +19,31 @@ function getStaffClientIds(
   staffId: string,
   assignments: SchedulerAssignment[]
 ): Set<string> {
-  const clientIds = assignments
-    .filter(
-      (assignment) =>
-        assignment.staffId === staffId &&
-        assignment.assignmentType === "CLIENT_1_TO_1" &&
-        Boolean(assignment.clientId)
-    )
-    .map((assignment) => assignment.clientId as string);
-
-  return new Set(clientIds);
+  return new Set(
+    assignments
+      .filter(
+        (assignment) =>
+          assignment.staffId === staffId &&
+          assignment.assignmentType === "CLIENT_1_TO_1" &&
+          Boolean(assignment.clientId)
+      )
+      .map((assignment) => assignment.clientId as string)
+  );
 }
 
 function getClientStaffIds(
   clientId: string,
   assignments: SchedulerAssignment[]
 ): Set<string> {
-  const staffIds = assignments
-    .filter(
-      (assignment) =>
-        assignment.clientId === clientId &&
-        assignment.assignmentType === "CLIENT_1_TO_1"
-    )
-    .map((assignment) => assignment.staffId);
-
-  return new Set(staffIds);
+  return new Set(
+    assignments
+      .filter(
+        (assignment) =>
+          assignment.clientId === clientId &&
+          assignment.assignmentType === "CLIENT_1_TO_1"
+      )
+      .map((assignment) => assignment.staffId)
+  );
 }
 
 function getStaffAssignedSlotCount(
@@ -54,6 +55,86 @@ function getStaffAssignedSlotCount(
       assignment.staffId === staffId &&
       assignment.assignmentType === "CLIENT_1_TO_1"
   ).length;
+}
+
+function serviceSettingsCompatible(
+  staffSetting: ServiceSetting | undefined,
+  clientSetting: ServiceSetting | undefined
+): boolean {
+  if (!staffSetting || !clientSetting) {
+    return true;
+  }
+
+  if (staffSetting === "BOTH" || clientSetting === "BOTH") {
+    return true;
+  }
+
+  return staffSetting === clientSetting;
+}
+
+function timeToMinutes(time: string): number | null {
+  const [hoursText, minutesText] = time.split(":");
+  const hours = Number(hoursText);
+  const minutes = Number(minutesText);
+
+  if (
+    Number.isNaN(hours) ||
+    Number.isNaN(minutes) ||
+    hours < 0 ||
+    hours > 23 ||
+    minutes < 0 ||
+    minutes > 59
+  ) {
+    return null;
+  }
+
+  return hours * 60 + minutes;
+}
+
+function countConsecutiveClientBlocksWithStaff(
+  staffId: string,
+  clientId: string,
+  startTime: string,
+  assignments: SchedulerAssignment[],
+  slotLengthMinutes: number
+): number {
+  const targetMinutes = timeToMinutes(startTime);
+
+  if (targetMinutes === null) {
+    return 1;
+  }
+
+  const occupiedMinutes = new Set(
+    assignments
+      .filter(
+        (assignment) =>
+          assignment.staffId === staffId &&
+          assignment.clientId === clientId &&
+          assignment.assignmentType === "CLIENT_1_TO_1"
+      )
+      .map((assignment) => timeToMinutes(assignment.startTime))
+      .filter((value): value is number => value !== null)
+  );
+
+  let consecutive = 1;
+
+  for (
+    let minute = targetMinutes - slotLengthMinutes;
+    occupiedMinutes.has(minute);
+    minute -= slotLengthMinutes
+  ) {
+    consecutive += 1;
+  }
+
+  for (
+    let minute = targetMinutes + slotLengthMinutes;
+    occupiedMinutes.has(minute);
+    minute += slotLengthMinutes
+  ) {
+    consecutive += 1;
+  }
+
+  return consecutive;
 }
 
 export function canAssignStaffToClient({
@@ -78,6 +159,19 @@ export function canAssignStaffToClient({
     };
   }
 
+  if (
+    !serviceSettingsCompatible(
+      staffMember.serviceSetting,
+      client.serviceSetting
+    )
+  ) {
+    return {
+      allowed: false,
+      reason:
+        "Staff and client service settings are not compatible for this appointment.",
+    };
+  }
+
   const occupiedAssignment = assignments.find(
     (assignment) =>
       assignment.staffId === staffMember.id &&
@@ -88,6 +182,20 @@ export function canAssignStaffToClient({
     return {
       allowed: false,
       reason: "Staff member already has an assignment in this time slot.",
+    };
+  }
+
+  const clientDoubleBooking = assignments.find(
+    (assignment) =>
+      assignment.clientId === client.id &&
+      assignment.startTime === startTime &&
+      assignment.assignmentType === "CLIENT_1_TO_1"
+  );
+
+  if (clientDoubleBooking) {
+    return {
+      allowed: false,
+      reason: "Client already has a technician assigned during this time slot.",
     };
   }
 
@@ -122,6 +230,27 @@ export function canAssignStaffToClient({
       allowed: false,
       reason: "Client has reached the maximum technician count for the day.",
     };
+  }
+
+  if (
+    client.maxConsecutiveBlocksWithSameStaff !== undefined &&
+    client.maxConsecutiveBlocksWithSameStaff > 0
+  ) {
+    const consecutiveBlocks = countConsecutiveClientBlocksWithStaff(
+      staffMember.id,
+      client.id,
+      startTime,
+      assignments,
+      rules.slotLengthMinutes
+    );
+
+    if (consecutiveBlocks > client.maxConsecutiveBlocksWithSameStaff) {
+      return {
+        allowed: false,
+        reason:
+          "The client rotation rule prevents another consecutive block with this staff member.",
+      };
+    }
   }
 
   if (staffMember.maximumDailyHours !== undefined) {
