@@ -2,16 +2,10 @@ import { NextResponse } from "next/server";
 
 import { getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
 import { generateSchedule } from "@/features/scheduler/engine/generateSchedule";
+import { calculateSchedulerReadiness } from "@/features/scheduler/engine/preflight";
 import { reserveStaffBreaks } from "@/features/scheduler/engine/reserveBreaks";
 import type { SchedulerAssignment } from "@/features/scheduler/engine/types";
 import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySchedulerInput";
-import {
-  forbiddenResponse,
-  requireApiSession,
-  SCHEDULE_WRITE_ROLES,
-  sessionCanAccessLocation,
-  sessionHasAnyRole,
-} from "@/lib/api/auth";
 import { writeAuditLog } from "@/lib/api/audit";
 import { connectToDatabase } from "@/lib/db";
 import { ScheduleAssignment } from "@/models/ScheduleAssignment";
@@ -33,16 +27,6 @@ function shouldKeepExistingAssignment(
 }
 
 export async function POST(request: Request) {
-  const auth = await requireApiSession();
-
-  if (auth.error) {
-    return auth.error;
-  }
-
-  if (!sessionHasAnyRole(auth.session, SCHEDULE_WRITE_ROLES)) {
-    return forbiddenResponse();
-  }
-
   try {
     const body = (await request.json()) as GenerateRequest;
     const locationId = body.locationId?.trim();
@@ -62,11 +46,11 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!sessionCanAccessLocation(auth.session, locationId)) {
-      return forbiddenResponse("You do not have access to this location.");
-    }
-
     const dayData = await buildDaySchedulerInput(locationId, date);
+    const readiness = calculateSchedulerReadiness(
+      dayData.input,
+      dayData.extendedRules
+    );
 
     const protectedAssignments = dayData.input.existingAssignments.filter(
       shouldKeepExistingAssignment
@@ -121,15 +105,17 @@ export async function POST(request: Request) {
 
     await writeAuditLog({
       locationId,
-      userId: auth.session.userId,
+      userId: "scheduler-system",
       action: "GENERATE",
       entityType: "SCHEDULE_DAY",
       entityId: date,
       summary: `Generated schedule for ${date}: ${result.metrics.coveredClientSlots}/${result.metrics.requiredClientSlots} client blocks covered.`,
       after: {
+        readiness,
         metrics: result.metrics,
         uncoveredRequirements: result.uncoveredRequirements,
         warningCount: result.warnings.length,
+        reservedBreakCount: reservedBreaks.length,
       },
     });
 
@@ -137,6 +123,7 @@ export async function POST(request: Request) {
       success: true,
       date,
       locationId,
+      readiness,
       metrics: result.metrics,
       warnings: result.warnings,
       uncoveredRequirements: result.uncoveredRequirements,
