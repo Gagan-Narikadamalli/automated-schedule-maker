@@ -7,6 +7,8 @@ import {
   reserveStaffBreaks,
 } from "@/features/scheduler/engine/reserveBreaks";
 import type { SchedulerAssignment } from "@/features/scheduler/engine/types";
+import { applyHistoricalTraining } from "@/features/scheduler/server/applyHistoricalTraining";
+import { applyLivingstonWorkbookTrial } from "@/features/scheduler/server/applyLivingstonWorkbookTrial";
 import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySchedulerInput";
 import {
   forbiddenResponse,
@@ -25,6 +27,8 @@ type GenerateRangeRequest = {
   endDate?: string;
 };
 
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
 function shouldKeepExistingAssignment(
   assignment: SchedulerAssignment
 ): boolean {
@@ -36,6 +40,24 @@ function shouldKeepExistingAssignment(
   );
 }
 
+function dateIsValid(value: string): boolean {
+  if (!DATE_PATTERN.test(value)) {
+    return false;
+  }
+
+  const [yearText, monthText, dayText] = value.split("-");
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+
+  return (
+    parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === month - 1 &&
+    parsed.getUTCDate() === day
+  );
+}
+
 function enumerateDates(
   startDate: string,
   endDate: string
@@ -43,6 +65,14 @@ function enumerateDates(
   const start = new Date(`${startDate}T12:00:00`);
   const end = new Date(`${endDate}T12:00:00`);
   const dates: string[] = [];
+
+  if (
+    Number.isNaN(start.getTime()) ||
+    Number.isNaN(end.getTime()) ||
+    start.getTime() > end.getTime()
+  ) {
+    return dates;
+  }
 
   for (
     const cursor = new Date(start);
@@ -83,13 +113,10 @@ export async function POST(request: Request) {
       );
     }
 
-    if (
-      !/^\d{4}-\d{2}-\d{2}$/.test(startDate) ||
-      !/^\d{4}-\d{2}-\d{2}$/.test(endDate)
-    ) {
+    if (!dateIsValid(startDate) || !dateIsValid(endDate)) {
       return NextResponse.json(
         {
-          error: "Dates must use YYYY-MM-DD format.",
+          error: "Dates must use a real YYYY-MM-DD calendar date.",
         },
         {
           status: 400,
@@ -136,29 +163,45 @@ export async function POST(request: Request) {
         locationId,
         date
       );
+
+      const workbookTraining = await applyLivingstonWorkbookTrial(
+        locationId,
+        dayData.input
+      );
+
+      const historicalTraining = await applyHistoricalTraining(
+        locationId,
+        date,
+        workbookTraining.input
+      );
+
+      const schedulerInput = historicalTraining.input;
       const protectedAssignments =
-        dayData.input.existingAssignments.filter(
+        schedulerInput.existingAssignments.filter(
           shouldKeepExistingAssignment
         );
+
       const reservedBreaks = reserveStaffBreaks({
-        staff: dayData.staff,
-        clients: dayData.clients,
+        staff: schedulerInput.staff,
+        clients: schedulerInput.clients,
         existingAssignments: protectedAssignments,
-        referenceAssignments: dayData.input.referenceAssignments,
-        callOutStaffIds: dayData.input.callOutStaffIds,
+        referenceAssignments: schedulerInput.referenceAssignments,
+        callOutStaffIds: schedulerInput.callOutStaffIds,
         rules: dayData.extendedRules,
       });
+
       const result = generateSchedule({
-        ...dayData.input,
+        ...schedulerInput,
         existingAssignments: [
           ...protectedAssignments,
           ...reservedBreaks,
         ],
       });
+
       const enrichedAssignments =
         enrichBreakAssignmentsWithFixedEvents(
           result.assignments,
-          dayData.clients,
+          schedulerInput.clients,
           dayData.extendedRules.slotLengthMinutes
         );
 
@@ -213,6 +256,13 @@ export async function POST(request: Request) {
         autoTemplateName: dayData.autoTemplateName,
         previousReferenceDate:
           dayData.previousReferenceDate,
+        workbookTrainingApplied: workbookTraining.applied,
+        workbookTrainingReferences:
+          workbookTraining.referenceCount,
+        importedTrainingScheduleDays:
+          historicalTraining.matchedScheduleDayCount,
+        importedTrainingRecords:
+          historicalTraining.matchedRecordCount,
       });
     }
 
