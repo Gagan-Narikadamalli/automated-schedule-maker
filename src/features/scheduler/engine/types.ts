@@ -29,6 +29,8 @@ export type SchedulerClient = {
   serviceSetting?: ServiceSetting;
   supportLevel?: SupportLevel;
   requiredSlots: string[];
+  napSlots: string[];
+  speechSlots: string[];
   staffRelationships: Record<string, StaffRelationship>;
   maxConsecutiveBlocksWithSameStaff?: number;
   desiredDifferentStaffPerDay?: number;
@@ -66,12 +68,16 @@ export type SchedulerRules = {
   continuityPriority: number;
   rotationPriority: number;
   workloadBalancePriority: number;
+  scheduleStabilityPriority: number;
+  weekdayTemplatePriority: number;
+  autoUseWeekdayTemplate: boolean;
 };
 
 export type SchedulerInput = {
   staff: SchedulerStaff[];
   clients: SchedulerClient[];
   existingAssignments: SchedulerAssignment[];
+  referenceAssignments: SchedulerAssignment[];
   callOutStaffIds: string[];
   rules: SchedulerRules;
 };
@@ -89,7 +95,8 @@ export type SchedulerWarning = {
     | "NO_ELIGIBLE_STAFF"
     | "CLIENT_TECH_LIMIT"
     | "STAFF_HOUR_LIMIT"
-    | "CAPACITY_SHORTAGE";
+    | "CAPACITY_SHORTAGE"
+    | "REPAIRED_BY_SWAP";
   message: string;
 };
 
