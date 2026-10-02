@@ -68,7 +68,9 @@ const DEFAULT_DATES = {
 
 export function TrialDataPanel() {
   const [status, setStatus] = useState<TrialStatus | null>(null);
-  const [lastRun, setLastRun] = useState<TrialApiResponse["result"]>(null);
+  const [lastRun, setLastRun] = useState<
+    TrialApiResponse["result"] | null
+  >(null);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
   const [message, setMessage] = useState(
@@ -229,12 +231,30 @@ export function TrialDataPanel() {
 
       {counts ? (
         <div className={styles.countGrid}>
-          <div><span>Staff</span><strong>{counts.staff}</strong></div>
-          <div><span>Clients</span><strong>{counts.clients}</strong></div>
-          <div><span>Teams</span><strong>{counts.teams}</strong></div>
-          <div><span>Speech blocks</span><strong>{counts.speechSessions}</strong></div>
-          <div><span>Call-outs</span><strong>{counts.callOuts}</strong></div>
-          <div><span>Templates</span><strong>{counts.templates}</strong></div>
+          <div>
+            <span>Staff</span>
+            <strong>{counts.staff}</strong>
+          </div>
+          <div>
+            <span>Clients</span>
+            <strong>{counts.clients}</strong>
+          </div>
+          <div>
+            <span>Teams</span>
+            <strong>{counts.teams}</strong>
+          </div>
+          <div>
+            <span>Speech blocks</span>
+            <strong>{counts.speechSessions}</strong>
+          </div>
+          <div>
+            <span>Call-outs</span>
+            <strong>{counts.callOuts}</strong>
+          </div>
+          <div>
+            <span>Templates</span>
+            <strong>{counts.templates}</strong>
+          </div>
         </div>
       ) : null}
 
