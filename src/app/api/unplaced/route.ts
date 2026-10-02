@@ -51,6 +51,7 @@ function serializeRecord(record: PlainRecord) {
       : null,
     originalStartTime: String(record.originalStartTime ?? ""),
     reason: String(record.reason ?? ""),
+    origin: String(record.origin ?? "MANUAL_DISPLACEMENT"),
     status: String(record.status ?? "UNPLACED"),
     createdAt: record.createdAt,
   };
@@ -87,7 +88,7 @@ export async function GET(request: Request) {
       status: "UNPLACED",
     })
       .populate("clientId", "displayCode fullName color")
-      .sort({ createdAt: 1 })
+      .sort({ originalStartTime: 1, createdAt: 1 })
       .lean();
 
     return NextResponse.json({
@@ -122,6 +123,9 @@ export async function POST(request: Request) {
     const date = body.date?.trim();
     const displayText = body.displayText?.trim();
     const originalStartTime = body.originalStartTime?.trim();
+    const clientId = body.clientId || null;
+    const reason =
+      body.reason?.trim() || "Displaced by a manager schedule change.";
 
     if (!locationId || !date || !displayText || !originalStartTime) {
       return NextResponse.json(
@@ -139,18 +143,33 @@ export async function POST(request: Request) {
 
     await connectToDatabase();
 
-    const record = await UnplacedAssignment.create({
-      locationId,
-      date,
-      clientId: body.clientId || null,
-      displayText,
-      originalStaffId: body.originalStaffId || null,
-      originalStartTime,
-      reason:
-        body.reason?.trim() || "Displaced by a manager schedule change.",
-      status: "UNPLACED",
-      createdBy: auth.session.userId,
-    });
+    const record = await UnplacedAssignment.findOneAndUpdate(
+      {
+        locationId,
+        date,
+        clientId,
+        originalStartTime,
+        origin: "MANUAL_DISPLACEMENT",
+        status: "UNPLACED",
+      },
+      {
+        $set: {
+          displayText,
+          originalStaffId: body.originalStaffId || null,
+          reason,
+        },
+        $setOnInsert: {
+          origin: "MANUAL_DISPLACEMENT",
+          status: "UNPLACED",
+          createdBy: auth.session.userId,
+        },
+      },
+      {
+        new: true,
+        upsert: true,
+        setDefaultsOnInsert: true,
+      }
+    );
 
     await writeAuditLog({
       locationId,
@@ -168,7 +187,7 @@ export async function POST(request: Request) {
           record.toObject() as unknown as PlainRecord
         ),
       },
-      { status: 201 }
+      { status: 200 }
     );
   } catch (error) {
     console.error("Failed to create unplaced assignment:", error);
