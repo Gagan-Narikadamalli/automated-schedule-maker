@@ -1,6 +1,27 @@
-import { model, models, Schema } from "mongoose";
+import {
+  model,
+  models,
+  Schema,
+  type Model,
+  type Types,
+} from "mongoose";
 
-const TrialDatasetSchema = new Schema(
+export type TrialDatasetDocument = {
+  key: string;
+  locationId: Types.ObjectId;
+  startDate: string;
+  endDate: string;
+  staffIds: Types.ObjectId[];
+  clientIds: Types.ObjectId[];
+  teamIds: Types.ObjectId[];
+  speechSessionIds: Types.ObjectId[];
+  templateIds: Types.ObjectId[];
+  callOutIds: Types.ObjectId[];
+  generatedDates: string[];
+  notes: string;
+};
+
+const TrialDatasetSchema = new Schema<TrialDatasetDocument>(
   {
     key: {
       type: String,
@@ -62,5 +83,6 @@ const TrialDatasetSchema = new Schema(
   }
 );
 
-export const TrialDataset =
-  models.TrialDataset ?? model("TrialDataset", TrialDatasetSchema);
+export const TrialDataset: Model<TrialDatasetDocument> =
+  (models.TrialDataset as Model<TrialDatasetDocument> | undefined) ??
+  model<TrialDatasetDocument>("TrialDataset", TrialDatasetSchema);
