@@ -75,6 +75,24 @@ function staffAlreadyOccupied(
   );
 }
 
+function isBreakAssignment(assignment: SchedulerAssignment): boolean {
+  return (
+    assignment.assignmentType === "BREAK" ||
+    assignment.assignmentType === "BREAK_NAP" ||
+    assignment.assignmentType === "BREAK_SPEECH"
+  );
+}
+
+function staffAlreadyHasBreak(
+  staffId: string,
+  assignments: SchedulerAssignment[]
+): boolean {
+  return assignments.some(
+    (assignment) =>
+      assignment.staffId === staffId && isBreakAssignment(assignment)
+  );
+}
+
 function countFreeStaff(
   staff: SchedulerStaff[],
   callOutStaffIds: Set<string>,
@@ -116,9 +134,7 @@ function countReferenceBreaks(
     (assignment) =>
       assignment.staffId === staffId &&
       assignment.startTime === startTime &&
-      (assignment.assignmentType === "BREAK" ||
-        assignment.assignmentType === "BREAK_NAP" ||
-        assignment.assignmentType === "BREAK_SPEECH")
+      isBreakAssignment(assignment)
   ).length;
 }
 
@@ -150,15 +166,10 @@ function calculateBreakSlotScore(
     referenceAssignments
   );
 
-  // Repeated break placement from templates, recent schedules, and workbook
-  // observations is useful evidence, but it can only rank slots that have
-  // already passed the capacity-safety check below.
   const historicalBreakBonus =
     -Math.min(historicalBreakCount, 4) *
     Math.max(historicalBreakPriority, 0);
 
-  // Lower is better. Capacity remains the main guardrail; historical guidance
-  // only helps choose between break slots that are already safe.
   return (
     historicalBreakBonus +
     uncoveredDemand * 10 -
@@ -374,16 +385,6 @@ function findSupervisedFixedEventClient(
   return null;
 }
 
-/**
- * Reserves one automatic break for each eligible staff member before client
- * matching. Frontline staff are processed before managers and BCBAs so relief
- * roles remain available to cover the client while a technician takes a break.
- *
- * When the complete scheduler rules are provided, a candidate break is accepted
- * only if the remaining eligible staff can still be matched one-to-one with all
- * uncovered clients in that half-hour block. This prevents a headcount-only
- * break decision from overlooking hard staff/client or service-setting limits.
- */
 export function reserveStaffBreaks({
   staff,
   clients,
@@ -438,6 +439,10 @@ export function reserveStaffBreaks({
       ...existingAssignments,
       ...reservedAssignments,
     ];
+
+    if (staffAlreadyHasBreak(staffMember.id, currentAssignments)) {
+      continue;
+    }
 
     const candidateSlots = staffMember.availableSlots
       .filter(
@@ -505,12 +510,6 @@ export function reserveStaffBreaks({
   return reservedAssignments;
 }
 
-/**
- * Converts a normal break into Break/Nap or Break/Speech when the same technician
- * is supervising a client immediately around that fixed event. This mirrors the
- * clinic spreadsheet convention while keeping the client out of 1:1 demand for
- * the fixed-event block.
- */
 export function enrichBreakAssignmentsWithFixedEvents(
   assignments: SchedulerAssignment[],
   clients: SchedulerClient[],
