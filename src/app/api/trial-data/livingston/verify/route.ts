@@ -7,6 +7,8 @@ import { Staff } from "@/models/Staff";
 import { SupervisionRecord } from "@/models/SupervisionRecord";
 import { Team } from "@/models/Team";
 
+type PlainRecord = Record<string, unknown>;
+
 const TRIAL_LOCATION_CODE = "LIVINGSTON_TRIAL_VERIFY";
 const TRIAL_LOCATION_NAME = "Livingston Trial Verification";
 const TRIAL_TEAM_NAME = "Trial Blue";
@@ -262,14 +264,21 @@ export async function GET(request: Request) {
       }
     );
 
-    const [reflectedLocation, reflectedTeam, reflectedBt, reflectedClient, reflectedSupervision] =
-      await Promise.all([
-        Location.findById(location._id).lean(),
-        Team.findById(team._id).lean(),
-        Staff.findById(bt._id).lean(),
-        Client.findById(client._id).lean(),
-        SupervisionRecord.findById(supervision._id).lean(),
-      ]);
+    const reflectedLocation = (await Location.findById(location._id).lean()) as
+      | PlainRecord
+      | null;
+    const reflectedTeam = (await Team.findById(team._id).lean()) as
+      | PlainRecord
+      | null;
+    const reflectedBt = (await Staff.findById(bt._id).lean()) as
+      | PlainRecord
+      | null;
+    const reflectedClient = (await Client.findById(client._id).lean()) as
+      | PlainRecord
+      | null;
+    const reflectedSupervision = (await SupervisionRecord.findById(
+      supervision._id
+    ).lean()) as PlainRecord | null;
 
     const verified = Boolean(
       reflectedLocation &&
