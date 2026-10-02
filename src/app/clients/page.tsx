@@ -1,6 +1,6 @@
 import { AppShell } from "@/components/AppShell";
 import { SectionHeader } from "@/components/SectionHeader";
-import { ClientManager } from "@/features/clients/ClientManager";
+import { ClientCardManager } from "@/features/clients/ClientCardManager";
 import { ClientRotationManager } from "@/features/clients/ClientRotationManager";
 
 export default function ClientsPage() {
@@ -13,7 +13,7 @@ export default function ClientsPage() {
           description="Manage client attendance, staffing support, rotation rules, team assignments, BCBA and intern relationships, colors, and staff preferences or hard restrictions."
         />
 
-        <ClientManager />
+        <ClientCardManager />
         <ClientRotationManager />
       </div>
     </AppShell>

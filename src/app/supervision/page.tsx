@@ -1,6 +1,6 @@
 import { AppShell } from "@/components/AppShell";
 import { SectionHeader } from "@/components/SectionHeader";
-import { SupervisionDashboard } from "@/features/supervision/SupervisionDashboard";
+import { SupervisionCardDashboard } from "@/features/supervision/SupervisionCardDashboard";
 
 export default function SupervisionPage() {
   return (
@@ -12,7 +12,7 @@ export default function SupervisionPage() {
           description="Plan supervision coverage alongside the schedule and identify BT/RBT supervision needs when BCBA availability is limited."
         />
 
-        <SupervisionDashboard />
+        <SupervisionCardDashboard />
       </div>
     </AppShell>
   );

@@ -1,0 +1,176 @@
+.labCard {
+  display: grid;
+  gap: 18px;
+  border-color: #c9dde7;
+  background:
+    linear-gradient(180deg, rgba(239, 249, 252, 0.96), rgba(255, 255, 255, 1));
+}
+
+.statusPill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid #d5e1e7;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #607783;
+  font-size: 11px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.statusInstalled {
+  border-color: #9ad0b5;
+  background: #eefaf3;
+  color: #246e4f;
+}
+
+.scenarioGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.scenarioGrid article {
+  min-height: 104px;
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  padding: 12px;
+  border: 1px solid #d8e6ec;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.scenarioGrid strong {
+  color: #123b5d;
+  font-size: 12px;
+}
+
+.scenarioGrid span {
+  color: #607783;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.sampleNotes {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border-left: 4px solid #2a9d8f;
+  border-radius: 8px;
+  background: #f1fbf9;
+}
+
+.sampleNotes strong {
+  color: #17695f;
+  font-size: 12px;
+}
+
+.sampleNotes span {
+  color: #4d6f6a;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.countGrid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.countGrid div {
+  display: grid;
+  gap: 3px;
+  padding: 10px;
+  border: 1px solid #dce7ec;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.countGrid span {
+  color: #738691;
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.countGrid strong {
+  color: #123b5d;
+  font-size: 18px;
+}
+
+.actionRow,
+.testLinks {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.testLinks a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 5px 9px;
+  border: 1px solid #c9dce5;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #1c648b;
+  font-size: 10px;
+  font-weight: 850;
+  text-decoration: none;
+}
+
+.testLinks a:hover,
+.testLinks a:focus-visible {
+  border-color: #7fb5cd;
+  background: #f0f8fb;
+  outline: none;
+}
+
+.resultPanel {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border: 1px solid #b8dbc9;
+  border-radius: 10px;
+  background: #f3fbf6;
+}
+
+.resultPanel strong {
+  color: #286c50;
+  font-size: 12px;
+}
+
+.resultPanel span {
+  color: #4e6d5e;
+  font-size: 11px;
+}
+
+@media (max-width: 1100px) {
+  .scenarioGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .countGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .scenarioGrid,
+  .countGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .actionRow {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .actionRow button {
+    width: 100%;
+  }
+}

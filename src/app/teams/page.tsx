@@ -1,6 +1,6 @@
 import { AppShell } from "@/components/AppShell";
 import { SectionHeader } from "@/components/SectionHeader";
-import { TeamManager } from "@/features/teams/TeamManager";
+import { TeamCardManager } from "@/features/teams/TeamCardManager";
 
 export default function TeamsPage() {
   return (
@@ -12,7 +12,7 @@ export default function TeamsPage() {
           description="Group staff and clients together, share team colors, and give the automatic scheduler a preferred matching structure before it fills remaining coverage."
         />
 
-        <TeamManager />
+        <TeamCardManager />
       </div>
     </AppShell>
   );
