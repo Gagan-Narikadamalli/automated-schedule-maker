@@ -1,0 +1,128 @@
+.tray {
+  min-width: 260px;
+}
+
+.trayHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.trayHeader h2 {
+  margin: 0 0 4px;
+}
+
+.trayHeader p {
+  margin: 0;
+}
+
+.countBadge {
+  min-width: 30px;
+  height: 30px;
+  padding: 0 9px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(14, 65, 97, 0.2);
+  background: #f2f8fb;
+  color: #0e4161;
+  font-weight: 800;
+}
+
+.blockList {
+  display: grid;
+  gap: 10px;
+}
+
+.blockRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.unplacedBlock {
+  appearance: none;
+  width: 100%;
+  min-height: 54px;
+  border: 1px solid rgba(10, 52, 79, 0.32);
+  border-radius: 7px;
+  padding: 8px 10px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    "client time"
+    "status time";
+  gap: 2px 10px;
+  text-align: left;
+  color: #082f49;
+  cursor: grab;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.36);
+}
+
+.unplacedBlock:active {
+  cursor: grabbing;
+}
+
+.unplacedBlock:hover,
+.unplacedBlock:focus-visible {
+  outline: 2px solid #1479ad;
+  outline-offset: 1px;
+}
+
+.unplacedBlock strong {
+  grid-area: client;
+  font-size: 0.96rem;
+}
+
+.unplacedBlock span {
+  grid-area: status;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.unplacedBlock small {
+  grid-area: time;
+  align-self: center;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.placeButton {
+  align-self: stretch;
+}
+
+.detailsGrid {
+  display: grid;
+  gap: 12px;
+}
+
+.detailsGrid > div {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid rgba(14, 65, 97, 0.14);
+  border-radius: 8px;
+  background: #f8fbfd;
+}
+
+.detailsGrid span {
+  color: #577487;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.detailsGrid strong {
+  color: #0b3652;
+}
+
+@media (max-width: 900px) {
+  .blockRow {
+    grid-template-columns: 1fr;
+  }
+}
