@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 
-import { getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
 import { generateSchedule } from "@/features/scheduler/engine/generateSchedule";
 import { calculateSchedulerReadiness } from "@/features/scheduler/engine/preflight";
 import {
@@ -14,12 +13,8 @@ import type {
 import { applyHistoricalTraining } from "@/features/scheduler/server/applyHistoricalTraining";
 import { applyLivingstonWorkbookTrial } from "@/features/scheduler/server/applyLivingstonWorkbookTrial";
 import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySchedulerInput";
-import { syncAutoUnplacedGaps } from "@/features/scheduler/server/syncAutoUnplacedGaps";
-import { writeAuditLog } from "@/lib/api/audit";
-import { connectToDatabase } from "@/lib/db";
-import { ScheduleAssignment } from "@/models/ScheduleAssignment";
 
-type GenerateRequest = {
+type PreviewRequest = {
   locationId?: string;
   date?: string;
 };
@@ -39,7 +34,7 @@ function buildCoverageByRole(
   assignments: SchedulerAssignment[],
   staff: SchedulerStaff[],
   slotLengthMinutes: number
-) {
+): Record<string, number> {
   const roleByStaffId = new Map(
     staff.map((staffMember) => [staffMember.id, staffMember.role])
   );
@@ -61,7 +56,7 @@ function buildCoverageByRole(
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as GenerateRequest;
+    const body = (await request.json()) as PreviewRequest;
     const locationId = body.locationId?.trim();
     const date = body.date?.trim();
 
@@ -136,124 +131,46 @@ export async function POST(request: Request) {
       ],
     });
 
-    const enrichedAssignments =
+    const proposedAssignments =
       enrichBreakAssignmentsWithFixedEvents(
         result.assignments,
         schedulerInput.clients,
         dayData.extendedRules.slotLengthMinutes
       );
 
-    await connectToDatabase();
-
-    await ScheduleAssignment.deleteMany({
-      locationId,
-      date,
-      manuallyOverridden: {
-        $ne: true,
-      },
-      source: {
-        $in: ["AUTO", "TEMPLATE", "COPIED"],
-      },
-    });
-
-    const autoAssignments = enrichedAssignments.filter(
-      (assignment) => assignment.source === "AUTO"
-    );
-
-    if (autoAssignments.length > 0) {
-      await ScheduleAssignment.insertMany(
-        autoAssignments.map((assignment) => ({
-          locationId,
-          date,
-          startTime: assignment.startTime,
-          endTime: getEndTimeForSlot(
-            assignment.startTime
-          ),
-          staffId: assignment.staffId,
-          clientId: assignment.clientId || null,
-          assignmentType: assignment.assignmentType,
-          source: "AUTO",
-          locked: assignment.locked,
-          manuallyOverridden: false,
-          note: assignment.note || "",
-        }))
-      );
-    }
-
-    const managerGapCount = await syncAutoUnplacedGaps(
-      locationId,
-      date,
-      result.uncoveredRequirements
-    );
-
     const completeCoverage =
       result.metrics.uncoveredClientSlots === 0;
-    const partialBuild = !completeCoverage;
     const coverageByRole = buildCoverageByRole(
-      enrichedAssignments,
+      proposedAssignments,
       schedulerInput.staff,
       dayData.extendedRules.slotLengthMinutes
     );
 
-    await writeAuditLog({
-      locationId,
-      userId: "scheduler-system",
-      action: "GENERATE",
-      entityType: "SCHEDULE_DAY",
-      entityId: date,
-      summary: partialBuild
-        ? `Built a partial schedule for ${date}: ${result.metrics.coveredClientSlots}/${result.metrics.requiredClientSlots} client blocks covered.`
-        : `Generated a complete schedule for ${date}: ${result.metrics.coveredClientSlots}/${result.metrics.requiredClientSlots} client blocks covered.`,
-      after: {
-        readiness,
-        metrics: result.metrics,
-        uncoveredRequirements:
-          result.uncoveredRequirements,
-        managerGapCount,
-        warningCount: result.warnings.length,
-        reservedBreakCount: reservedBreaks.length,
-        completeCoverage,
-        partialBuild,
-        coverageByRole,
-        autoTemplateName: dayData.autoTemplateName,
-        previousReferenceDate:
-          dayData.previousReferenceDate,
-        workbookTrainingApplied: workbookTraining.applied,
-        workbookTrainingReferences:
-          workbookTraining.referenceCount,
-        workbookTrainingSourceWeek: workbookTraining.applied
-          ? {
-              start: workbookTraining.sourceWeekStart,
-              end: workbookTraining.sourceWeekEnd,
-            }
-          : null,
-        importedTrainingScheduleDays:
-          historicalTraining.matchedScheduleDayCount,
-        importedTrainingRecords:
-          historicalTraining.matchedRecordCount,
-      },
-    });
-
     return NextResponse.json({
       success: true,
+      previewOnly: true,
       date,
       locationId,
       completeCoverage,
-      partialBuild,
-      message: partialBuild
-        ? "The automatic scheduler built every assignment it could safely cover. Remaining client blocks were added to the manager Unplaced Assignments tray."
-        : "The automatic scheduler completed all required client coverage.",
+      partialBuild: !completeCoverage,
       readiness,
       metrics: result.metrics,
       warnings: result.warnings,
-      uncoveredRequirements:
-        result.uncoveredRequirements,
-      managerGapCount,
+      uncoveredRequirements: result.uncoveredRequirements,
       reservedBreakCount: reservedBreaks.length,
       coverageByRole,
+      proposedAssignments: proposedAssignments.map((assignment) => ({
+        staffId: assignment.staffId,
+        clientId: assignment.clientId ?? null,
+        startTime: assignment.startTime,
+        assignmentType: assignment.assignmentType,
+        source: assignment.source,
+        locked: assignment.locked,
+        note: assignment.note ?? "",
+      })),
       autoTemplateName: dayData.autoTemplateName,
-      previousReferenceDate:
-        dayData.previousReferenceDate,
+      previousReferenceDate: dayData.previousReferenceDate,
+      historicalReferenceDates: dayData.historicalReferenceDates,
       workbookTrainingApplied: workbookTraining.applied,
       workbookTrainingReferences:
         workbookTraining.referenceCount,
@@ -269,14 +186,11 @@ export async function POST(request: Request) {
         historicalTraining.matchedRecordCount,
     });
   } catch (error) {
-    console.error(
-      "Schedule generation failed:",
-      error
-    );
+    console.error("Schedule preview failed:", error);
 
     return NextResponse.json(
       {
-        error: "The schedule could not be generated.",
+        error: "The automatic schedule preview could not be calculated.",
       },
       {
         status: 500,

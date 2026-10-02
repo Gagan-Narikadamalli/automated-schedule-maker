@@ -1,4 +1,5 @@
 import {
+  getDayKeys,
   getSlotsInsideTimeRange,
   patternMatchesDate,
 } from "@/features/scheduler/engine/dateUtils";
@@ -10,17 +11,23 @@ import type {
   SchedulerStaff,
   ServiceSetting,
   StaffRelationship,
+  StaffRole,
   SupportLevel,
 } from "@/features/scheduler/engine/types";
 import { connectToDatabase } from "@/lib/db";
 import { CallOut } from "@/models/CallOut";
 import { Client } from "@/models/Client";
 import { ScheduleAssignment } from "@/models/ScheduleAssignment";
+import { ScheduleTemplate } from "@/models/ScheduleTemplate";
 import { SchedulingRules } from "@/models/SchedulingRules";
 import { SpeechSession } from "@/models/SpeechSession";
 import { Staff } from "@/models/Staff";
 
 type DatabaseRecord = Record<string, any>;
+type TimeRange = {
+  startTime: string;
+  endTime: string;
+};
 
 export type ExtendedSchedulerRules = SchedulerRules & {
   breakWindowStart: string;
@@ -29,6 +36,10 @@ export type ExtendedSchedulerRules = SchedulerRules & {
   breakEligibilityHours: number;
   scheduleStartTime: string;
   scheduleEndTime: string;
+  fullTimeMinimumWeeklyHours: number;
+  fullTimeMaximumWeeklyHours: number;
+  partTimeMinimumWeeklyHours: number;
+  partTimeMaximumWeeklyHours: number;
 };
 
 export type DaySchedulerData = {
@@ -41,7 +52,41 @@ export type DaySchedulerData = {
     startTime: string;
     endTime: string;
   }>;
+  autoTemplateName: string | null;
+  previousReferenceDate: string | null;
+  historicalReferenceDates: string[];
 };
+
+function formatLocalDate(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getWeekStart(dateText: string): string {
+  const date = new Date(`${dateText}T12:00:00`);
+  const day = date.getDay();
+  const daysSinceMonday = day === 0 ? 6 : day - 1;
+  date.setDate(date.getDate() - daysSinceMonday);
+  return formatLocalDate(date);
+}
+
+function getPreviousSameWeekdayDates(
+  dateText: string,
+  count: number
+): string[] {
+  const date = new Date(`${dateText}T12:00:00`);
+  const dates: string[] = [];
+
+  for (let index = 1; index <= count; index += 1) {
+    const previousDate = new Date(date);
+    previousDate.setDate(previousDate.getDate() - index * 7);
+    dates.push(formatLocalDate(previousDate));
+  }
+
+  return dates;
+}
 
 function isDateInsideActiveRange(
   requestedDateText: string,
@@ -99,7 +144,7 @@ function getPatternSlots(
 
 function removeBlockedSlots(
   slots: string[],
-  ranges: Array<{ startTime: string; endTime: string }>
+  ranges: TimeRange[]
 ): string[] {
   return slots.filter((slot) => {
     return !ranges.some((range) => {
@@ -120,12 +165,26 @@ function getDefaultRules(): ExtendedSchedulerRules {
     continuityPriority: 35,
     rotationPriority: 60,
     workloadBalancePriority: 10,
+    scheduleStabilityPriority: 140,
+    weekdayTemplatePriority: 75,
+    weeklyHoursPriority: 12,
+    btCoveragePriority: 500,
+    internCoveragePriority: 300,
+    managerCoveragePriority: 125,
+    bcbaCoveragePriority: 25,
+    otherCoveragePriority: 75,
+    autoUseWeekdayTemplate: true,
+    autoUsePreviousWeekdaySchedule: true,
     breakWindowStart: "11:00",
     breakWindowEnd: "13:30",
     defaultBreakMinutes: 30,
     breakEligibilityHours: 6,
     scheduleStartTime: "08:00",
-    scheduleEndTime: "18:00",
+    scheduleEndTime: "20:00",
+    fullTimeMinimumWeeklyHours: 30,
+    fullTimeMaximumWeeklyHours: 40,
+    partTimeMinimumWeeklyHours: 0,
+    partTimeMaximumWeeklyHours: 29,
   };
 }
 
@@ -169,6 +228,37 @@ function mapRules(document: DatabaseRecord | null): ExtendedSchedulerRules {
     workloadBalancePriority: Number(
       document.workloadBalancePriority ?? defaults.workloadBalancePriority
     ),
+    scheduleStabilityPriority: Number(
+      document.scheduleStabilityPriority ?? defaults.scheduleStabilityPriority
+    ),
+    weekdayTemplatePriority: Number(
+      document.weekdayTemplatePriority ?? defaults.weekdayTemplatePriority
+    ),
+    weeklyHoursPriority: Number(
+      document.weeklyHoursPriority ?? defaults.weeklyHoursPriority
+    ),
+    btCoveragePriority: Number(
+      document.btCoveragePriority ?? defaults.btCoveragePriority
+    ),
+    internCoveragePriority: Number(
+      document.internCoveragePriority ?? defaults.internCoveragePriority
+    ),
+    managerCoveragePriority: Number(
+      document.managerCoveragePriority ?? defaults.managerCoveragePriority
+    ),
+    bcbaCoveragePriority: Number(
+      document.bcbaCoveragePriority ?? defaults.bcbaCoveragePriority
+    ),
+    otherCoveragePriority: Number(
+      document.otherCoveragePriority ?? defaults.otherCoveragePriority
+    ),
+    autoUseWeekdayTemplate: Boolean(
+      document.autoUseWeekdayTemplate ?? defaults.autoUseWeekdayTemplate
+    ),
+    autoUsePreviousWeekdaySchedule: Boolean(
+      document.autoUsePreviousWeekdaySchedule ??
+        defaults.autoUsePreviousWeekdaySchedule
+    ),
     breakWindowStart: String(
       document.breakWindowStart ?? defaults.breakWindowStart
     ),
@@ -186,6 +276,22 @@ function mapRules(document: DatabaseRecord | null): ExtendedSchedulerRules {
     ),
     scheduleEndTime: String(
       document.scheduleEndTime ?? defaults.scheduleEndTime
+    ),
+    fullTimeMinimumWeeklyHours: Number(
+      document.fullTimeMinimumWeeklyHours ??
+        defaults.fullTimeMinimumWeeklyHours
+    ),
+    fullTimeMaximumWeeklyHours: Number(
+      document.fullTimeMaximumWeeklyHours ??
+        defaults.fullTimeMaximumWeeklyHours
+    ),
+    partTimeMinimumWeeklyHours: Number(
+      document.partTimeMinimumWeeklyHours ??
+        defaults.partTimeMinimumWeeklyHours
+    ),
+    partTimeMaximumWeeklyHours: Number(
+      document.partTimeMaximumWeeklyHours ??
+        defaults.partTimeMaximumWeeklyHours
     ),
   };
 }
@@ -210,6 +316,21 @@ function normalizeSupportLevel(value: unknown): SupportLevel {
   return "ONE_TO_ONE";
 }
 
+function normalizeStaffRole(value: unknown): StaffRole {
+  if (
+    value === "BT" ||
+    value === "RBT" ||
+    value === "INTERN" ||
+    value === "OFFICE_MANAGER" ||
+    value === "BCBA" ||
+    value === "OTHER"
+  ) {
+    return value;
+  }
+
+  return "OTHER";
+}
+
 function defaultRotationRules(supportLevel: SupportLevel) {
   if (supportLevel === "HIGH_SUPPORT") {
     return {
@@ -231,10 +352,39 @@ function defaultRotationRules(supportLevel: SupportLevel) {
   };
 }
 
+function buildWeeklyClientHoursByStaff(
+  assignmentDocuments: DatabaseRecord[],
+  slotLengthMinutes: number
+): Map<string, number> {
+  const hoursByStaff = new Map<string, number>();
+  const slotHours = slotLengthMinutes / 60;
+
+  for (const assignment of assignmentDocuments) {
+    if (String(assignment.assignmentType) !== "CLIENT_1_TO_1") {
+      continue;
+    }
+
+    const staffId = String(assignment.staffId ?? "");
+
+    if (!staffId) {
+      continue;
+    }
+
+    hoursByStaff.set(
+      staffId,
+      (hoursByStaff.get(staffId) ?? 0) + slotHours
+    );
+  }
+
+  return hoursByStaff;
+}
+
 function mapStaff(
   staffDocuments: DatabaseRecord[],
   callOuts: DaySchedulerData["partialCallOuts"],
-  date: string
+  date: string,
+  weeklyClientHoursByStaff: Map<string, number>,
+  rules: ExtendedSchedulerRules
 ): SchedulerStaff[] {
   return staffDocuments
     .filter((staffMember) => {
@@ -246,7 +396,7 @@ function mapStaff(
     })
     .map((staffMember) => {
       const staffId = String(staffMember._id);
-      const unavailableRanges = callOuts
+      const unavailableRanges: TimeRange[] = callOuts
         .filter((callOut) => callOut.staffId === staffId)
         .map((callOut) => ({
           startTime: callOut.startTime,
@@ -261,16 +411,54 @@ function mapStaff(
         normalAvailableSlots,
         unavailableRanges
       );
+      const employeeType = String(
+        staffMember.employeeType ?? "FULL_TIME"
+      );
+      const fallbackMinimumWeeklyHours =
+        employeeType === "PART_TIME"
+          ? rules.partTimeMinimumWeeklyHours
+          : rules.fullTimeMinimumWeeklyHours;
+      const fallbackMaximumWeeklyHours =
+        employeeType === "PART_TIME"
+          ? rules.partTimeMaximumWeeklyHours
+          : rules.fullTimeMaximumWeeklyHours;
+      const configuredMinimumWeeklyHours = Number(
+        staffMember.minimumWeeklyHours ?? fallbackMinimumWeeklyHours
+      );
+      const configuredMaximumWeeklyHours = Number(
+        staffMember.maximumWeeklyHours ?? fallbackMaximumWeeklyHours
+      );
+      const configuredTargetWeeklyHours = Number(
+        staffMember.targetWeeklyHours ?? 0
+      );
 
       return {
         id: staffId,
         name: String(staffMember.fullName ?? ""),
+        role: normalizeStaffRole(staffMember.role),
         teamId: staffMember.teamId
           ? String(staffMember.teamId)
           : undefined,
-        serviceSetting: normalizeServiceSetting(staffMember.serviceSetting),
+        serviceSetting: normalizeServiceSetting(
+          staffMember.serviceSetting
+        ),
         availableSlots,
-        maximumDailyHours: availableSlots.length / 2,
+        maximumDailyHours:
+          (availableSlots.length * rules.slotLengthMinutes) / 60,
+        minimumWeeklyHours: Math.max(
+          configuredMinimumWeeklyHours,
+          0
+        ),
+        targetWeeklyHours:
+          configuredTargetWeeklyHours > 0
+            ? configuredTargetWeeklyHours
+            : undefined,
+        maximumWeeklyHours:
+          configuredMaximumWeeklyHours > 0
+            ? configuredMaximumWeeklyHours
+            : undefined,
+        scheduledWeeklyClientHoursBeforeDate:
+          weeklyClientHoursByStaff.get(staffId) ?? 0,
       };
     });
 }
@@ -295,29 +483,37 @@ function mapClients(
         date
       );
 
-      const napRanges = (client.napPatterns ?? [])
-        .filter((pattern: DatabaseRecord) => {
+      const napRanges: TimeRange[] = (
+        (client.napPatterns ?? []) as DatabaseRecord[]
+      )
+        .filter((pattern) => {
           const days = Array.isArray(pattern.days)
             ? pattern.days.map((day: unknown) => String(day))
             : [];
 
           return patternMatchesDate(days, date);
         })
-        .filter((pattern: DatabaseRecord) => {
+        .filter((pattern) => {
           return Boolean(pattern.startTime && pattern.endTime);
         })
-        .map((pattern: DatabaseRecord) => ({
+        .map((pattern) => ({
           startTime: String(pattern.startTime),
           endTime: String(pattern.endTime),
         }));
 
-      const speechRanges = speechSessions
+      const speechRanges: TimeRange[] = speechSessions
         .filter((session) => String(session.clientId) === clientId)
         .map((session) => ({
           startTime: String(session.startTime),
           endTime: String(session.endTime),
         }));
 
+      const napSlots: string[] = napRanges.flatMap((range) =>
+        getSlotsInsideTimeRange(range.startTime, range.endTime)
+      );
+      const speechSlots: string[] = speechRanges.flatMap((range) =>
+        getSlotsInsideTimeRange(range.startTime, range.endTime)
+      );
       const staffRelationships: Record<string, StaffRelationship> = {};
 
       for (const relationship of client.staffRelationships ?? []) {
@@ -351,13 +547,19 @@ function mapClients(
       return {
         id: clientId,
         displayCode: String(client.displayCode ?? ""),
-        teamId: client.teamId ? String(client.teamId) : undefined,
-        serviceSetting: normalizeServiceSetting(client.serviceSetting),
+        teamId: client.teamId
+          ? String(client.teamId)
+          : undefined,
+        serviceSetting: normalizeServiceSetting(
+          client.serviceSetting
+        ),
         supportLevel,
         requiredSlots: removeBlockedSlots(attendanceSlots, [
           ...napRanges,
           ...speechRanges,
         ]),
+        napSlots: [...new Set(napSlots)].sort(),
+        speechSlots: [...new Set(speechSlots)].sort(),
         staffRelationships,
         maxConsecutiveBlocksWithSameStaff:
           configuredMaxConsecutive > 0
@@ -388,9 +590,76 @@ function mapExistingAssignments(
       locked:
         Boolean(assignment.locked) ||
         Boolean(assignment.manuallyOverridden),
-      note: assignment.note ? String(assignment.note) : undefined,
+      note: assignment.note
+        ? String(assignment.note)
+        : undefined,
     };
   });
+}
+
+function mapReferenceAssignments(
+  records: DatabaseRecord[],
+  source: "TEMPLATE" | "COPIED",
+  staff: SchedulerStaff[],
+  clients: SchedulerClient[],
+  label: string
+): SchedulerAssignment[] {
+  const staffById = new Map(
+    staff.map((staffMember) => [staffMember.id, staffMember])
+  );
+  const clientById = new Map(
+    clients.map((client) => [client.id, client])
+  );
+  const references: SchedulerAssignment[] = [];
+
+  records.forEach((assignment, index) => {
+    const assignmentType = String(
+      assignment.assignmentType ?? ""
+    ) as SchedulerAssignment["assignmentType"];
+    const staffId = String(assignment.staffId ?? "");
+    const clientId = assignment.clientId
+      ? String(assignment.clientId)
+      : undefined;
+    const startTime = String(assignment.startTime ?? "");
+    const staffMember = staffById.get(staffId);
+
+    if (!staffMember || !startTime) {
+      return;
+    }
+
+    if (!staffMember.availableSlots.includes(startTime)) {
+      return;
+    }
+
+    if (assignmentType === "CLIENT_1_TO_1") {
+      const client = clientId
+        ? clientById.get(clientId)
+        : undefined;
+
+      if (!client || !client.requiredSlots.includes(startTime)) {
+        return;
+      }
+    } else if (
+      assignmentType !== "BREAK" &&
+      assignmentType !== "BREAK_NAP" &&
+      assignmentType !== "BREAK_SPEECH"
+    ) {
+      return;
+    }
+
+    references.push({
+      id: `${source.toLowerCase()}-${index}-${staffId}-${startTime}`,
+      staffId,
+      clientId,
+      startTime,
+      assignmentType,
+      source,
+      locked: false,
+      note: label,
+    });
+  });
+
+  return references;
 }
 
 export async function buildDaySchedulerInput(
@@ -399,6 +668,13 @@ export async function buildDaySchedulerInput(
 ): Promise<DaySchedulerData> {
   await connectToDatabase();
 
+  const dayOfWeek = getDayKeys(date)[0] ?? "";
+  const weekStart = getWeekStart(date);
+  const previousSameWeekdayDates = getPreviousSameWeekdayDates(
+    date,
+    8
+  );
+
   const [
     rawStaff,
     rawClients,
@@ -406,6 +682,9 @@ export async function buildDaySchedulerInput(
     rawSpeechSessions,
     rawAssignments,
     rawRules,
+    rawTemplate,
+    rawPreviousWeekdayAssignments,
+    rawEarlierWeekAssignments,
   ] = await Promise.all([
     Staff.find({ locationId, active: true })
       .sort({ fullName: 1 })
@@ -417,6 +696,31 @@ export async function buildDaySchedulerInput(
     SpeechSession.find({ locationId, date }).lean(),
     ScheduleAssignment.find({ locationId, date }).lean(),
     SchedulingRules.findOne({ locationId }).lean(),
+    dayOfWeek
+      ? ScheduleTemplate.findOne({
+          locationId,
+          dayOfWeek,
+          active: true,
+        })
+          .sort({ updatedAt: -1 })
+          .lean()
+      : Promise.resolve(null),
+    ScheduleAssignment.find({
+      locationId,
+      date: {
+        $in: previousSameWeekdayDates,
+      },
+    })
+      .sort({ date: -1, startTime: 1 })
+      .lean(),
+    ScheduleAssignment.find({
+      locationId,
+      date: {
+        $gte: weekStart,
+        $lt: date,
+      },
+      assignmentType: "CLIENT_1_TO_1",
+    }).lean(),
   ]);
 
   const staffDocuments = rawStaff as unknown as DatabaseRecord[];
@@ -424,6 +728,12 @@ export async function buildDaySchedulerInput(
   const speechSessions = rawSpeechSessions as unknown as DatabaseRecord[];
   const assignmentDocuments = rawAssignments as unknown as DatabaseRecord[];
   const rulesDocument = rawRules as unknown as DatabaseRecord | null;
+  const templateDocument = rawTemplate as unknown as DatabaseRecord | null;
+  const previousWeekdayAssignments =
+    rawPreviousWeekdayAssignments as unknown as DatabaseRecord[];
+  const earlierWeekAssignments =
+    rawEarlierWeekAssignments as unknown as DatabaseRecord[];
+  const extendedRules = mapRules(rulesDocument);
 
   const partialCallOuts = (
     rawCallOuts as unknown as DatabaseRecord[]
@@ -433,12 +743,64 @@ export async function buildDaySchedulerInput(
     endTime: String(callOut.endTime),
   }));
 
-  const staff = mapStaff(staffDocuments, partialCallOuts, date);
-  const clients = mapClients(clientDocuments, speechSessions, date);
+  const weeklyClientHoursByStaff = buildWeeklyClientHoursByStaff(
+    earlierWeekAssignments,
+    extendedRules.slotLengthMinutes
+  );
+  const staff = mapStaff(
+    staffDocuments,
+    partialCallOuts,
+    date,
+    weeklyClientHoursByStaff,
+    extendedRules
+  );
+  const clients = mapClients(
+    clientDocuments,
+    speechSessions,
+    date
+  );
   const existingAssignments = mapExistingAssignments(
     assignmentDocuments
   );
-  const extendedRules = mapRules(rulesDocument);
+
+  const templateReferences =
+    extendedRules.autoUseWeekdayTemplate && templateDocument
+      ? mapReferenceAssignments(
+          templateDocument.assignments ?? [],
+          "TEMPLATE",
+          staff,
+          clients,
+          `Reference from weekday template ${String(
+            templateDocument.name ?? ""
+          )}.`
+        )
+      : [];
+
+  const historicalReferenceDates = [
+    ...new Set(
+      previousWeekdayAssignments
+        .map((assignment) => String(assignment.date ?? ""))
+        .filter(Boolean)
+    ),
+  ];
+  const latestPreviousReferenceDate =
+    extendedRules.autoUsePreviousWeekdaySchedule &&
+    historicalReferenceDates.length > 0
+      ? historicalReferenceDates[0]
+      : null;
+  const previousScheduleReferences =
+    extendedRules.autoUsePreviousWeekdaySchedule
+      ? mapReferenceAssignments(
+          previousWeekdayAssignments,
+          "COPIED",
+          staff,
+          clients,
+          `Historical reference from the previous ${Math.min(
+            historicalReferenceDates.length,
+            8
+          )} ${dayOfWeek.toLowerCase()} schedule(s).`
+        )
+      : [];
 
   const fullDayCallOutStaffIds = partialCallOuts
     .filter((callOut) => {
@@ -453,21 +815,59 @@ export async function buildDaySchedulerInput(
     staff,
     clients,
     existingAssignments,
+    referenceAssignments: [
+      ...existingAssignments.filter(
+        (assignment) =>
+          assignment.assignmentType === "CLIENT_1_TO_1" ||
+          assignment.assignmentType === "BREAK" ||
+          assignment.assignmentType === "BREAK_NAP" ||
+          assignment.assignmentType === "BREAK_SPEECH"
+      ),
+      ...templateReferences,
+      ...previousScheduleReferences,
+    ],
     callOutStaffIds: fullDayCallOutStaffIds,
     rules: {
       maximumClientsPerTechPerDay:
         extendedRules.maximumClientsPerTechPerDay,
       maximumTechsPerClientPerDay:
         extendedRules.maximumTechsPerClientPerDay,
-      preferSameTeam: extendedRules.preferSameTeam,
+      preferSameTeam:
+        extendedRules.preferSameTeam,
       preferStaffContinuity:
         extendedRules.preferStaffContinuity,
-      slotLengthMinutes: extendedRules.slotLengthMinutes,
-      preferredStaffPriority: extendedRules.preferredStaffPriority,
-      sameTeamPriority: extendedRules.sameTeamPriority,
-      continuityPriority: extendedRules.continuityPriority,
-      rotationPriority: extendedRules.rotationPriority,
-      workloadBalancePriority: extendedRules.workloadBalancePriority,
+      slotLengthMinutes:
+        extendedRules.slotLengthMinutes,
+      preferredStaffPriority:
+        extendedRules.preferredStaffPriority,
+      sameTeamPriority:
+        extendedRules.sameTeamPriority,
+      continuityPriority:
+        extendedRules.continuityPriority,
+      rotationPriority:
+        extendedRules.rotationPriority,
+      workloadBalancePriority:
+        extendedRules.workloadBalancePriority,
+      scheduleStabilityPriority:
+        extendedRules.scheduleStabilityPriority,
+      weekdayTemplatePriority:
+        extendedRules.weekdayTemplatePriority,
+      weeklyHoursPriority:
+        extendedRules.weeklyHoursPriority,
+      btCoveragePriority:
+        extendedRules.btCoveragePriority,
+      internCoveragePriority:
+        extendedRules.internCoveragePriority,
+      managerCoveragePriority:
+        extendedRules.managerCoveragePriority,
+      bcbaCoveragePriority:
+        extendedRules.bcbaCoveragePriority,
+      otherCoveragePriority:
+        extendedRules.otherCoveragePriority,
+      autoUseWeekdayTemplate:
+        extendedRules.autoUseWeekdayTemplate,
+      autoUsePreviousWeekdaySchedule:
+        extendedRules.autoUsePreviousWeekdaySchedule,
     },
   };
 
@@ -477,5 +877,14 @@ export async function buildDaySchedulerInput(
     staff,
     clients,
     partialCallOuts,
+    autoTemplateName:
+      extendedRules.autoUseWeekdayTemplate && templateDocument
+        ? String(templateDocument.name ?? "") || null
+        : null,
+    previousReferenceDate: latestPreviousReferenceDate,
+    historicalReferenceDates:
+      extendedRules.autoUsePreviousWeekdaySchedule
+        ? historicalReferenceDates
+        : [],
   };
 }

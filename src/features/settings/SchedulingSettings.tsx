@@ -24,11 +24,21 @@ type RulesForm = {
   preferSameTeam: boolean;
   preferStaffContinuity: boolean;
   preserveManualOverrides: boolean;
+  autoUseWeekdayTemplate: boolean;
+  autoUsePreviousWeekdaySchedule: boolean;
   preferredStaffPriority: number;
   sameTeamPriority: number;
   continuityPriority: number;
   rotationPriority: number;
   workloadBalancePriority: number;
+  scheduleStabilityPriority: number;
+  weekdayTemplatePriority: number;
+  weeklyHoursPriority: number;
+  btCoveragePriority: number;
+  internCoveragePriority: number;
+  managerCoveragePriority: number;
+  bcbaCoveragePriority: number;
+  otherCoveragePriority: number;
   supervisionPlanningTargetPercent: number;
 };
 
@@ -47,11 +57,29 @@ type NumericRuleField =
   | "continuityPriority"
   | "rotationPriority"
   | "workloadBalancePriority"
+  | "scheduleStabilityPriority"
+  | "weekdayTemplatePriority"
+  | "weeklyHoursPriority"
+  | "btCoveragePriority"
+  | "internCoveragePriority"
+  | "managerCoveragePriority"
+  | "bcbaCoveragePriority"
+  | "otherCoveragePriority"
   | "supervisionPlanningTargetPercent";
+
+type LocationsResponse = {
+  locations?: LocationOption[];
+  error?: string;
+};
+
+type RulesResponse = {
+  rules?: Partial<RulesForm>;
+  error?: string;
+};
 
 const DEFAULT_RULES: RulesForm = {
   scheduleStartTime: "08:00",
-  scheduleEndTime: "18:00",
+  scheduleEndTime: "20:00",
   slotLengthMinutes: 30,
   fullTimeMinimumWeeklyHours: 30,
   fullTimeMaximumWeeklyHours: 40,
@@ -66,23 +94,59 @@ const DEFAULT_RULES: RulesForm = {
   preferSameTeam: true,
   preferStaffContinuity: true,
   preserveManualOverrides: true,
+  autoUseWeekdayTemplate: true,
+  autoUsePreviousWeekdaySchedule: true,
   preferredStaffPriority: 100,
   sameTeamPriority: 40,
   continuityPriority: 35,
   rotationPriority: 60,
   workloadBalancePriority: 10,
+  scheduleStabilityPriority: 140,
+  weekdayTemplatePriority: 75,
+  weeklyHoursPriority: 12,
+  btCoveragePriority: 500,
+  internCoveragePriority: 300,
+  managerCoveragePriority: 125,
+  bcbaCoveragePriority: 25,
+  otherCoveragePriority: 75,
   supervisionPlanningTargetPercent: 5,
 };
 
-type LocationsResponse = {
-  locations?: LocationOption[];
-  error?: string;
-};
+function softPriorityLabel(value: number): string {
+  if (value === 0) {
+    return "Off";
+  }
 
-type RulesResponse = {
-  rules?: Partial<RulesForm>;
-  error?: string;
-};
+  if (value <= 25) {
+    return "Low";
+  }
+
+  if (value <= 60) {
+    return "Medium";
+  }
+
+  if (value <= 110) {
+    return "High";
+  }
+
+  return "Very high";
+}
+
+function rolePriorityLabel(value: number): string {
+  if (value < 100) {
+    return "Last resort";
+  }
+
+  if (value < 250) {
+    return "Relief coverage";
+  }
+
+  if (value < 450) {
+    return "Secondary coverage";
+  }
+
+  return "Primary coverage";
+}
 
 export function SchedulingSettings() {
   const [locations, setLocations] = useState<LocationOption[]>([]);
@@ -90,7 +154,9 @@ export function SchedulingSettings() {
   const [rules, setRules] = useState<RulesForm>(DEFAULT_RULES);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState("Loading clinic scheduling rules...");
+  const [message, setMessage] = useState(
+    "Loading clinic scheduling rules..."
+  );
 
   useEffect(() => {
     void loadLocations();
@@ -106,11 +172,15 @@ export function SchedulingSettings() {
     try {
       setLoading(true);
 
-      const response = await fetch("/api/locations", { cache: "no-store" });
+      const response = await fetch("/api/locations", {
+        cache: "no-store",
+      });
       const data = (await response.json()) as LocationsResponse;
 
       if (!response.ok) {
-        throw new Error(data.error || "Locations could not be loaded.");
+        throw new Error(
+          data.error || "Locations could not be loaded."
+        );
       }
 
       const nextLocations = data.locations ?? [];
@@ -123,7 +193,9 @@ export function SchedulingSettings() {
       }
     } catch (error) {
       setMessage(
-        error instanceof Error ? error.message : "Locations could not be loaded."
+        error instanceof Error
+          ? error.message
+          : "Locations could not be loaded."
       );
     } finally {
       setLoading(false);
@@ -139,12 +211,16 @@ export function SchedulingSettings() {
         `/api/scheduling-rules?locationId=${encodeURIComponent(
           requestedLocationId
         )}`,
-        { cache: "no-store" }
+        {
+          cache: "no-store",
+        }
       );
       const data = (await response.json()) as RulesResponse;
 
       if (!response.ok || !data.rules) {
-        throw new Error(data.error || "Scheduling rules could not be loaded.");
+        throw new Error(
+          data.error || "Scheduling rules could not be loaded."
+        );
       }
 
       setRules({
@@ -163,31 +239,29 @@ export function SchedulingSettings() {
     }
   }
 
-  function updateNumberField(field: NumericRuleField, value: string) {
+  function updateNumberField(
+    field: NumericRuleField,
+    value: string
+  ) {
     setRules((currentRules) => ({
       ...currentRules,
       [field]: Number(value),
     }));
   }
 
-  function priorityHelp(value: number): string {
-    if (value === 0) {
-      return "Off";
-    }
-
-    if (value <= 25) {
-      return "Low";
-    }
-
-    if (value <= 60) {
-      return "Medium";
-    }
-
-    if (value <= 110) {
-      return "High";
-    }
-
-    return "Very high";
+  function updateBooleanField(
+    field:
+      | "preferSameTeam"
+      | "preferStaffContinuity"
+      | "preserveManualOverrides"
+      | "autoUseWeekdayTemplate"
+      | "autoUsePreviousWeekdaySchedule",
+    value: boolean
+  ) {
+    setRules((currentRules) => ({
+      ...currentRules,
+      [field]: value,
+    }));
   }
 
   async function saveRules() {
@@ -197,26 +271,34 @@ export function SchedulingSettings() {
     }
 
     if (rules.scheduleEndTime <= rules.scheduleStartTime) {
-      setMessage("Schedule end time must be later than schedule start time.");
+      setMessage(
+        "Schedule end time must be later than schedule start time."
+      );
       return;
     }
 
     if (rules.breakWindowEnd <= rules.breakWindowStart) {
-      setMessage("Break window end must be later than break window start.");
+      setMessage(
+        "Break window end must be later than break window start."
+      );
       return;
     }
 
     if (
-      rules.fullTimeMaximumWeeklyHours < rules.fullTimeMinimumWeeklyHours ||
-      rules.partTimeMaximumWeeklyHours < rules.partTimeMinimumWeeklyHours
+      rules.fullTimeMaximumWeeklyHours <
+        rules.fullTimeMinimumWeeklyHours ||
+      rules.partTimeMaximumWeeklyHours <
+        rules.partTimeMinimumWeeklyHours
     ) {
-      setMessage("Maximum hours cannot be lower than minimum hours.");
+      setMessage(
+        "Maximum weekly hours cannot be lower than minimum weekly hours."
+      );
       return;
     }
 
     if (rules.slotLengthMinutes !== 30) {
       setMessage(
-        "The Excel-matching schedule currently requires 30-minute blocks."
+        "The Excel-style scheduler currently requires 30-minute blocks."
       );
       return;
     }
@@ -238,7 +320,9 @@ export function SchedulingSettings() {
       const data = (await response.json()) as RulesResponse;
 
       if (!response.ok || !data.rules) {
-        throw new Error(data.error || "Scheduling rules could not be saved.");
+        throw new Error(
+          data.error || "Scheduling rules could not be saved."
+        );
       }
 
       setRules({
@@ -246,7 +330,7 @@ export function SchedulingSettings() {
         ...data.rules,
       });
       setMessage(
-        "Scheduling rules saved. Auto Generate and Repair will use the new priorities."
+        "Scheduling rules saved. Auto Generate and Repair will use these priorities."
       );
     } catch (error) {
       setMessage(
@@ -266,8 +350,8 @@ export function SchedulingSettings() {
           <div>
             <h2>Location</h2>
             <p>
-              Livingston and Parsippany keep separate scheduling rules while sharing
-              the same application.
+              Livingston and Parsippany use separate scheduling rules while
+              sharing the same scheduler application.
             </p>
           </div>
 
@@ -276,10 +360,15 @@ export function SchedulingSettings() {
             <select
               value={locationId}
               disabled={loading || saving}
-              onChange={(event) => setLocationId(event.target.value)}
+              onChange={(event) =>
+                setLocationId(event.target.value)
+              }
             >
               {locations.map((location) => (
-                <option key={location.id} value={location.id}>
+                <option
+                  key={location.id}
+                  value={location.id}
+                >
                   {location.name}
                 </option>
               ))}
@@ -291,8 +380,7 @@ export function SchedulingSettings() {
       <section className="section-card">
         <h2>Calendar Rules</h2>
         <p>
-          These values define the Excel-style day that the automatic scheduler is
-          allowed to use.
+          The scheduler uses these boundaries for the Excel-style daily grid.
         </p>
 
         <div className="form-grid">
@@ -333,7 +421,10 @@ export function SchedulingSettings() {
               step="30"
               value={rules.slotLengthMinutes}
               onChange={(event) =>
-                updateNumberField("slotLengthMinutes", event.target.value)
+                updateNumberField(
+                  "slotLengthMinutes",
+                  event.target.value
+                )
               }
             />
           </label>
@@ -341,7 +432,13 @@ export function SchedulingSettings() {
       </section>
 
       <section className="section-card">
-        <h2>Staff Hour Rules</h2>
+        <h2>Staff Hour Planning</h2>
+        <p>
+          The scheduler checks weekly service hours already assigned before the
+          selected date. It prefers staff who still need hours and prevents
+          automatic assignments beyond the configured maximum.
+        </p>
+
         <div className="form-grid">
           <label className="form-field">
             <span>Full-time minimum weekly hours</span>
@@ -406,15 +503,36 @@ export function SchedulingSettings() {
               }
             />
           </label>
+
+          <label className="form-field">
+            <span>Weekly hour target priority</span>
+            <input
+              type="number"
+              min="0"
+              max="200"
+              step="1"
+              value={rules.weeklyHoursPriority}
+              onChange={(event) =>
+                updateNumberField(
+                  "weeklyHoursPriority",
+                  event.target.value
+                )
+              }
+            />
+            <small>
+              {softPriorityLabel(rules.weeklyHoursPriority)}
+            </small>
+          </label>
         </div>
       </section>
 
       <section className="section-card">
         <h2>Break Planning</h2>
         <p>
-          Automatic breaks are only placed when enough staff remain to cover all
-          clients. Multiple staff may break together when the clinic has spare
-          coverage.
+          Breaks are planned inside this window only when the remaining staff can
+          still cover client demand. The scheduler can also represent Break/Nap
+          and Break/Speech when the staff member remains responsible for the
+          client during that fixed event.
         </p>
 
         <div className="form-grid">
@@ -423,7 +541,10 @@ export function SchedulingSettings() {
             <select
               value={rules.defaultBreakMinutes}
               onChange={(event) =>
-                updateNumberField("defaultBreakMinutes", event.target.value)
+                updateNumberField(
+                  "defaultBreakMinutes",
+                  event.target.value
+                )
               }
             >
               <option value={0}>No automatic break</option>
@@ -440,7 +561,10 @@ export function SchedulingSettings() {
               step="0.5"
               value={rules.breakEligibilityHours}
               onChange={(event) =>
-                updateNumberField("breakEligibilityHours", event.target.value)
+                updateNumberField(
+                  "breakEligibilityHours",
+                  event.target.value
+                )
               }
             />
           </label>
@@ -476,11 +600,209 @@ export function SchedulingSettings() {
       </section>
 
       <section className="section-card">
-        <h2>Automatic Scheduler Priorities</h2>
+        <h2>Coverage Role Order</h2>
         <p>
-          Higher numbers make a soft preference more important. Hard rules such as
-          availability, call-outs, double-booking, service setting, and hard
-          staff/client restrictions always take priority over these scores.
+          Higher values are chosen first. The default clinic order is BT/RBT,
+          then Intern, then Office Manager for relief coverage, with BCBA used as
+          the final coverage tier when lower tiers cannot cover the client.
+        </p>
+
+        <div className="form-grid">
+          <label className="form-field">
+            <span>BT / RBT priority</span>
+            <input
+              type="number"
+              min="0"
+              max="1000"
+              step="25"
+              value={rules.btCoveragePriority}
+              onChange={(event) =>
+                updateNumberField(
+                  "btCoveragePriority",
+                  event.target.value
+                )
+              }
+            />
+            <small>
+              {rolePriorityLabel(rules.btCoveragePriority)}
+            </small>
+          </label>
+
+          <label className="form-field">
+            <span>Intern priority</span>
+            <input
+              type="number"
+              min="0"
+              max="1000"
+              step="25"
+              value={rules.internCoveragePriority}
+              onChange={(event) =>
+                updateNumberField(
+                  "internCoveragePriority",
+                  event.target.value
+                )
+              }
+            />
+            <small>
+              {rolePriorityLabel(rules.internCoveragePriority)}
+            </small>
+          </label>
+
+          <label className="form-field">
+            <span>Office Manager priority</span>
+            <input
+              type="number"
+              min="0"
+              max="1000"
+              step="25"
+              value={rules.managerCoveragePriority}
+              onChange={(event) =>
+                updateNumberField(
+                  "managerCoveragePriority",
+                  event.target.value
+                )
+              }
+            />
+            <small>
+              {rolePriorityLabel(rules.managerCoveragePriority)}
+            </small>
+          </label>
+
+          <label className="form-field">
+            <span>BCBA priority</span>
+            <input
+              type="number"
+              min="0"
+              max="1000"
+              step="25"
+              value={rules.bcbaCoveragePriority}
+              onChange={(event) =>
+                updateNumberField(
+                  "bcbaCoveragePriority",
+                  event.target.value
+                )
+              }
+            />
+            <small>
+              {rolePriorityLabel(rules.bcbaCoveragePriority)}
+            </small>
+          </label>
+
+          <label className="form-field">
+            <span>Other role priority</span>
+            <input
+              type="number"
+              min="0"
+              max="1000"
+              step="25"
+              value={rules.otherCoveragePriority}
+              onChange={(event) =>
+                updateNumberField(
+                  "otherCoveragePriority",
+                  event.target.value
+                )
+              }
+            />
+            <small>
+              {rolePriorityLabel(rules.otherCoveragePriority)}
+            </small>
+          </label>
+        </div>
+      </section>
+
+      <section className="section-card">
+        <h2>Excel Pattern Guidance</h2>
+        <p>
+          These settings help Auto Generate resemble the clinic&apos;s established
+          spreadsheet patterns without treating an old schedule as an unchangeable
+          rule. Current attendance, shifts, call-outs, speech, nap, hard pairing
+          restrictions, and manual overrides still take priority.
+        </p>
+
+        <div className="toggle-list">
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={rules.autoUseWeekdayTemplate}
+              onChange={(event) =>
+                updateBooleanField(
+                  "autoUseWeekdayTemplate",
+                  event.target.checked
+                )
+              }
+            />
+            <span>
+              Use the saved template for the selected weekday as a scheduling
+              preference.
+            </span>
+          </label>
+
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={rules.autoUsePreviousWeekdaySchedule}
+              onChange={(event) =>
+                updateBooleanField(
+                  "autoUsePreviousWeekdaySchedule",
+                  event.target.checked
+                )
+              }
+            />
+            <span>
+              Use the most recent schedule from the same weekday as a second
+              reference pattern.
+            </span>
+          </label>
+        </div>
+
+        <div className="form-grid">
+          <label className="form-field">
+            <span>Weekday template priority</span>
+            <input
+              type="number"
+              min="0"
+              max="200"
+              step="5"
+              value={rules.weekdayTemplatePriority}
+              onChange={(event) =>
+                updateNumberField(
+                  "weekdayTemplatePriority",
+                  event.target.value
+                )
+              }
+            />
+            <small>
+              {softPriorityLabel(rules.weekdayTemplatePriority)}
+            </small>
+          </label>
+
+          <label className="form-field">
+            <span>Current schedule stability priority</span>
+            <input
+              type="number"
+              min="0"
+              max="200"
+              step="5"
+              value={rules.scheduleStabilityPriority}
+              onChange={(event) =>
+                updateNumberField(
+                  "scheduleStabilityPriority",
+                  event.target.value
+                )
+              }
+            />
+            <small>
+              {softPriorityLabel(rules.scheduleStabilityPriority)}
+            </small>
+          </label>
+        </div>
+      </section>
+
+      <section className="section-card">
+        <h2>Client Matching Priorities</h2>
+        <p>
+          These are soft priorities. Hard restrictions and actual availability
+          always win over the scores below.
         </p>
 
         <div className="form-grid">
@@ -493,10 +815,15 @@ export function SchedulingSettings() {
               step="5"
               value={rules.preferredStaffPriority}
               onChange={(event) =>
-                updateNumberField("preferredStaffPriority", event.target.value)
+                updateNumberField(
+                  "preferredStaffPriority",
+                  event.target.value
+                )
               }
             />
-            <small>{priorityHelp(rules.preferredStaffPriority)}</small>
+            <small>
+              {softPriorityLabel(rules.preferredStaffPriority)}
+            </small>
           </label>
 
           <label className="form-field">
@@ -508,10 +835,15 @@ export function SchedulingSettings() {
               step="5"
               value={rules.sameTeamPriority}
               onChange={(event) =>
-                updateNumberField("sameTeamPriority", event.target.value)
+                updateNumberField(
+                  "sameTeamPriority",
+                  event.target.value
+                )
               }
             />
-            <small>{priorityHelp(rules.sameTeamPriority)}</small>
+            <small>
+              {softPriorityLabel(rules.sameTeamPriority)}
+            </small>
           </label>
 
           <label className="form-field">
@@ -523,10 +855,15 @@ export function SchedulingSettings() {
               step="5"
               value={rules.continuityPriority}
               onChange={(event) =>
-                updateNumberField("continuityPriority", event.target.value)
+                updateNumberField(
+                  "continuityPriority",
+                  event.target.value
+                )
               }
             />
-            <small>{priorityHelp(rules.continuityPriority)}</small>
+            <small>
+              {softPriorityLabel(rules.continuityPriority)}
+            </small>
           </label>
 
           <label className="form-field">
@@ -538,14 +875,19 @@ export function SchedulingSettings() {
               step="5"
               value={rules.rotationPriority}
               onChange={(event) =>
-                updateNumberField("rotationPriority", event.target.value)
+                updateNumberField(
+                  "rotationPriority",
+                  event.target.value
+                )
               }
             />
-            <small>{priorityHelp(rules.rotationPriority)}</small>
+            <small>
+              {softPriorityLabel(rules.rotationPriority)}
+            </small>
           </label>
 
           <label className="form-field">
-            <span>Workload balancing priority</span>
+            <span>Workload balance priority</span>
             <input
               type="number"
               min="0"
@@ -553,16 +895,74 @@ export function SchedulingSettings() {
               step="5"
               value={rules.workloadBalancePriority}
               onChange={(event) =>
-                updateNumberField("workloadBalancePriority", event.target.value)
+                updateNumberField(
+                  "workloadBalancePriority",
+                  event.target.value
+                )
               }
             />
-            <small>{priorityHelp(rules.workloadBalancePriority)}</small>
+            <small>
+              {softPriorityLabel(rules.workloadBalancePriority)}
+            </small>
+          </label>
+        </div>
+
+        <div className="toggle-list">
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={rules.preferSameTeam}
+              onChange={(event) =>
+                updateBooleanField(
+                  "preferSameTeam",
+                  event.target.checked
+                )
+              }
+            />
+            <span>
+              Prefer a same-team staff/client match when coverage allows it.
+            </span>
+          </label>
+
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={rules.preferStaffContinuity}
+              onChange={(event) =>
+                updateBooleanField(
+                  "preferStaffContinuity",
+                  event.target.checked
+                )
+              }
+            />
+            <span>
+              Keep standard clients with the same staff across neighboring blocks
+              when possible.
+            </span>
+          </label>
+
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={rules.preserveManualOverrides}
+              onChange={(event) =>
+                updateBooleanField(
+                  "preserveManualOverrides",
+                  event.target.checked
+                )
+              }
+            />
+            <span>
+              Preserve manager-approved manual assignments during Generate and
+              Repair.
+            </span>
           </label>
         </div>
       </section>
 
       <section className="section-card">
         <h2>Automatic Scheduling Limits</h2>
+
         <div className="form-grid">
           <label className="form-field">
             <span>Max clients per technician per day</span>
@@ -612,58 +1012,6 @@ export function SchedulingSettings() {
           </label>
         </div>
 
-        <div className="toggle-list">
-          <label className="toggle-row">
-            <input
-              type="checkbox"
-              checked={rules.preferSameTeam}
-              onChange={(event) =>
-                setRules((currentRules) => ({
-                  ...currentRules,
-                  preferSameTeam: event.target.checked,
-                }))
-              }
-            />
-            <span>
-              Use the same-team priority when staff and client belong to the same
-              team.
-            </span>
-          </label>
-
-          <label className="toggle-row">
-            <input
-              type="checkbox"
-              checked={rules.preferStaffContinuity}
-              onChange={(event) =>
-                setRules((currentRules) => ({
-                  ...currentRules,
-                  preferStaffContinuity: event.target.checked,
-                }))
-              }
-            />
-            <span>
-              Prefer continuity for standard clients while rotation clients still
-              rotate according to their own support rules.
-            </span>
-          </label>
-
-          <label className="toggle-row">
-            <input
-              type="checkbox"
-              checked={rules.preserveManualOverrides}
-              onChange={(event) =>
-                setRules((currentRules) => ({
-                  ...currentRules,
-                  preserveManualOverrides: event.target.checked,
-                }))
-              }
-            />
-            <span>
-              Preserve manager-approved manual overrides during Generate and Repair.
-            </span>
-          </label>
-        </div>
-
         <button
           type="button"
           className="button button-primary"
@@ -673,7 +1021,9 @@ export function SchedulingSettings() {
           {saving ? "Saving..." : "Save Scheduling Rules"}
         </button>
 
-        <div className="inline-message">{message}</div>
+        <div className="inline-message">
+          {message}
+        </div>
       </section>
     </div>
   );

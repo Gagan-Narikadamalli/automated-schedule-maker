@@ -6,6 +6,7 @@ import "./management.css";
 import "./navigation.css";
 import "./scheduler-enhancements.css";
 import "./responsive-management.css";
+import "./ui-polish.css";
 
 export const metadata: Metadata = {
   title: "SOS Automated Schedule Maker",

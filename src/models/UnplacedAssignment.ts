@@ -38,6 +38,12 @@ const UnplacedAssignmentSchema = new Schema(
       default: "Displaced by a manager schedule change.",
       trim: true,
     },
+    origin: {
+      type: String,
+      enum: ["MANUAL_DISPLACEMENT", "AUTO_UNCOVERED"],
+      default: "MANUAL_DISPLACEMENT",
+      index: true,
+    },
     status: {
       type: String,
       enum: ["UNPLACED", "RESOLVED"],
@@ -68,6 +74,7 @@ UnplacedAssignmentSchema.index({
   locationId: 1,
   date: 1,
   status: 1,
+  origin: 1,
   createdAt: 1,
 });
 

@@ -33,6 +33,24 @@ function serializeCallOut(callOut: Record<string, unknown>) {
   };
 }
 
+function normalizeCallOutEndTime(
+  requestedEndTime: string,
+  reason: string
+): string {
+  const normalizedReason = reason.trim().toLowerCase();
+
+  if (
+    requestedEndTime === "18:00" &&
+    (normalizedReason === "call out" ||
+      normalizedReason === "call-out" ||
+      normalizedReason === "callout")
+  ) {
+    return "20:00";
+  }
+
+  return requestedEndTime;
+}
+
 export async function GET(request: Request) {
   const auth = await requireApiSession();
 
@@ -98,8 +116,13 @@ export async function POST(request: Request) {
     const locationId = body.locationId?.trim();
     const staffId = body.staffId?.trim();
     const date = body.date?.trim();
+    const reason = body.reason?.trim() || "";
     const startTime = body.startTime?.trim() || "08:00";
-    const endTime = body.endTime?.trim() || "18:00";
+    const requestedEndTime = body.endTime?.trim() || "20:00";
+    const endTime = normalizeCallOutEndTime(
+      requestedEndTime,
+      reason
+    );
 
     if (!locationId || !staffId || !date) {
       return NextResponse.json(
@@ -140,7 +163,7 @@ export async function POST(request: Request) {
       date,
       startTime,
       endTime,
-      reason: body.reason?.trim() || "",
+      reason,
       note: body.note?.trim() || "",
       createdByUserId: auth.session.userId,
     });

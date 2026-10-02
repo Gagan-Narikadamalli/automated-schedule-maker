@@ -6,15 +6,28 @@ export type SupportLevel =
   | "ROTATION"
   | "HIGH_SUPPORT";
 
+export type StaffRole =
+  | "BT"
+  | "RBT"
+  | "INTERN"
+  | "OFFICE_MANAGER"
+  | "BCBA"
+  | "OTHER";
+
 export type SchedulerStaff = {
   id: string;
   name: string;
+  role: StaffRole;
   teamId?: string;
   serviceSetting?: ServiceSetting;
   availableSlots: string[];
   minimumDailyHours?: number;
   targetDailyHours?: number;
   maximumDailyHours?: number;
+  minimumWeeklyHours?: number;
+  targetWeeklyHours?: number;
+  maximumWeeklyHours?: number;
+  scheduledWeeklyClientHoursBeforeDate?: number;
 };
 
 export type StaffRelationship =
@@ -29,6 +42,8 @@ export type SchedulerClient = {
   serviceSetting?: ServiceSetting;
   supportLevel?: SupportLevel;
   requiredSlots: string[];
+  napSlots: string[];
+  speechSlots: string[];
   staffRelationships: Record<string, StaffRelationship>;
   maxConsecutiveBlocksWithSameStaff?: number;
   desiredDifferentStaffPerDay?: number;
@@ -55,6 +70,14 @@ export type SchedulerAssignment = {
   note?: string;
 };
 
+export type HistoricalPatternScores = {
+  sampleCount: number;
+  scheduleDayCount: number;
+  pairingScores: Record<string, number>;
+  exactSlotScores: Record<string, number>;
+  breakSlotScores: Record<string, number>;
+};
+
 export type SchedulerRules = {
   maximumClientsPerTechPerDay: number;
   maximumTechsPerClientPerDay: number;
@@ -66,12 +89,28 @@ export type SchedulerRules = {
   continuityPriority: number;
   rotationPriority: number;
   workloadBalancePriority: number;
+  scheduleStabilityPriority: number;
+  weekdayTemplatePriority: number;
+  weeklyHoursPriority: number;
+  btCoveragePriority: number;
+  internCoveragePriority: number;
+  managerCoveragePriority: number;
+  bcbaCoveragePriority: number;
+  otherCoveragePriority: number;
+  autoUseWeekdayTemplate: boolean;
+  autoUsePreviousWeekdaySchedule: boolean;
+  historicalPairingPriority?: number;
+  historicalSlotPriority?: number;
+  historicalBreakPriority?: number;
+  autoUseHistoricalPatterns?: boolean;
 };
 
 export type SchedulerInput = {
   staff: SchedulerStaff[];
   clients: SchedulerClient[];
   existingAssignments: SchedulerAssignment[];
+  referenceAssignments: SchedulerAssignment[];
+  historicalPatterns?: HistoricalPatternScores;
   callOutStaffIds: string[];
   rules: SchedulerRules;
 };
@@ -89,7 +128,8 @@ export type SchedulerWarning = {
     | "NO_ELIGIBLE_STAFF"
     | "CLIENT_TECH_LIMIT"
     | "STAFF_HOUR_LIMIT"
-    | "CAPACITY_SHORTAGE";
+    | "CAPACITY_SHORTAGE"
+    | "REPAIRED_BY_SWAP";
   message: string;
 };
 

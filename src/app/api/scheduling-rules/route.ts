@@ -27,8 +27,24 @@ type RulesRequest = {
   continuityPriority?: number;
   rotationPriority?: number;
   workloadBalancePriority?: number;
+  scheduleStabilityPriority?: number;
+  weekdayTemplatePriority?: number;
+  weeklyHoursPriority?: number;
+  historicalPairingPriority?: number;
+  historicalSlotPriority?: number;
+  historicalBreakPriority?: number;
+  btCoveragePriority?: number;
+  internCoveragePriority?: number;
+  managerCoveragePriority?: number;
+  bcbaCoveragePriority?: number;
+  otherCoveragePriority?: number;
+  autoUseWeekdayTemplate?: boolean;
+  autoUsePreviousWeekdaySchedule?: boolean;
+  autoUseHistoricalPatterns?: boolean;
   supervisionPlanningTargetPercent?: number;
 };
+
+type RuleValues = ReturnType<typeof defaultRules>;
 
 function defaultRules(locationId: string) {
   return {
@@ -54,8 +70,51 @@ function defaultRules(locationId: string) {
     continuityPriority: 35,
     rotationPriority: 60,
     workloadBalancePriority: 10,
+    scheduleStabilityPriority: 140,
+    weekdayTemplatePriority: 75,
+    weeklyHoursPriority: 12,
+    historicalPairingPriority: 70,
+    historicalSlotPriority: 90,
+    historicalBreakPriority: 80,
+    btCoveragePriority: 500,
+    internCoveragePriority: 300,
+    managerCoveragePriority: 125,
+    bcbaCoveragePriority: 25,
+    otherCoveragePriority: 75,
+    autoUseWeekdayTemplate: true,
+    autoUsePreviousWeekdaySchedule: true,
+    autoUseHistoricalPatterns: true,
     supervisionPlanningTargetPercent: 5,
   };
+}
+
+function mergeRuleValues(
+  locationId: string,
+  existing: Record<string, unknown> | null,
+  body: RulesRequest
+): RuleValues {
+  const defaults = defaultRules(locationId);
+  const merged: Record<string, unknown> = {
+    ...defaults,
+  };
+
+  if (existing) {
+    for (const key of Object.keys(defaults)) {
+      if (existing[key] !== undefined) {
+        merged[key] = existing[key];
+      }
+    }
+  }
+
+  for (const [key, value] of Object.entries(body)) {
+    if (value !== undefined && key in defaults) {
+      merged[key] = value;
+    }
+  }
+
+  merged.locationId = locationId;
+
+  return merged as RuleValues;
 }
 
 function serializeRules(rules: Record<string, unknown>) {
@@ -69,6 +128,10 @@ function serializeRules(rules: Record<string, unknown>) {
 
 function validatePriority(value: number | undefined): boolean {
   return value === undefined || (value >= 0 && value <= 200);
+}
+
+function validateRolePriority(value: number | undefined): boolean {
+  return value === undefined || (value >= 0 && value <= 1000);
 }
 
 export async function GET(request: Request) {
@@ -177,11 +240,32 @@ export async function PUT(request: Request) {
       body.continuityPriority,
       body.rotationPriority,
       body.workloadBalancePriority,
+      body.scheduleStabilityPriority,
+      body.weekdayTemplatePriority,
+      body.weeklyHoursPriority,
+      body.historicalPairingPriority,
+      body.historicalSlotPriority,
+      body.historicalBreakPriority,
     ].every(validatePriority);
 
     if (!prioritiesAreValid) {
       return NextResponse.json(
         { error: "Scheduler priority values must be between 0 and 200." },
+        { status: 400 }
+      );
+    }
+
+    const rolePrioritiesAreValid = [
+      body.btCoveragePriority,
+      body.internCoveragePriority,
+      body.managerCoveragePriority,
+      body.bcbaCoveragePriority,
+      body.otherCoveragePriority,
+    ].every(validateRolePriority);
+
+    if (!rolePrioritiesAreValid) {
+      return NextResponse.json(
+        { error: "Role coverage priority values must be between 0 and 1000." },
         { status: 400 }
       );
     }
@@ -200,11 +284,14 @@ export async function PUT(request: Request) {
     await connectToDatabase();
 
     const existing = await SchedulingRules.findOne({ locationId }).lean();
-    const changes = {
-      ...defaultRules(locationId),
-      ...body,
+    const existingRecord = existing
+      ? (existing as unknown as Record<string, unknown>)
+      : null;
+    const changes = mergeRuleValues(
       locationId,
-    };
+      existingRecord,
+      body
+    );
 
     const savedRules = await SchedulingRules.findOneAndUpdate(
       { locationId },
