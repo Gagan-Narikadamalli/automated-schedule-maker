@@ -87,6 +87,113 @@
   box-shadow: inset 0 0 0 1px rgba(28, 106, 150, 0.06);
 }
 
+.findBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 12px;
+  border: 1px solid #dbe7ec;
+  border-radius: 11px;
+  background: #fbfdfe;
+}
+
+.findLabel {
+  min-width: 180px;
+  display: grid;
+  gap: 2px;
+}
+
+.findLabel strong {
+  color: #123b5d;
+  font-size: 11px;
+}
+
+.findControls {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.findControls input {
+  width: min(360px, 40vw);
+  min-width: 180px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid #c8d9e1;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #173042;
+  font-size: 11px;
+}
+
+.findControls input:focus {
+  border-color: #4c9fc3;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(76, 159, 195, 0.12);
+}
+
+.findButton,
+.clearButton {
+  min-height: 34px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.findButton {
+  border: 1px solid #1c6a96;
+  background: #1c6a96;
+  color: #ffffff;
+}
+
+.findButton:hover:not(:disabled),
+.findButton:focus-visible:not(:disabled) {
+  background: #15516f;
+  outline: none;
+}
+
+.clearButton {
+  border: 1px solid #c8d9e1;
+  background: #ffffff;
+  color: #496674;
+}
+
+.clearButton:hover:not(:disabled),
+.clearButton:focus-visible:not(:disabled) {
+  border-color: #79b2cc;
+  background: #f1f9fc;
+  outline: none;
+}
+
+.findButton:disabled,
+.clearButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.matchCount {
+  min-width: 125px;
+  color: #6e8490;
+  font-size: 10px;
+  font-weight: 750;
+  text-align: right;
+}
+
+.searchMatch {
+  position: relative;
+  z-index: 6 !important;
+  outline: 3px solid #f0a128 !important;
+  outline-offset: -3px;
+  box-shadow:
+    inset 0 0 0 1px #ffffff,
+    0 0 0 1px rgba(240, 161, 40, 0.25) !important;
+}
+
 .legendPanel {
   overflow: hidden;
   border: 1px solid #dce7ec;
@@ -343,7 +450,8 @@
 
 @media (max-width: 900px) {
   .displayBar,
-  .displayHeading {
+  .displayHeading,
+  .findBar {
     align-items: stretch;
     flex-direction: column;
   }
@@ -360,6 +468,21 @@
     flex: 1 1 120px;
   }
 
+  .findControls {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .findControls input {
+    width: 100%;
+    flex: 1 1 100%;
+  }
+
+  .matchCount {
+    min-width: 0;
+    text-align: left;
+  }
+
   .workspace :global(.unplaced-tray) {
     max-height: 220px;
   }
@@ -369,6 +492,16 @@
   .displayActions {
     display: grid;
     grid-template-columns: 1fr;
+  }
+
+  .findControls {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .findControls input,
+  .matchCount {
+    grid-column: 1 / -1;
   }
 
   .legendPanel summary {
