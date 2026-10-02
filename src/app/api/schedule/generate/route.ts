@@ -24,9 +24,22 @@ type GenerateRequest = {
   date?: string;
 };
 
+function isAutomaticBreak(assignment: SchedulerAssignment): boolean {
+  return (
+    assignment.source === "AUTO" &&
+    (assignment.assignmentType === "BREAK" ||
+      assignment.assignmentType === "BREAK_NAP" ||
+      assignment.assignmentType === "BREAK_SPEECH")
+  );
+}
+
 function shouldKeepExistingAssignment(
   assignment: SchedulerAssignment
 ): boolean {
+  if (isAutomaticBreak(assignment)) {
+    return false;
+  }
+
   return (
     assignment.locked ||
     assignment.source === "MANUAL" ||
@@ -183,7 +196,8 @@ export async function POST(request: Request) {
     const managerGapCount = await syncAutoUnplacedGaps(
       locationId,
       date,
-      result.uncoveredRequirements
+      result.uncoveredRequirements,
+      enrichedAssignments
     );
 
     const completeCoverage =
