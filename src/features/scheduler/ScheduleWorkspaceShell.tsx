@@ -1,7 +1,7 @@
 "use client";
 
-import { ScheduleWorkspaceV2 } from "./ScheduleWorkspaceV2";
+import { ScheduleWorkspaceV3 } from "./ScheduleWorkspaceV3";
 
 export function ScheduleWorkspaceShell() {
-  return <ScheduleWorkspaceV2 />;
+  return <ScheduleWorkspaceV3 />;
 }
