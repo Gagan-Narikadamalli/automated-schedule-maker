@@ -1,6 +1,6 @@
 import { AppShell } from "@/components/AppShell";
 import { SectionHeader } from "@/components/SectionHeader";
-import { StaffManager } from "@/features/staff/StaffManager";
+import { StaffCardManager } from "@/features/staff/StaffCardManager";
 
 export default function StaffPage() {
   return (
@@ -12,7 +12,7 @@ export default function StaffPage() {
           description="Manage staff details, teams, recurring availability, service setting, and weekly hour limits used by the automatic scheduler."
         />
 
-        <StaffManager />
+        <StaffCardManager />
       </div>
     </AppShell>
   );
