@@ -19,6 +19,23 @@ function shouldKeepAssignmentDuringRepair(
   affectedStaffIds: Set<string>,
   affectedSlotKeys: Set<string> | null
 ): boolean {
+  const assignmentKey = slotKey(assignment.staffId, assignment.startTime);
+  const isAffectedSlot = affectedSlotKeys
+    ? affectedSlotKeys.has(assignmentKey)
+    : affectedStaffIds.has(assignment.staffId);
+
+  // A recorded call-out is a hard automatic-scheduling boundary. Automatic
+  // assignments inside the affected staff/time window must be released even if
+  // they were stored as locked capacity blocks (for example AUTO BREAK or
+  // BREAK_NAP records). Otherwise Repair Schedule can leave a break sitting in
+  // the middle of a gray call-out column.
+  //
+  // Explicit MANUAL manager overrides are still preserved. If a manager truly
+  // wants something inside the call-out window, Manual Mode owns that decision.
+  if (isAffectedSlot && assignment.source !== "MANUAL") {
+    return false;
+  }
+
   if (assignment.locked || assignment.source === "MANUAL") {
     return true;
   }
@@ -31,9 +48,7 @@ function shouldKeepAssignmentDuringRepair(
   }
 
   if (affectedSlotKeys) {
-    return !affectedSlotKeys.has(
-      slotKey(assignment.staffId, assignment.startTime)
-    );
+    return !affectedSlotKeys.has(assignmentKey);
   }
 
   return !affectedStaffIds.has(assignment.staffId);
