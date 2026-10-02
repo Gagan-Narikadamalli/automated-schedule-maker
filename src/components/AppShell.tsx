@@ -27,6 +27,11 @@ const navigationGroups: NavigationGroup[] = [
         shortLabel: "CAL",
       },
       {
+        href: "/scheduler-guide",
+        label: "Scheduler Guide",
+        shortLabel: "HELP",
+      },
+      {
         href: "/schedule-preview",
         label: "Auto Schedule Preview",
         shortLabel: "AUTO",
