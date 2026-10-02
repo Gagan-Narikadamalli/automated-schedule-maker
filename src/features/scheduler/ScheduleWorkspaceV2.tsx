@@ -13,6 +13,7 @@ import {
   type ScheduleGridMutation,
 } from "./ScheduleGrid";
 import type { AssignmentType, StaffColumn } from "./types";
+import { useSchedulerConfirm } from "./useSchedulerConfirm";
 
 type LocationOption = {
   id: string;
@@ -55,6 +56,7 @@ type UnplacedRecord = {
   originalStaffId: string | null;
   originalStartTime: string;
   reason: string;
+  origin?: "MANUAL_DISPLACEMENT" | "AUTO_UNCOVERED";
 };
 
 type ScheduleResponse = {
@@ -384,6 +386,7 @@ export function ScheduleWorkspaceV2() {
   const [copySourceDate, setCopySourceDate] = useState(() =>
     addDays(getTodayForDateInput(), -1)
   );
+  const confirmation = useSchedulerConfirm();
 
   const demoMode = locationId.startsWith("demo-");
 
@@ -605,6 +608,7 @@ export function ScheduleWorkspaceV2() {
         originalStaffId: null,
         originalStartTime: "",
         reason: "Displaced during preview mode.",
+        origin: "MANUAL_DISPLACEMENT",
       },
     ]);
   }
@@ -713,9 +717,15 @@ export function ScheduleWorkspaceV2() {
         const details = data.conflicts
           .map((conflict, index) => `${index + 1}. ${conflict.message}`)
           .join("\n");
-        const confirmed = window.confirm(
-          `This manual change conflicts with the current scheduling rules:\n\n${details}\n\nForce this manager override anyway?`
-        );
+        const confirmed = await confirmation.ask({
+          eyebrow: "SCHEDULING RULE CONFLICT",
+          title: "Override scheduling rule conflict?",
+          message:
+            `This manual change conflicts with the current scheduling rules:\n${details}\n` +
+            "Choose Override only if you intentionally want to save this manager exception.",
+          confirmLabel: "Override",
+          cancelLabel: "Cancel",
+        });
 
         if (!confirmed) {
           setStatusMessage("Manual override canceled. The schedule was not changed.");
@@ -1317,8 +1327,9 @@ export function ScheduleWorkspaceV2() {
         <aside className="unplaced-tray">
           <h2>Unplaced Assignments</h2>
           <p>
-            Replaced client assignments stay here until they are placed in another
-            calendar cell or marked covered by the manager.
+            Only client blocks that still need manager attention appear here. Once
+            the exact client/time block is covered again, regeneration or repair
+            automatically clears the stale tray item.
           </p>
 
           {placementRecord && (
@@ -1342,9 +1353,15 @@ export function ScheduleWorkspaceV2() {
               {unplacedAssignments.map((assignment) => (
                 <li key={assignment.id}>
                   <strong>{assignment.displayText}</strong>
+                  <span>
+                    {assignment.origin === "AUTO_UNCOVERED"
+                      ? "Uncovered by automatic scheduling"
+                      : "Displaced by a manager edit"}
+                  </span>
                   {assignment.originalStartTime && (
-                    <span>From {assignment.originalStartTime}</span>
+                    <span>Required time: {assignment.originalStartTime}</span>
                   )}
+                  {assignment.reason && <span>{assignment.reason}</span>}
                   <div className="table-actions">
                     <button
                       type="button"
@@ -1369,6 +1386,8 @@ export function ScheduleWorkspaceV2() {
           )}
         </aside>
       </div>
+
+      {confirmation.dialog}
     </div>
   );
 }
