@@ -1,6 +1,7 @@
 import { AppShell } from "@/components/AppShell";
 import { SectionHeader } from "@/components/SectionHeader";
 import { DataMaintenancePanel } from "@/features/settings/DataMaintenancePanel";
+import { TrialDataPanel } from "@/features/settings/TrialDataPanel";
 
 export default function DataMaintenancePage() {
   return (
@@ -9,9 +10,10 @@ export default function DataMaintenancePage() {
         <SectionHeader
           eyebrow="CLINIC CONFIGURATION"
           title="Data Maintenance"
-          description="Preview and manage date-scoped scheduling records while preserving the clinic roster, teams, templates, locations, and scheduling rules."
+          description="Create a safe Livingston trial dataset for scheduler testing, or preview and manage date-scoped scheduling records while preserving the permanent clinic setup."
         />
 
+        <TrialDataPanel />
         <DataMaintenancePanel />
       </div>
     </AppShell>
