@@ -1,6 +1,6 @@
 .page {
   display: grid;
-  gap: 16px;
+  gap: 10px;
 }
 
 .commandCenter {
@@ -205,6 +205,10 @@
   scroll-margin-top: 78px;
 }
 
+.page :global(.schedule-page) {
+  gap: 10px;
+}
+
 .page :global(.schedule-page .page-subtitle) {
   font-size: 0;
 }
@@ -217,7 +221,9 @@
 .page :global(.schedule-page > .page-header) {
   align-items: center;
   padding: 12px 14px;
+  border: 1px solid #dbe5ea;
   border-radius: 12px;
+  background: #ffffff;
   box-shadow: 0 3px 12px rgba(18, 59, 93, 0.045);
 }
 
@@ -245,6 +251,16 @@
 
 .page :global(.toolbar-card) {
   position: static;
+  padding: 10px 12px;
+}
+
+.page :global(.schedule-status-bar) {
+  min-height: 40px;
+  padding: 8px 12px;
+}
+
+.page :global(.spreadsheet-help) {
+  display: none;
 }
 
 .page :global(.schedule-card) {
