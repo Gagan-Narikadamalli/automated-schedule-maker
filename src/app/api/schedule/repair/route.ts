@@ -191,7 +191,8 @@ export async function POST(request: Request) {
     const managerGapCount = await syncAutoUnplacedGaps(
       locationId,
       date,
-      result.uncoveredRequirements
+      result.uncoveredRequirements,
+      result.assignments
     );
 
     await writeAuditLog({
