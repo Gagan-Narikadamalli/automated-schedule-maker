@@ -21,6 +21,7 @@ import {
   type SchedulePreset,
 } from "./schedulePresets";
 import type { CellPosition, StaffColumn } from "./types";
+import { useSchedulerConfirm } from "./useSchedulerConfirm";
 
 export type ScheduleGridMutation = {
   row: number;
@@ -187,7 +188,9 @@ export function ScheduleGrid({
   const [undoStack, setUndoStack] = useState<HistoryEntry[]>([]);
   const [redoStack, setRedoStack] = useState<HistoryEntry[]>([]);
   const scheduleAreaRef = useRef<HTMLDivElement | null>(null);
+  const gridWrapperRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<HTMLInputElement | null>(null);
+  const confirmation = useSchedulerConfirm();
 
   const normalizedSelection = useMemo(
     () => normalizeSelection(selection),
@@ -195,6 +198,10 @@ export function ScheduleGrid({
   );
 
   const selectedCell = grid[selection.focus.row]?.[selection.focus.column];
+
+  function focusGrid() {
+    window.requestAnimationFrame(() => gridWrapperRef.current?.focus());
+  }
 
   function isScratchColumn(column: number): boolean {
     return Boolean(columns[column]?.temporary);
@@ -209,6 +216,15 @@ export function ScheduleGrid({
     );
   }
 
+  function isEntireRowSelected(row: number): boolean {
+    return (
+      row >= normalizedSelection.firstRow &&
+      row <= normalizedSelection.lastRow &&
+      normalizedSelection.firstColumn === 0 &&
+      normalizedSelection.lastColumn === columns.length - 1
+    );
+  }
+
   function isDragTarget(row: number, column: number): boolean {
     return dragOverCell?.row === row && dragOverCell?.column === column;
   }
@@ -218,6 +234,21 @@ export function ScheduleGrid({
       anchor: { row, column },
       focus: { row, column },
     });
+    focusGrid();
+  }
+
+  function selectEntireRow(row: number, extendSelection: boolean) {
+    setSelection((currentSelection) => ({
+      anchor: {
+        row: extendSelection ? currentSelection.anchor.row : row,
+        column: 0,
+      },
+      focus: {
+        row,
+        column: columns.length - 1,
+      },
+    }));
+    focusGrid();
   }
 
   function mutationForCell(
@@ -287,14 +318,20 @@ export function ScheduleGrid({
     }
   }
 
-  function confirmReplacement(count: number): boolean {
+  async function confirmReplacement(count: number): Promise<boolean> {
     if (count <= 0) {
       return true;
     }
 
-    return window.confirm(
-      `${count} occupied schedule block${count === 1 ? "" : "s"} will be replaced. The displaced assignment(s) will be listed in the Unplaced Assignments tray. Continue?`
-    );
+    return confirmation.ask({
+      eyebrow: "MANAGER OVERRIDE",
+      title: `Replace ${count} occupied schedule block${count === 1 ? "" : "s"}?`,
+      message:
+        `${count} occupied schedule block${count === 1 ? "" : "s"} will be replaced. ` +
+        "Each displaced client assignment will be moved to the Unplaced Assignments tray until it is placed again or marked covered.",
+      confirmLabel: "Override",
+      cancelLabel: "Cancel",
+    });
   }
 
   async function undoLastChange() {
@@ -376,7 +413,7 @@ export function ScheduleGrid({
       return;
     }
 
-    if (isOccupied(targetCell) && !confirmReplacement(1)) {
+    if (isOccupied(targetCell) && !(await confirmReplacement(1))) {
       return;
     }
 
@@ -412,6 +449,8 @@ export function ScheduleGrid({
       return;
     }
 
+    focusGrid();
+
     if (placementCell) {
       event.preventDefault();
       void placeExternalAssignment(row, column);
@@ -444,6 +483,36 @@ export function ScheduleGrid({
     setSelection((currentSelection) => ({
       ...currentSelection,
       focus: { row, column },
+    }));
+  }
+
+  function handleRowHeaderMouseDown(
+    event: MouseEvent<HTMLTableCellElement>,
+    row: number
+  ) {
+    if (saving || moveSource || placementCell) {
+      return;
+    }
+
+    event.preventDefault();
+    setDragSelecting(true);
+    selectEntireRow(row, event.shiftKey);
+  }
+
+  function handleRowHeaderMouseEnter(row: number) {
+    if (!dragSelecting || moveSource || placementCell || saving) {
+      return;
+    }
+
+    setSelection((currentSelection) => ({
+      anchor: {
+        row: currentSelection.anchor.row,
+        column: 0,
+      },
+      focus: {
+        row,
+        column: columns.length - 1,
+      },
     }));
   }
 
@@ -529,7 +598,10 @@ export function ScheduleGrid({
       }
     }
 
-    if (displaced.length > 0 && !confirmReplacement(displaced.length)) {
+    if (
+      displaced.length > 0 &&
+      !(await confirmReplacement(displaced.length))
+    ) {
       return;
     }
 
@@ -593,7 +665,11 @@ export function ScheduleGrid({
       }
     }
 
-    if (displaced.length > 0 && manualMode && !confirmReplacement(displaced.length)) {
+    if (
+      displaced.length > 0 &&
+      manualMode &&
+      !(await confirmReplacement(displaced.length))
+    ) {
       return;
     }
 
@@ -697,14 +773,15 @@ export function ScheduleGrid({
       return;
     }
 
-    const pastedRows = clipboardText
+    const normalizedClipboardText = clipboardText
       .replace(/\r/g, "")
+      .replace(/\n+$/, "");
+    const pastedRows = normalizedClipboardText
       .split("\n")
-      .filter((row) => row.length > 0)
       .map((row) => row.split("\t"));
 
-    const startRow = selection.focus.row;
-    const startColumn = selection.focus.column;
+    const startRow = normalizedSelection.firstRow;
+    const startColumn = normalizedSelection.firstColumn;
     const nextGrid = cloneGrid(grid);
     const mutations: ScheduleGridMutation[] = [];
     const displaced: string[] = [];
@@ -760,7 +837,10 @@ export function ScheduleGrid({
       });
     });
 
-    if (displaced.length > 0 && !confirmReplacement(displaced.length)) {
+    if (
+      displaced.length > 0 &&
+      !(await confirmReplacement(displaced.length))
+    ) {
       event.preventDefault();
       return;
     }
@@ -807,7 +887,7 @@ export function ScheduleGrid({
     if (
       replacing &&
       !isScratchColumn(column) &&
-      !confirmReplacement(1)
+      !(await confirmReplacement(1))
     ) {
       setEditingCell(null);
       return;
@@ -894,7 +974,11 @@ export function ScheduleGrid({
       return;
     }
 
-    if (isOccupied(targetCell) && !targetIsScratch && !confirmReplacement(1)) {
+    if (
+      isOccupied(targetCell) &&
+      !targetIsScratch &&
+      !(await confirmReplacement(1))
+    ) {
       setMoveSource(null);
       return;
     }
@@ -1096,6 +1180,7 @@ export function ScheduleGrid({
       </div>
 
       <div
+        ref={gridWrapperRef}
         className={`schedule-grid-wrapper ${styles.scrollWindow} ${
           moveSource || placementCell ? "schedule-grid-move-mode" : ""
         }`}
@@ -1134,7 +1219,18 @@ export function ScheduleGrid({
           <tbody>
             {DAILY_TIME_SLOTS.map((timeSlot, rowIndex) => (
               <tr key={timeSlot.startTime}>
-                <th className="schedule-time-column">{timeSlot.label}</th>
+                <th
+                  className={`schedule-time-column ${
+                    isEntireRowSelected(rowIndex) ? styles.selectedRowHeader : ""
+                  }`}
+                  title="Click to select this entire row. Shift-click another time to select multiple rows."
+                  onMouseDown={(event) =>
+                    handleRowHeaderMouseDown(event, rowIndex)
+                  }
+                  onMouseEnter={() => handleRowHeaderMouseEnter(rowIndex)}
+                >
+                  {timeSlot.label}
+                </th>
 
                 {columns.map((column, columnIndex) => {
                   const cell = grid[rowIndex][columnIndex];
@@ -1254,6 +1350,8 @@ export function ScheduleGrid({
           </tbody>
         </table>
       </div>
+
+      {confirmation.dialog}
     </div>
   );
 }
