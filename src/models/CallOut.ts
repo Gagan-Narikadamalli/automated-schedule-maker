@@ -25,7 +25,7 @@ const CallOutSchema = new Schema(
     },
     endTime: {
       type: String,
-      default: "18:00",
+      default: "20:00",
     },
     reason: {
       type: String,
@@ -38,8 +38,9 @@ const CallOutSchema = new Schema(
       trim: true,
     },
     createdByUserId: {
-      type: Schema.Types.ObjectId,
-      ref: "User",
+      type: String,
+      default: "scheduler-system",
+      trim: true,
       required: true,
     },
   },
