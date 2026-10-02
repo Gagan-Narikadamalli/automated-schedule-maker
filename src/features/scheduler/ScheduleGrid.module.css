@@ -53,6 +53,14 @@
   border-left: 2px dashed #82939d !important;
 }
 
+.selectedRowHeader {
+  background: #d7edf7 !important;
+  color: #0d4f73 !important;
+  box-shadow:
+    inset 3px 0 0 #0b6fb4,
+    3px 0 7px rgba(18, 59, 93, 0.09) !important;
+}
+
 :global(.schedule-layout) {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -171,6 +179,11 @@
 
 :global(.schedule-grid tbody tr:hover .schedule-time-column) {
   background: #e4f1f6;
+}
+
+:global(.schedule-grid tbody .schedule-time-column) {
+  cursor: row-resize;
+  user-select: none;
 }
 
 :global(.schedule-time-column) {
