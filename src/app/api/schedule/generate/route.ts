@@ -2,15 +2,15 @@ import { NextResponse } from "next/server";
 
 import { getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
 import { generateSchedule } from "@/features/scheduler/engine/generateSchedule";
+import { placeStaffBreaksAfterCoverage } from "@/features/scheduler/engine/placeStaffBreaks";
 import { calculateSchedulerReadiness } from "@/features/scheduler/engine/preflight";
-import {
-  enrichBreakAssignmentsWithFixedEvents,
-  reserveStaffBreaks,
-} from "@/features/scheduler/engine/reserveBreaks";
+import { enrichBreakAssignmentsWithFixedEvents } from "@/features/scheduler/engine/reserveBreaks";
 import type {
   SchedulerAssignment,
+  SchedulerResult,
   SchedulerStaff,
 } from "@/features/scheduler/engine/types";
+import { applyFixedNapSessions } from "@/features/scheduler/server/applyFixedNapSessions";
 import { applyHistoricalTraining } from "@/features/scheduler/server/applyHistoricalTraining";
 import { applyLivingstonWorkbookTrial } from "@/features/scheduler/server/applyLivingstonWorkbookTrial";
 import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySchedulerInput";
@@ -65,11 +65,34 @@ function buildCoverageByRole(
     }
 
     const role = roleByStaffId.get(assignment.staffId) ?? "OTHER";
-    coverageByRole[role] =
-      (coverageByRole[role] ?? 0) + slotHours;
+    coverageByRole[role] = (coverageByRole[role] ?? 0) + slotHours;
   }
 
   return coverageByRole;
+}
+
+function applyFinalBreakMetrics(
+  metrics: SchedulerResult["metrics"],
+  reservedBreakCount: number,
+  slotLengthMinutes: number
+): SchedulerResult["metrics"] {
+  const breakHoursReserved =
+    reservedBreakCount * (slotLengthMinutes / 60);
+  const netStaffCoverageHours = Math.max(
+    metrics.staffAvailableHours - breakHoursReserved,
+    0
+  );
+  const additionalLaborHoursNeeded = Math.max(
+    metrics.requiredClientHours - netStaffCoverageHours,
+    0
+  );
+
+  return {
+    ...metrics,
+    breakHoursReserved,
+    netStaffCoverageHours,
+    additionalLaborHoursNeeded,
+  };
 }
 
 export async function POST(request: Request) {
@@ -80,34 +103,28 @@ export async function POST(request: Request) {
 
     if (!locationId || !date) {
       return NextResponse.json(
-        {
-          error: "locationId and date are required.",
-        },
-        {
-          status: 400,
-        }
+        { error: "locationId and date are required." },
+        { status: 400 }
       );
     }
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return NextResponse.json(
-        {
-          error: "Date must use YYYY-MM-DD format.",
-        },
-        {
-          status: 400,
-        }
+        { error: "Date must use YYYY-MM-DD format." },
+        { status: 400 }
       );
     }
 
-    const dayData = await buildDaySchedulerInput(
+    const dayData = await buildDaySchedulerInput(locationId, date);
+    const fixedNapApplication = await applyFixedNapSessions(
       locationId,
-      date
+      date,
+      dayData.input
     );
 
     const workbookTraining = await applyLivingstonWorkbookTrial(
       locationId,
-      dayData.input
+      fixedNapApplication.input
     );
 
     const historicalTraining = await applyHistoricalTraining(
@@ -122,15 +139,26 @@ export async function POST(request: Request) {
       dayData.extendedRules
     );
 
-    const protectedAssignments =
-      schedulerInput.existingAssignments.filter(
-        shouldKeepExistingAssignment
-      );
+    const protectedAssignments = schedulerInput.existingAssignments.filter(
+      shouldKeepExistingAssignment
+    );
 
-    const reservedBreaks = reserveStaffBreaks({
+    // Coverage is built first. Fixed nap and speech windows have already been
+    // removed from required client coverage, so those events cannot be pushed
+    // aside merely to create a staff break.
+    const coverageResult = generateSchedule({
+      ...schedulerInput,
+      existingAssignments: protectedAssignments,
+    });
+
+    // Breaks are placed second. The planner first uses free nap/speech windows.
+    // If a break still cannot fit, it can move an AUTO client block to the best
+    // eligible relief technician and preserve 1:1 coverage while creating the
+    // original staff member's break.
+    const breakPlan = placeStaffBreaksAfterCoverage({
       staff: schedulerInput.staff,
       clients: schedulerInput.clients,
-      existingAssignments: protectedAssignments,
+      assignments: coverageResult.assignments,
       referenceAssignments: schedulerInput.referenceAssignments,
       callOutStaffIds: schedulerInput.callOutStaffIds,
       rules: {
@@ -141,32 +169,24 @@ export async function POST(request: Request) {
       schedulerRules: schedulerInput.rules,
     });
 
-    const result = generateSchedule({
-      ...schedulerInput,
-      existingAssignments: [
-        ...protectedAssignments,
-        ...reservedBreaks,
-      ],
-    });
-
-    const enrichedAssignments =
-      enrichBreakAssignmentsWithFixedEvents(
-        result.assignments,
-        schedulerInput.clients,
-        dayData.extendedRules.slotLengthMinutes
-      );
+    const enrichedAssignments = enrichBreakAssignmentsWithFixedEvents(
+      breakPlan.assignments,
+      schedulerInput.clients,
+      dayData.extendedRules.slotLengthMinutes
+    );
+    const metrics = applyFinalBreakMetrics(
+      coverageResult.metrics,
+      breakPlan.reservedBreaks.length,
+      dayData.extendedRules.slotLengthMinutes
+    );
 
     await connectToDatabase();
 
     await ScheduleAssignment.deleteMany({
       locationId,
       date,
-      manuallyOverridden: {
-        $ne: true,
-      },
-      source: {
-        $in: ["AUTO", "TEMPLATE", "COPIED"],
-      },
+      manuallyOverridden: { $ne: true },
+      source: { $in: ["AUTO", "TEMPLATE", "COPIED"] },
     });
 
     const autoAssignments = enrichedAssignments.filter(
@@ -179,9 +199,7 @@ export async function POST(request: Request) {
           locationId,
           date,
           startTime: assignment.startTime,
-          endTime: getEndTimeForSlot(
-            assignment.startTime
-          ),
+          endTime: getEndTimeForSlot(assignment.startTime),
           staffId: assignment.staffId,
           clientId: assignment.clientId || null,
           assignmentType: assignment.assignmentType,
@@ -196,12 +214,11 @@ export async function POST(request: Request) {
     const managerGapCount = await syncAutoUnplacedGaps(
       locationId,
       date,
-      result.uncoveredRequirements,
+      coverageResult.uncoveredRequirements,
       enrichedAssignments
     );
 
-    const completeCoverage =
-      result.metrics.uncoveredClientSlots === 0;
+    const completeCoverage = coverageResult.metrics.uncoveredClientSlots === 0;
     const partialBuild = !completeCoverage;
     const coverageByRole = buildCoverageByRole(
       enrichedAssignments,
@@ -216,25 +233,26 @@ export async function POST(request: Request) {
       entityType: "SCHEDULE_DAY",
       entityId: date,
       summary: partialBuild
-        ? `Built a partial schedule for ${date}: ${result.metrics.coveredClientSlots}/${result.metrics.requiredClientSlots} client blocks covered.`
-        : `Generated a complete schedule for ${date}: ${result.metrics.coveredClientSlots}/${result.metrics.requiredClientSlots} client blocks covered.`,
+        ? `Built a partial schedule for ${date}: ${coverageResult.metrics.coveredClientSlots}/${coverageResult.metrics.requiredClientSlots} client blocks covered.`
+        : `Generated a complete schedule for ${date}: ${coverageResult.metrics.coveredClientSlots}/${coverageResult.metrics.requiredClientSlots} client blocks covered.`,
       after: {
         readiness,
-        metrics: result.metrics,
-        uncoveredRequirements:
-          result.uncoveredRequirements,
+        metrics,
+        uncoveredRequirements: coverageResult.uncoveredRequirements,
         managerGapCount,
-        warningCount: result.warnings.length,
-        reservedBreakCount: reservedBreaks.length,
+        warningCount: coverageResult.warnings.length,
+        reservedBreakCount: breakPlan.reservedBreaks.length,
+        reliefSwapCount: breakPlan.reliefSwapCount,
+        unplacedBreakStaffIds: breakPlan.unplacedBreakStaffIds,
         completeCoverage,
         partialBuild,
         coverageByRole,
+        fixedNapSessionsApplied: fixedNapApplication.sessionCount,
+        fixedNapClientsApplied: fixedNapApplication.clientCount,
         autoTemplateName: dayData.autoTemplateName,
-        previousReferenceDate:
-          dayData.previousReferenceDate,
+        previousReferenceDate: dayData.previousReferenceDate,
         workbookTrainingApplied: workbookTraining.applied,
-        workbookTrainingReferences:
-          workbookTraining.referenceCount,
+        workbookTrainingReferences: workbookTraining.referenceCount,
         workbookTrainingSourceWeek: workbookTraining.applied
           ? {
               start: workbookTraining.sourceWeekStart,
@@ -243,8 +261,7 @@ export async function POST(request: Request) {
           : null,
         importedTrainingScheduleDays:
           historicalTraining.matchedScheduleDayCount,
-        importedTrainingRecords:
-          historicalTraining.matchedRecordCount,
+        importedTrainingRecords: historicalTraining.matchedRecordCount,
       },
     });
 
@@ -255,22 +272,23 @@ export async function POST(request: Request) {
       completeCoverage,
       partialBuild,
       message: partialBuild
-        ? "The automatic scheduler built every assignment it could safely cover. Remaining client blocks were added to the manager Unplaced Assignments tray."
-        : "The automatic scheduler completed all required client coverage.",
+        ? "The automatic scheduler built every assignment it could safely cover. Nap and speech events were protected first, then staff breaks were placed. Remaining client blocks were added to the manager Unplaced Assignments tray."
+        : "The automatic scheduler completed all required client coverage, protected nap and speech events first, and then placed staff breaks.",
       readiness,
-      metrics: result.metrics,
-      warnings: result.warnings,
-      uncoveredRequirements:
-        result.uncoveredRequirements,
+      metrics,
+      warnings: coverageResult.warnings,
+      uncoveredRequirements: coverageResult.uncoveredRequirements,
       managerGapCount,
-      reservedBreakCount: reservedBreaks.length,
+      reservedBreakCount: breakPlan.reservedBreaks.length,
+      reliefSwapCount: breakPlan.reliefSwapCount,
+      unplacedBreakStaffIds: breakPlan.unplacedBreakStaffIds,
+      fixedNapSessionsApplied: fixedNapApplication.sessionCount,
+      fixedNapClientsApplied: fixedNapApplication.clientCount,
       coverageByRole,
       autoTemplateName: dayData.autoTemplateName,
-      previousReferenceDate:
-        dayData.previousReferenceDate,
+      previousReferenceDate: dayData.previousReferenceDate,
       workbookTrainingApplied: workbookTraining.applied,
-      workbookTrainingReferences:
-        workbookTraining.referenceCount,
+      workbookTrainingReferences: workbookTraining.referenceCount,
       workbookTrainingSourceWeek: workbookTraining.applied
         ? {
             start: workbookTraining.sourceWeekStart,
@@ -279,22 +297,14 @@ export async function POST(request: Request) {
         : null,
       importedTrainingScheduleDays:
         historicalTraining.matchedScheduleDayCount,
-      importedTrainingRecords:
-        historicalTraining.matchedRecordCount,
+      importedTrainingRecords: historicalTraining.matchedRecordCount,
     });
   } catch (error) {
-    console.error(
-      "Schedule generation failed:",
-      error
-    );
+    console.error("Schedule generation failed:", error);
 
     return NextResponse.json(
-      {
-        error: "The schedule could not be generated.",
-      },
-      {
-        status: 500,
-      }
+      { error: "The schedule could not be generated." },
+      { status: 500 }
     );
   }
 }
