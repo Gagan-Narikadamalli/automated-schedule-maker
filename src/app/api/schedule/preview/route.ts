@@ -1,15 +1,14 @@
 import { NextResponse } from "next/server";
 
 import { generateSchedule } from "@/features/scheduler/engine/generateSchedule";
+import { placeStaffBreaksAfterCoverage } from "@/features/scheduler/engine/placeStaffBreaks";
 import { calculateSchedulerReadiness } from "@/features/scheduler/engine/preflight";
-import {
-  enrichBreakAssignmentsWithFixedEvents,
-  reserveStaffBreaks,
-} from "@/features/scheduler/engine/reserveBreaks";
+import { enrichBreakAssignmentsWithFixedEvents } from "@/features/scheduler/engine/reserveBreaks";
 import type {
   SchedulerAssignment,
   SchedulerStaff,
 } from "@/features/scheduler/engine/types";
+import { applyFixedNapSessions } from "@/features/scheduler/server/applyFixedNapSessions";
 import { applyHistoricalTraining } from "@/features/scheduler/server/applyHistoricalTraining";
 import { applyLivingstonWorkbookTrial } from "@/features/scheduler/server/applyLivingstonWorkbookTrial";
 import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySchedulerInput";
@@ -19,9 +18,17 @@ type PreviewRequest = {
   date?: string;
 };
 
-function shouldKeepExistingAssignment(
-  assignment: SchedulerAssignment
-): boolean {
+function isAutomaticBreak(assignment: SchedulerAssignment): boolean {
+  return (
+    assignment.source === "AUTO" &&
+    (assignment.assignmentType === "BREAK" ||
+      assignment.assignmentType === "BREAK_NAP" ||
+      assignment.assignmentType === "BREAK_SPEECH")
+  );
+}
+
+function shouldKeepExistingAssignment(assignment: SchedulerAssignment): boolean {
+  if (isAutomaticBreak(assignment)) return false;
   return (
     assignment.locked ||
     assignment.source === "MANUAL" ||
@@ -35,20 +42,14 @@ function buildCoverageByRole(
   staff: SchedulerStaff[],
   slotLengthMinutes: number
 ): Record<string, number> {
-  const roleByStaffId = new Map(
-    staff.map((staffMember) => [staffMember.id, staffMember.role])
-  );
+  const roleByStaffId = new Map(staff.map((staffMember) => [staffMember.id, staffMember.role]));
   const slotHours = slotLengthMinutes / 60;
   const coverageByRole: Record<string, number> = {};
 
   for (const assignment of assignments) {
-    if (assignment.assignmentType !== "CLIENT_1_TO_1") {
-      continue;
-    }
-
+    if (assignment.assignmentType !== "CLIENT_1_TO_1") continue;
     const role = roleByStaffId.get(assignment.staffId) ?? "OTHER";
-    coverageByRole[role] =
-      (coverageByRole[role] ?? 0) + slotHours;
+    coverageByRole[role] = (coverageByRole[role] ?? 0) + slotHours;
   }
 
   return coverageByRole;
@@ -61,37 +62,23 @@ export async function POST(request: Request) {
     const date = body.date?.trim();
 
     if (!locationId || !date) {
-      return NextResponse.json(
-        {
-          error: "locationId and date are required.",
-        },
-        {
-          status: 400,
-        }
-      );
+      return NextResponse.json({ error: "locationId and date are required." }, { status: 400 });
     }
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      return NextResponse.json(
-        {
-          error: "Date must use YYYY-MM-DD format.",
-        },
-        {
-          status: 400,
-        }
-      );
+      return NextResponse.json({ error: "Date must use YYYY-MM-DD format." }, { status: 400 });
     }
 
-    const dayData = await buildDaySchedulerInput(
+    const dayData = await buildDaySchedulerInput(locationId, date);
+    const fixedNapApplication = await applyFixedNapSessions(
       locationId,
-      date
-    );
-
-    const workbookTraining = await applyLivingstonWorkbookTrial(
-      locationId,
+      date,
       dayData.input
     );
-
+    const workbookTraining = await applyLivingstonWorkbookTrial(
+      locationId,
+      fixedNapApplication.input
+    );
     const historicalTraining = await applyHistoricalTraining(
       locationId,
       date,
@@ -103,43 +90,34 @@ export async function POST(request: Request) {
       schedulerInput,
       dayData.extendedRules
     );
+    const protectedAssignments = schedulerInput.existingAssignments.filter(
+      shouldKeepExistingAssignment
+    );
 
-    const protectedAssignments =
-      schedulerInput.existingAssignments.filter(
-        shouldKeepExistingAssignment
-      );
+    const coverageResult = generateSchedule({
+      ...schedulerInput,
+      existingAssignments: protectedAssignments,
+    });
 
-    const reservedBreaks = reserveStaffBreaks({
+    const breakPlan = placeStaffBreaksAfterCoverage({
       staff: schedulerInput.staff,
       clients: schedulerInput.clients,
-      existingAssignments: protectedAssignments,
+      assignments: coverageResult.assignments,
       referenceAssignments: schedulerInput.referenceAssignments,
       callOutStaffIds: schedulerInput.callOutStaffIds,
       rules: {
         ...dayData.extendedRules,
-        historicalBreakPriority:
-          schedulerInput.rules.historicalBreakPriority,
+        historicalBreakPriority: schedulerInput.rules.historicalBreakPriority,
       },
       schedulerRules: schedulerInput.rules,
     });
 
-    const result = generateSchedule({
-      ...schedulerInput,
-      existingAssignments: [
-        ...protectedAssignments,
-        ...reservedBreaks,
-      ],
-    });
-
-    const proposedAssignments =
-      enrichBreakAssignmentsWithFixedEvents(
-        result.assignments,
-        schedulerInput.clients,
-        dayData.extendedRules.slotLengthMinutes
-      );
-
-    const completeCoverage =
-      result.metrics.uncoveredClientSlots === 0;
+    const proposedAssignments = enrichBreakAssignmentsWithFixedEvents(
+      breakPlan.assignments,
+      schedulerInput.clients,
+      dayData.extendedRules.slotLengthMinutes
+    );
+    const completeCoverage = coverageResult.metrics.uncoveredClientSlots === 0;
     const coverageByRole = buildCoverageByRole(
       proposedAssignments,
       schedulerInput.staff,
@@ -154,10 +132,14 @@ export async function POST(request: Request) {
       completeCoverage,
       partialBuild: !completeCoverage,
       readiness,
-      metrics: result.metrics,
-      warnings: result.warnings,
-      uncoveredRequirements: result.uncoveredRequirements,
-      reservedBreakCount: reservedBreaks.length,
+      metrics: coverageResult.metrics,
+      warnings: coverageResult.warnings,
+      uncoveredRequirements: coverageResult.uncoveredRequirements,
+      reservedBreakCount: breakPlan.reservedBreaks.length,
+      reliefSwapCount: breakPlan.reliefSwapCount,
+      unplacedBreakStaffIds: breakPlan.unplacedBreakStaffIds,
+      fixedNapSessionsApplied: fixedNapApplication.sessionCount,
+      clientAttendanceChangesApplied: fixedNapApplication.attendanceChangeCount,
       coverageByRole,
       proposedAssignments: proposedAssignments.map((assignment) => ({
         staffId: assignment.staffId,
@@ -172,29 +154,18 @@ export async function POST(request: Request) {
       previousReferenceDate: dayData.previousReferenceDate,
       historicalReferenceDates: dayData.historicalReferenceDates,
       workbookTrainingApplied: workbookTraining.applied,
-      workbookTrainingReferences:
-        workbookTraining.referenceCount,
+      workbookTrainingReferences: workbookTraining.referenceCount,
       workbookTrainingSourceWeek: workbookTraining.applied
-        ? {
-            start: workbookTraining.sourceWeekStart,
-            end: workbookTraining.sourceWeekEnd,
-          }
+        ? { start: workbookTraining.sourceWeekStart, end: workbookTraining.sourceWeekEnd }
         : null,
-      importedTrainingScheduleDays:
-        historicalTraining.matchedScheduleDayCount,
-      importedTrainingRecords:
-        historicalTraining.matchedRecordCount,
+      importedTrainingScheduleDays: historicalTraining.matchedScheduleDayCount,
+      importedTrainingRecords: historicalTraining.matchedRecordCount,
     });
   } catch (error) {
     console.error("Schedule preview failed:", error);
-
     return NextResponse.json(
-      {
-        error: "The automatic schedule preview could not be calculated.",
-      },
-      {
-        status: 500,
-      }
+      { error: "The automatic schedule preview could not be calculated." },
+      { status: 500 }
     );
   }
 }
