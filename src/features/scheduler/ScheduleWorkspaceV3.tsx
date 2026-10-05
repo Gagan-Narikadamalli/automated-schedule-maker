@@ -82,6 +82,14 @@ type UnplacedResponse = {
   error?: string;
 };
 
+type CallOutResponse = {
+  success?: boolean;
+  selectedStaffIds?: string[];
+  addedCount?: number;
+  removedCount?: number;
+  error?: string;
+};
+
 type GenerateMetrics = {
   requiredClientSlots?: number;
   coveredClientSlots?: number;
@@ -124,10 +132,6 @@ type CopyDayResponse = {
   success?: boolean;
   copiedCount?: number;
   warnings?: string[];
-  error?: string;
-};
-
-type SimpleApiResponse = {
   error?: string;
 };
 
@@ -311,6 +315,7 @@ export function ScheduleWorkspaceV3() {
   const [detailsRecord, setDetailsRecord] = useState<UnplacedRecord | null>(null);
   const [showCallOutPanel, setShowCallOutPanel] = useState(false);
   const [callOutStaffIds, setCallOutStaffIds] = useState<string[]>([]);
+  const [savedCallOutStaffIds, setSavedCallOutStaffIds] = useState<string[]>([]);
   const [showCopyPanel, setShowCopyPanel] = useState(false);
   const [copySourceDate, setCopySourceDate] = useState(() => addDays(getTodayForDateInput(), -1));
   const confirmation = useSchedulerConfirm();
@@ -361,6 +366,9 @@ export function ScheduleWorkspaceV3() {
   useEffect(() => {
     setPlacementRecord(null);
     setDetailsRecord(null);
+    setShowCallOutPanel(false);
+    setCallOutStaffIds([]);
+    setSavedCallOutStaffIds([]);
     if (!locationId || !selectedDate) return;
     void loadSchedule(locationId, selectedDate);
   }, [locationId, selectedDate]);
@@ -371,6 +379,8 @@ export function ScheduleWorkspaceV3() {
     setInitialGrid(nextGrid);
     setRequiredClientSlots(countDemoClientBlocks(nextGrid));
     setUnplacedAssignments([]);
+    setCallOutStaffIds([]);
+    setSavedCallOutStaffIds([]);
     setGridVersion((current) => current + 1);
     setLoading(false);
   }
@@ -388,6 +398,24 @@ export function ScheduleWorkspaceV3() {
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "Unplaced assignments could not be loaded.");
     }
+  }
+
+  async function loadCallOuts(requestedLocationId = locationId, requestedDate = selectedDate) {
+    if (!requestedLocationId || requestedLocationId.startsWith("demo-")) {
+      setCallOutStaffIds([]);
+      setSavedCallOutStaffIds([]);
+      return;
+    }
+
+    const response = await fetch(
+      `/api/call-outs?locationId=${encodeURIComponent(requestedLocationId)}&date=${encodeURIComponent(requestedDate)}`,
+      { cache: "no-store" }
+    );
+    const data = await readJson<CallOutResponse>(response);
+    if (!response.ok) throw new Error(data.error || "Saved call-outs could not be loaded.");
+    const ids = data.selectedStaffIds ?? [];
+    setCallOutStaffIds(ids);
+    setSavedCallOutStaffIds(ids);
   }
 
   async function loadSchedule(requestedLocationId = locationId, requestedDate = selectedDate) {
@@ -411,7 +439,10 @@ export function ScheduleWorkspaceV3() {
       setInitialGrid(buildGrid(nextStaff, nextAssignments));
       setRequiredClientSlots(data.requiredClientSlots ?? 0);
       setGridVersion((current) => current + 1);
-      await loadUnplacedAssignments(requestedLocationId, requestedDate);
+      await Promise.all([
+        loadUnplacedAssignments(requestedLocationId, requestedDate),
+        loadCallOuts(requestedLocationId, requestedDate),
+      ]);
       setStatusMessage(
         `Loaded ${nextAssignments.length} saved assignment${nextAssignments.length === 1 ? "" : "s"}. ${data.requiredClientSlots ?? 0} client blocks require coverage.`
       );
@@ -609,42 +640,50 @@ export function ScheduleWorkspaceV3() {
     setCallOutStaffIds((current) => current.includes(staffId) ? current.filter((id) => id !== staffId) : [...current, staffId]);
   }
 
+  function closeCallOutPanel() {
+    setCallOutStaffIds(savedCallOutStaffIds);
+    setShowCallOutPanel(false);
+  }
+
   async function saveCallOuts() {
     if (demoMode) {
       setShowCallOutPanel(false);
       setCallOutStaffIds([]);
+      setSavedCallOutStaffIds([]);
       setStatusMessage("Call-outs are not persisted in preview mode.");
       return;
     }
-    if (!locationId || callOutStaffIds.length === 0) {
-      setStatusMessage("Select at least one staff member before saving call-outs.");
+    if (!locationId) {
+      setStatusMessage("Choose a location before saving call-outs.");
       return;
     }
 
     try {
       setWorking(true);
-      setStatusMessage("Saving call-outs to MongoDB...");
-      for (const staffId of callOutStaffIds) {
-        const response = await fetch("/api/call-outs", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            locationId,
-            staffId,
-            date: selectedDate,
-            startTime: "08:00",
-            endTime: "18:00",
-            reason: "Call out",
-          }),
-        });
-        const data = await readJson<SimpleApiResponse>(response);
-        if (!response.ok) throw new Error(data.error || "A call-out could not be saved.");
-      }
-      const savedCount = callOutStaffIds.length;
-      setCallOutStaffIds([]);
+      setStatusMessage("Saving call-out selections to MongoDB...");
+      const response = await fetch("/api/call-outs", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          locationId,
+          date: selectedDate,
+          staffIds: callOutStaffIds,
+        }),
+      });
+      const data = await readJson<CallOutResponse>(response);
+      if (!response.ok) throw new Error(data.error || "Call-outs could not be saved.");
+
+      const selectedIds = data.selectedStaffIds ?? callOutStaffIds;
+      setCallOutStaffIds(selectedIds);
+      setSavedCallOutStaffIds(selectedIds);
       setShowCallOutPanel(false);
       await loadSchedule();
-      setStatusMessage(`${savedCount} call-out${savedCount === 1 ? "" : "s"} saved. Use Repair Schedule to refill coverage and clear automatic break blocks inside the call-out window.`);
+
+      const added = data.addedCount ?? 0;
+      const removed = data.removedCount ?? 0;
+      setStatusMessage(
+        `${selectedIds.length} staff call-out${selectedIds.length === 1 ? "" : "s"} saved for ${selectedDate}. ${added} added, ${removed} removed. The grid now reflects the saved call-out boundaries.`
+      );
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "Call-outs could not be saved.");
     } finally {
@@ -809,8 +848,11 @@ export function ScheduleWorkspaceV3() {
       {showCallOutPanel && (
         <section className="callout-panel">
           <div className="panel-heading-row">
-            <div><h2>Call Outs for {selectedDate}</h2><p>Saved call-outs become hard automatic-scheduling boundaries.</p></div>
-            <button type="button" className="button button-secondary" disabled={working} onClick={() => setShowCallOutPanel(false)}>Close</button>
+            <div>
+              <h2>Call Outs for {selectedDate}</h2>
+              <p>Checked staff are currently saved as call-outs. Uncheck someone and save if they are coming in after all.</p>
+            </div>
+            <button type="button" className="button button-secondary" disabled={working} onClick={closeCallOutPanel}>Close</button>
           </div>
           <div className="callout-staff-list">
             {staff.map((staffMember) => (
@@ -820,7 +862,7 @@ export function ScheduleWorkspaceV3() {
               </label>
             ))}
           </div>
-          <button type="button" className="button button-primary" disabled={working || callOutStaffIds.length === 0} onClick={() => void saveCallOuts()}>{working ? "Saving..." : "Save Call Outs"}</button>
+          <button type="button" className="button button-primary" disabled={working} onClick={() => void saveCallOuts()}>{working ? "Saving..." : "Save Call Outs"}</button>
         </section>
       )}
 
