@@ -8,8 +8,8 @@ export default function FixedEventsPage() {
       <div className="section-page">
         <SectionHeader
           eyebrow="FIXED CLIENT EVENTS"
-          title="Speech & Fixed Events"
-          description="Manage one-time and recurring speech sessions that the automatic scheduler must honor before assigning normal client coverage."
+          title="Speech & Nap Events"
+          description="Manage color-coded Speech and Nap event cards. Nap times are protected between 11:00 AM and 2:00 PM, with younger-child naps prioritized before older-child naps when the automatic scheduler places staff breaks."
         />
 
         <FixedEventsManager />
