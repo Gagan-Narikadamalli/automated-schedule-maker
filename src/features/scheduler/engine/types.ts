@@ -6,6 +6,8 @@ export type SupportLevel =
   | "ROTATION"
   | "HIGH_SUPPORT";
 
+export type NapPriorityCategory = "YOUNGER" | "OLDER";
+
 export type StaffRole =
   | "BT"
   | "RBT"
@@ -43,6 +45,7 @@ export type SchedulerClient = {
   supportLevel?: SupportLevel;
   requiredSlots: string[];
   napSlots: string[];
+  napPriorityCategory?: NapPriorityCategory;
   speechSlots: string[];
   staffRelationships: Record<string, StaffRelationship>;
   maxConsecutiveBlocksWithSameStaff?: number;
