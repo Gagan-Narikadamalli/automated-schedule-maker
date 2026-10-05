@@ -2,11 +2,13 @@ import { NextResponse } from "next/server";
 
 import { getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
 import { generateSchedule } from "@/features/scheduler/engine/generateSchedule";
-import {
-  enrichBreakAssignmentsWithFixedEvents,
-  reserveStaffBreaks,
-} from "@/features/scheduler/engine/reserveBreaks";
-import type { SchedulerAssignment } from "@/features/scheduler/engine/types";
+import { placeStaffBreaksAfterCoverage } from "@/features/scheduler/engine/placeStaffBreaks";
+import { enrichBreakAssignmentsWithFixedEvents } from "@/features/scheduler/engine/reserveBreaks";
+import type {
+  SchedulerAssignment,
+  SchedulerResult,
+} from "@/features/scheduler/engine/types";
+import { applyFixedNapSessions } from "@/features/scheduler/server/applyFixedNapSessions";
 import { applyHistoricalTraining } from "@/features/scheduler/server/applyHistoricalTraining";
 import { applyLivingstonWorkbookTrial } from "@/features/scheduler/server/applyLivingstonWorkbookTrial";
 import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySchedulerInput";
@@ -54,6 +56,30 @@ function shouldKeepExistingAssignment(
   );
 }
 
+function applyFinalBreakMetrics(
+  metrics: SchedulerResult["metrics"],
+  reservedBreakCount: number,
+  slotLengthMinutes: number
+): SchedulerResult["metrics"] {
+  const breakHoursReserved =
+    reservedBreakCount * (slotLengthMinutes / 60);
+  const netStaffCoverageHours = Math.max(
+    metrics.staffAvailableHours - breakHoursReserved,
+    0
+  );
+  const additionalLaborHoursNeeded = Math.max(
+    metrics.requiredClientHours - netStaffCoverageHours,
+    0
+  );
+
+  return {
+    ...metrics,
+    breakHoursReserved,
+    netStaffCoverageHours,
+    additionalLaborHoursNeeded,
+  };
+}
+
 function dateIsValid(value: string): boolean {
   if (!DATE_PATTERN.test(value)) {
     return false;
@@ -72,10 +98,7 @@ function dateIsValid(value: string): boolean {
   );
 }
 
-function enumerateDates(
-  startDate: string,
-  endDate: string
-): string[] {
+function enumerateDates(startDate: string, endDate: string): string[] {
   const start = new Date(`${startDate}T12:00:00`);
   const end = new Date(`${endDate}T12:00:00`);
   const dates: string[] = [];
@@ -118,23 +141,15 @@ export async function POST(request: Request) {
 
     if (!locationId || !startDate || !endDate) {
       return NextResponse.json(
-        {
-          error: "Location, start date, and end date are required.",
-        },
-        {
-          status: 400,
-        }
+        { error: "Location, start date, and end date are required." },
+        { status: 400 }
       );
     }
 
     if (!dateIsValid(startDate) || !dateIsValid(endDate)) {
       return NextResponse.json(
-        {
-          error: "Dates must use a real YYYY-MM-DD calendar date.",
-        },
-        {
-          status: 400,
-        }
+        { error: "Dates must use a real YYYY-MM-DD calendar date." },
+        { status: 400 }
       );
     }
 
@@ -142,19 +157,13 @@ export async function POST(request: Request) {
 
     if (dates.length === 0 || dates.length > 14) {
       return NextResponse.json(
-        {
-          error: "Generate a range between 1 and 14 calendar days.",
-        },
-        {
-          status: 400,
-        }
+        { error: "Generate a range between 1 and 14 calendar days." },
+        { status: 400 }
       );
     }
 
     if (!sessionCanAccessLocation(auth.session, locationId)) {
-      return forbiddenResponse(
-        "You do not have access to this location."
-      );
+      return forbiddenResponse("You do not have access to this location.");
     }
 
     await connectToDatabase();
@@ -173,14 +182,16 @@ export async function POST(request: Request) {
         continue;
       }
 
-      const dayData = await buildDaySchedulerInput(
+      const dayData = await buildDaySchedulerInput(locationId, date);
+      const fixedNapApplication = await applyFixedNapSessions(
         locationId,
-        date
+        date,
+        dayData.input
       );
 
       const workbookTraining = await applyLivingstonWorkbookTrial(
         locationId,
-        dayData.input
+        fixedNapApplication.input
       );
 
       const historicalTraining = await applyHistoricalTraining(
@@ -190,15 +201,19 @@ export async function POST(request: Request) {
       );
 
       const schedulerInput = historicalTraining.input;
-      const protectedAssignments =
-        schedulerInput.existingAssignments.filter(
-          shouldKeepExistingAssignment
-        );
+      const protectedAssignments = schedulerInput.existingAssignments.filter(
+        shouldKeepExistingAssignment
+      );
 
-      const reservedBreaks = reserveStaffBreaks({
+      const coverageResult = generateSchedule({
+        ...schedulerInput,
+        existingAssignments: protectedAssignments,
+      });
+
+      const breakPlan = placeStaffBreaksAfterCoverage({
         staff: schedulerInput.staff,
         clients: schedulerInput.clients,
-        existingAssignments: protectedAssignments,
+        assignments: coverageResult.assignments,
         referenceAssignments: schedulerInput.referenceAssignments,
         callOutStaffIds: schedulerInput.callOutStaffIds,
         rules: {
@@ -209,30 +224,22 @@ export async function POST(request: Request) {
         schedulerRules: schedulerInput.rules,
       });
 
-      const result = generateSchedule({
-        ...schedulerInput,
-        existingAssignments: [
-          ...protectedAssignments,
-          ...reservedBreaks,
-        ],
-      });
-
-      const enrichedAssignments =
-        enrichBreakAssignmentsWithFixedEvents(
-          result.assignments,
-          schedulerInput.clients,
-          dayData.extendedRules.slotLengthMinutes
-        );
+      const enrichedAssignments = enrichBreakAssignmentsWithFixedEvents(
+        breakPlan.assignments,
+        schedulerInput.clients,
+        dayData.extendedRules.slotLengthMinutes
+      );
+      const metrics = applyFinalBreakMetrics(
+        coverageResult.metrics,
+        breakPlan.reservedBreaks.length,
+        dayData.extendedRules.slotLengthMinutes
+      );
 
       await ScheduleAssignment.deleteMany({
         locationId,
         date,
-        manuallyOverridden: {
-          $ne: true,
-        },
-        source: {
-          $in: ["AUTO", "TEMPLATE", "COPIED"],
-        },
+        manuallyOverridden: { $ne: true },
+        source: { $in: ["AUTO", "TEMPLATE", "COPIED"] },
       });
 
       const autoAssignments = enrichedAssignments.filter(
@@ -245,9 +252,7 @@ export async function POST(request: Request) {
             locationId,
             date,
             startTime: assignment.startTime,
-            endTime: getEndTimeForSlot(
-              assignment.startTime
-            ),
+            endTime: getEndTimeForSlot(assignment.startTime),
             staffId: assignment.staffId,
             clientId: assignment.clientId || null,
             assignmentType: assignment.assignmentType,
@@ -262,34 +267,33 @@ export async function POST(request: Request) {
       const managerGapCount = await syncAutoUnplacedGaps(
         locationId,
         date,
-        result.uncoveredRequirements,
+        coverageResult.uncoveredRequirements,
         enrichedAssignments
       );
 
-      const completeCoverage =
-        result.metrics.uncoveredClientSlots === 0;
+      const completeCoverage = coverageResult.metrics.uncoveredClientSlots === 0;
 
       results.push({
         date,
         skipped: false,
         completeCoverage,
         partialBuild: !completeCoverage,
-        metrics: result.metrics,
-        warningCount: result.warnings.length,
-        uncoveredCount:
-          result.uncoveredRequirements.length,
+        metrics,
+        warningCount: coverageResult.warnings.length,
+        uncoveredCount: coverageResult.uncoveredRequirements.length,
         managerGapCount,
-        reservedBreakCount: reservedBreaks.length,
+        reservedBreakCount: breakPlan.reservedBreaks.length,
+        reliefSwapCount: breakPlan.reliefSwapCount,
+        unplacedBreakStaffIds: breakPlan.unplacedBreakStaffIds,
+        fixedNapSessionsApplied: fixedNapApplication.sessionCount,
+        fixedNapClientsApplied: fixedNapApplication.clientCount,
         autoTemplateName: dayData.autoTemplateName,
-        previousReferenceDate:
-          dayData.previousReferenceDate,
+        previousReferenceDate: dayData.previousReferenceDate,
         workbookTrainingApplied: workbookTraining.applied,
-        workbookTrainingReferences:
-          workbookTraining.referenceCount,
+        workbookTrainingReferences: workbookTraining.referenceCount,
         importedTrainingScheduleDays:
           historicalTraining.matchedScheduleDayCount,
-        importedTrainingRecords:
-          historicalTraining.matchedRecordCount,
+        importedTrainingRecords: historicalTraining.matchedRecordCount,
       });
     }
 
@@ -299,10 +303,8 @@ export async function POST(request: Request) {
       action: "GENERATE_RANGE",
       entityType: "SCHEDULE_RANGE",
       entityId: `${startDate}:${endDate}`,
-      summary: `Generated schedule range ${startDate} through ${endDate}. Partial days were retained and uncovered blocks were added to the manager tray.`,
-      after: {
-        results,
-      },
+      summary: `Generated schedule range ${startDate} through ${endDate}. Fixed nap and speech events were protected before staff breaks, and partial days kept uncovered blocks in the manager tray.`,
+      after: { results },
     });
 
     return NextResponse.json({
@@ -312,18 +314,11 @@ export async function POST(request: Request) {
       results,
     });
   } catch (error) {
-    console.error(
-      "Schedule range generation failed:",
-      error
-    );
+    console.error("Schedule range generation failed:", error);
 
     return NextResponse.json(
-      {
-        error: "The schedule range could not be generated.",
-      },
-      {
-        status: 500,
-      }
+      { error: "The schedule range could not be generated." },
+      { status: 500 }
     );
   }
 }
