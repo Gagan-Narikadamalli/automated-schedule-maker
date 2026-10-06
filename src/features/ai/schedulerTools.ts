@@ -189,7 +189,7 @@ export function createSchedulerReadOnlyTools(context: SchedulerAiContext) {
   return {
     lookup_schedule: tool({
       description:
-        "Answer detailed conversational questions about the selected day's schedule by staff name, client code, and/or time range. Prefer this tool for questions such as: who is Anias with from 8 to 2, what clients does Areyana have, who is covering CaMe at 10, when is Danna on break, what is JeMa's coverage, or who is free between 12 and 1. It returns merged human-friendly schedule segments and can calculate free staff.",
+        "Answer detailed conversational questions about the selected day's schedule by staff name, client code, and/or time range. Prefer this for questions such as: who is Anias with from 8 to 2, what clients does Areyana have, who is covering CaMe at 10, when is Danna on break, what is JeMa's coverage, or who is free between 12 and 1. It returns merged human-friendly schedule segments and can calculate free staff.",
       inputSchema: scheduleLookupSchema,
       execute: async (input) => {
         const [dayData, assignments] = await Promise.all([
@@ -280,8 +280,11 @@ export function createSchedulerReadOnlyTools(context: SchedulerAiContext) {
         };
 
         if (input.includeFreeStaff) {
+          const allAvailableSlots = Array.from(
+            new Set(dayData.staff.flatMap((member) => member.availableSlots))
+          ).sort();
           const rangeSlots = new Set(
-            dayData.input.timeSlots.filter((slot: string) => {
+            allAvailableSlots.filter((slot) => {
               if (input.startTime && slot < input.startTime) return false;
               if (input.endTime && slot >= input.endTime) return false;
               return true;
@@ -296,12 +299,15 @@ export function createSchedulerReadOnlyTools(context: SchedulerAiContext) {
             const freeSlots = member.availableSlots.filter(
               (slot) => rangeSlots.has(slot) && !scheduledSlots.has(slot)
             );
+            const requestedAvailableSlots = member.availableSlots.filter((slot) => rangeSlots.has(slot));
             return {
               id: member.id,
               name: member.name,
               freeSlots,
               freeForEntireRequestedRange:
-                rangeSlots.size > 0 && freeSlots.length === rangeSlots.size,
+                rangeSlots.size > 0 &&
+                requestedAvailableSlots.length === rangeSlots.size &&
+                freeSlots.length === rangeSlots.size,
             };
           });
           result.freeStaff = freeStaff;
