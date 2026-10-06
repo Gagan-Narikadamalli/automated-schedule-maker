@@ -1,6 +1,7 @@
 import { ToolLoopAgent, generateText, stepCountIs } from "ai";
 import { NextResponse } from "next/server";
 
+import { buildSchedulerDateContextSnapshot } from "@/features/ai/schedulerDateContext";
 import { buildSchedulerAiInstructions } from "@/features/ai/schedulerPrompt";
 import { buildSchedulerReplyFallback } from "@/features/ai/schedulerReplyFallback";
 import { createSchedulerReadOnlyTools } from "@/features/ai/schedulerTools";
@@ -13,6 +14,7 @@ import {
   SCHEDULER_WRITE_TOOL_NAMES,
 } from "@/features/ai/schedulerWriteTools";
 import type {
+  SchedulerAiContext,
   SchedulerAiDateSource,
   SchedulerAiHistoryMessage,
   SchedulerAiRequest,
@@ -31,7 +33,9 @@ export const maxDuration = 300;
 const DEFAULT_SCHEDULER_AI_MODEL = "openai/gpt-5-nano";
 const MAX_MESSAGE_LENGTH = 5000;
 const MAX_HISTORY_MESSAGES = 12;
-const MAX_TOOL_EVIDENCE_LENGTH = 24_000;
+const MAX_TOOL_EVIDENCE_LENGTH = 32_000;
+const MAX_DATE_CONTEXT_LENGTH = 42_000;
+const CLOSING_QUESTION = "Is there anything else you'd like help with?";
 
 function cleanLocationName(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -139,7 +143,7 @@ function recentConversationDate(
   history: SchedulerAiHistoryMessage[],
   anchorDate: string
 ): string | null {
-  for (const entry of [...history].slice(-4).reverse()) {
+  for (const entry of [...history].slice(-6).reverse()) {
     const isoDate = entry.text.match(/\b(20\d{2}-\d{2}-\d{2})\b/)?.[1];
     if (isoDate) return isoDate;
     const namedOrNumeric = parseNamedOrNumericDate(entry.text, anchorDate);
@@ -212,11 +216,18 @@ function resolveDateContext(
     return { date: selectedDate, source: "SELECTED_DAY" };
   }
 
-  if (isAffirmativeContinuation(message)) {
-    const conversationDate = recentConversationDate(history, selectedDate);
-    if (conversationDate) {
-      return { date: conversationDate, source: "CONVERSATION" };
-    }
+  const conversationDate = recentConversationDate(history, selectedDate);
+  const latestAssistant = [...history]
+    .reverse()
+    .find((entry) => entry.role === "assistant")?.text.toLowerCase();
+  if (
+    conversationDate &&
+    (isAffirmativeContinuation(message) ||
+      Boolean(latestAssistant?.includes("which day")) ||
+      Boolean(latestAssistant?.includes("what date")) ||
+      Boolean(latestAssistant?.includes("would you like me to generate")))
+  ) {
+    return { date: conversationDate, source: "CONVERSATION" };
   }
 
   if (dateSelectionExplicit) {
@@ -226,25 +237,56 @@ function resolveDateContext(
   return { date: selectedDate, source: "PASSIVE_SELECTION" };
 }
 
-function buildConversationPrompt(
-  history: SchedulerAiHistoryMessage[],
-  message: string
-): string {
-  if (history.length === 0) return message;
-  const transcript = history
-    .map((entry) => `${entry.role === "user" ? "User" : "Scheduler AI"}: ${entry.text}`)
-    .join("\n");
-  return `Conversation so far:\n${transcript}\n\nUser's latest message:\n${message}`;
-}
-
-function safeToolEvidence(value: unknown): string {
+function stringifyLimited(value: unknown, maxLength: number): string {
   try {
     const serialized = JSON.stringify(value, null, 2);
-    if (!serialized) return "No structured tool output was available.";
-    return serialized.slice(0, MAX_TOOL_EVIDENCE_LENGTH);
+    if (!serialized) return "No structured scheduler data was available.";
+    return serialized.slice(0, maxLength);
   } catch {
-    return "The scheduler tools completed, but their structured output could not be serialized.";
+    return "The scheduler data was available, but it could not be serialized.";
   }
+}
+
+function buildConversationPrompt(
+  history: SchedulerAiHistoryMessage[],
+  message: string,
+  dateContext: unknown | null
+): string {
+  const transcript = history.length
+    ? history
+        .map((entry) => `${entry.role === "user" ? "User" : "Scheduler AI"}: ${entry.text}`)
+        .join("\n")
+    : "No previous conversation.";
+
+  const contextSection = dateContext
+    ? `\n\nAUTHORITATIVE DATE CONTEXT\nThe following snapshot was loaded directly from the scheduler for the effective date. Treat it as authoritative scheduler data. Use it to understand staff availability, saved assignments, client required time, breaks, naps/speech, call-outs, unplaced work, and uncovered coverage. You may call tools for additional detail or actions, but do not contradict this snapshot unless a later successful write/tool result changes it.\n${stringifyLimited(
+        dateContext,
+        MAX_DATE_CONTEXT_LENGTH
+      )}`
+    : "";
+
+  return `Conversation so far:\n${transcript}${contextSection}\n\nUser's latest message:\n${message}`;
+}
+
+function answerNeedsFollowUp(reply: string): boolean {
+  const normalized = reply.trim().toLowerCase();
+  if (!normalized) return true;
+  if (normalized.endsWith("?")) return true;
+  return (
+    normalized.includes("please explain or elaborate") ||
+    normalized.includes("please clarify") ||
+    normalized.includes("which day") ||
+    normalized.includes("what date") ||
+    normalized.includes("would you like me to generate")
+  );
+}
+
+function ensureConversationClosing(reply: string): string {
+  if (answerNeedsFollowUp(reply)) return reply;
+  if (/is there anything else (you('|’)d|you would) like help with\??/i.test(reply)) {
+    return reply;
+  }
+  return `${reply.trim()}\n\n${CLOSING_QUESTION}`;
 }
 
 export async function POST(request: Request) {
@@ -304,7 +346,7 @@ export async function POST(request: Request) {
       dateSelectionExplicit,
       history
     );
-    const context = {
+    const context: SchedulerAiContext = {
       locationId,
       locationName,
       date: resolvedDate.date,
@@ -314,6 +356,15 @@ export async function POST(request: Request) {
       dateSelectionExplicit,
       userId: auth.session.userId,
     };
+
+    let dateContext: Awaited<ReturnType<typeof buildSchedulerDateContextSnapshot>> | null = null;
+    if (resolvedDate.source !== "PASSIVE_SELECTION") {
+      try {
+        dateContext = await buildSchedulerDateContextSnapshot(context);
+      } catch (dateContextError) {
+        console.error("Scheduler AI date context could not be loaded:", dateContextError);
+      }
+    }
 
     const readTools = createSchedulerReadOnlyTools(context);
     const websiteTools = createSchedulerWebsiteTools(context);
@@ -328,11 +379,14 @@ export async function POST(request: Request) {
           get_scheduler_configuration: websiteTools.get_scheduler_configuration,
         };
 
+    const dateContextInstructions = `\n\nDATE-CONTEXT ANSWERING RULES\n- Whenever a date is clear, a complete scheduler snapshot for that date may be included with the user's prompt. Use that date-scoped evidence before answering factual questions.\n- Consider all relevant date information together: staff availability and call-outs, saved staff/client assignments, client required slots/attendance, breaks, nap/speech/fixed events, uncovered requirements, unplaced work, and scheduler readiness.\n- Answer whatever scheduler question the user asks from that evidence and any tool results. Do not limit yourself to call-outs or schedule generation.\n- If the available scheduler evidence does not support a reliable answer, say: \"I couldn't generate a reliable answer from the available scheduler information. Please try again with a different date, person, client, time, or more detail.\" Never invent an answer.\n- If the schedule for the requested date is not generated, say that clearly and ask whether the user wants you to generate it. Do not present profile availability as if it were the completed schedule.\n- When the user's request is fully answered or a requested action is fully completed, finish naturally. The server may append a brief offer for additional help. Do not add that offer when you are already asking a required clarification or asking permission to generate a missing schedule.`;
+
     const agent = new ToolLoopAgent({
       model,
-      instructions: buildSchedulerAiInstructions(context, {
-        autonomousWrites,
-      }),
+      instructions:
+        buildSchedulerAiInstructions(context, {
+          autonomousWrites,
+        }) + dateContextInstructions,
       tools,
       toolChoice: "auto",
       stopWhen: stepCountIs(20),
@@ -340,7 +394,7 @@ export async function POST(request: Request) {
     });
 
     const result = await agent.generate({
-      prompt: buildConversationPrompt(history, message),
+      prompt: buildConversationPrompt(history, message, dateContext),
       timeout: {
         totalMs: 260_000,
         stepMs: 65_000,
@@ -361,22 +415,36 @@ export async function POST(request: Request) {
     );
     const changed = autonomousWrites && writeToolsUsed.length > 0;
     const mode = autonomousWrites ? "AUTONOMOUS" : "READ_ONLY";
-    const toolEvidence = result.steps.flatMap((step) =>
-      step.toolResults.map((toolResult) => ({
-        toolName: toolResult.toolName,
-        input: toolResult.input,
-        output: toolResult.output,
-      }))
-    );
+    const toolEvidence = [
+      ...(dateContext
+        ? [
+            {
+              toolName: "date_context_snapshot",
+              input: { date: resolvedDate.date },
+              output: dateContext,
+            },
+          ]
+        : []),
+      ...result.steps.flatMap((step) =>
+        step.toolResults.map((toolResult) => ({
+          toolName: toolResult.toolName,
+          input: toolResult.input,
+          output: toolResult.output,
+        }))
+      ),
+    ];
 
     let reply = result.text.trim();
 
-    if (!reply && toolsUsed.length > 0) {
+    if (!reply && toolEvidence.length > 0) {
       try {
         const synthesis = await generateText({
           model,
-          instructions: `You are the final-response writer for the Automatic Schedule Maker assistant. Write a concise, natural answer to the user's scheduler request using ONLY the supplied scheduler tool evidence. Do not call tools. Do not invent names, coverage, conflicts, or changes. Clearly say what date was checked or changed. If the evidence says scheduleAvailable=false, state that the schedule has not been generated for that date and ask whether the user wants you to generate it; do not infer staff availability from an ungenerated schedule. If the evidence contains detailed schedule segments, answer with those names/codes and time ranges instead of a generic assignment count. If the evidence shows uncovered work or break problems, state them. If no write tool was used, do not imply that anything was changed. If a write tool was used, distinguish completed changes from remaining problems. Sound like a helpful scheduling assistant rather than a system log.`,
-          prompt: `Clinic: ${locationName || "Clinic"}\nEffective date: ${resolvedDate.date}\nOriginal user request: ${message}\nWrite tools used: ${writeToolsUsed.join(", ") || "none"}\n\nScheduler tool evidence:\n${safeToolEvidence(toolEvidence)}`,
+          instructions: `You are the final-response writer for the Automatic Schedule Maker assistant. Answer the user's actual scheduler question using ONLY the supplied date context and scheduler tool evidence. You may discuss staff availability, client attendance/requirements, assignments, who is taking care of whom, time ranges, breaks, nap/speech, call-outs, uncovered work, unplaced work, schedule health, and completed changes. Do not invent anything. If scheduleAvailable=false for a live-calendar question, state that the schedule has not been generated and ask whether the user wants it generated. If the evidence cannot support a reliable answer, say that you couldn't generate a reliable answer and ask for a different date/person/client/time or more detail. If no write tool was used, do not imply anything changed.`,
+          prompt: `Clinic: ${locationName || "Clinic"}\nEffective date: ${resolvedDate.date}\nOriginal user request: ${message}\nWrite tools used: ${writeToolsUsed.join(", ") || "none"}\n\nScheduler evidence:\n${stringifyLimited(
+            toolEvidence,
+            MAX_TOOL_EVIDENCE_LENGTH
+          )}`,
           maxOutputTokens: 1400,
           timeout: {
             totalMs: 55_000,
@@ -397,10 +465,16 @@ export async function POST(request: Request) {
       });
     }
 
+    if (!reply && dateContext && dateContext.scheduleAvailable === false) {
+      reply = `The schedule for ${resolvedDate.date} has not been generated yet. Would you like me to generate the schedule for ${resolvedDate.date}?`;
+    }
+
     if (!reply) {
       reply =
-        "I'm unable to understand that request yet. Please explain or elaborate what you want me to check or change in the scheduler.";
+        "I couldn't generate a reliable answer from the available scheduler information. Please try again with a different date, person, client, time, or more detail.";
     }
+
+    reply = ensureConversationClosing(reply);
 
     let trainingExampleId: string | null = null;
     try {
@@ -448,7 +522,7 @@ export async function POST(request: Request) {
           ? "Scheduler AI is not connected to a usable AI Gateway model yet. Enable Vercel AI Gateway/OIDC for the project or set AI_GATEWAY_API_KEY for local development."
           : timeoutProblem
             ? "Scheduler AI reached its execution limit before finishing. Try splitting a very large scheduler request into two prompts."
-            : "Scheduler AI could not complete this request.",
+            : "Scheduler AI could not complete this request. Please try again with different or more specific scheduler information.",
       },
       { status: configurationProblem ? 503 : timeoutProblem ? 504 : 500 }
     );
