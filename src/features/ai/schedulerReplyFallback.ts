@@ -173,6 +173,48 @@ function lookupAnswer(toolEvidence: ToolEvidence[], date: string): string | null
   return `For ${date}: ${segments.map(formatLookupSegment).join("; ")}.`;
 }
 
+function replacementClashAnswer(
+  toolEvidence: ToolEvidence[],
+  date: string
+): string | null {
+  const replacement = evidenceOutput(toolEvidence, "replace_schedule_blocks");
+  if (!replacement) return null;
+  const isClash =
+    replacement.requiresOccupiedReplacementConfirmation === true ||
+    asString(replacement.confirmationType)?.includes("OCCUPIED_TARGET") === true;
+  if (!isClash) return null;
+
+  const occupied = arrayRecords(replacement.occupiedTargetCells);
+  const count =
+    asNumber(replacement.occupiedTargetCount) ?? occupied.length;
+  const details = occupied.slice(0, 8).map((record) => {
+    const staff = asString(record.staffName) || "replacement staff";
+    const time = asString(record.startTime) || "unknown time";
+    const client = asString(record.clientCode);
+    const type = asString(record.assignmentType);
+    const label = client
+      ? `${client} 1:1`
+      : type
+        ? humanAssignmentType(type)
+        : "an existing block";
+    return `${staff} at ${displayTime(time)} (${label})`;
+  });
+  const more = count > details.length ? `, plus ${count - details.length} more` : "";
+  const protectedCells = arrayRecords(replacement.protectedCells);
+
+  let answer = `The replacement has ${count} clashing occupied block${count === 1 ? "" : "s"} on ${date}`;
+  if (details.length > 0) {
+    answer += `: ${details.join("; ")}${more}`;
+  }
+  answer += ". If you still want to proceed, those existing client blocks will be moved to Unplaced while the requested replacement is applied.";
+
+  if (protectedCells.length > 0) {
+    answer += ` ${protectedCells.length} affected cell${protectedCells.length === 1 ? " is" : "s are"} also locked/manual, so that protected-cell override would need separate approval.`;
+  }
+
+  return `${answer} Do you still want to proceed with this replacement?`;
+}
+
 function writeErrors(toolEvidence: ToolEvidence[], writeToolsUsed: string[]): string[] {
   const writeNames = new Set(writeToolsUsed);
   return toolEvidence.flatMap((entry) => {
@@ -192,6 +234,9 @@ export function buildSchedulerReplyFallback({
   toolEvidence,
   writeToolsUsed,
 }: FallbackOptions): string {
+  const replacementClash = replacementClashAnswer(toolEvidence, date);
+  if (replacementClash) return replacementClash;
+
   const advisory = buildSchedulerAdvisoryReplyFallback({ date, toolEvidence });
   if (advisory) return advisory;
 

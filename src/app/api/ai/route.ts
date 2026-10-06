@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { PUT as updateScheduleBatch } from "@/app/api/schedule/batch/route";
+import { POST as repairScheduleDay } from "@/app/api/schedule/repair/route";
 import { connectToDatabase } from "@/lib/db";
 import { analyzeNaturalTimeRange } from "@/features/ai/naturalTime";
 import { ScheduleAssignment } from "@/models/ScheduleAssignment";
@@ -46,6 +47,32 @@ function isAffirmative(value: string): boolean {
     .replace(/\s+/g, " ")
     .trim();
   return /^(yes|yeah|yep|sure|ok|okay|yes please|please do|go ahead|proceed|do it|allow it|override it|yes override|yes override it|yes proceed|yes go ahead)$/.test(text);
+}
+
+function isMinimalRepairIntent(value: string): boolean {
+  const text = value.toLowerCase();
+  return (
+    /\b(?:fix|repair)\b[\s\S]*\b(?:schedule|coverage|uncovered|unplaced|clients?|gaps?)\b/.test(text) ||
+    /\b(?:cover|fill)\b[\s\S]*\b(?:uncovered|unplaced|all\s+clients?|coverage\s+gaps?)\b/.test(text) ||
+    /\bmake\s+sure\b[\s\S]*\ball\s+clients?\b[\s\S]*\bcovered\b/.test(text)
+  );
+}
+
+async function invokeRepair(body: JsonRecord): Promise<JsonRecord> {
+  const response = await repairScheduleDay(
+    new Request("http://scheduler-ai.internal/api/schedule/repair", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+  );
+  let data: JsonRecord = {};
+  try {
+    data = (await response.json()) as JsonRecord;
+  } catch {
+    data = {};
+  }
+  return { ok: response.ok, status: response.status, ...data };
 }
 
 function breakAction(value: string): BreakAction | null {
@@ -257,6 +284,163 @@ function conflictText(conflicts: unknown): string {
     .join("; ");
 }
 
+async function runMinimalRepairFallback(
+  body: AiRequestBody,
+  baseData: JsonRecord,
+  responseStatus: number
+): Promise<Response | null> {
+  const message = body.message?.trim() ?? "";
+  if (
+    !isMinimalRepairIntent(message) ||
+    breakAction(message) !== null ||
+    baseData.mode !== "AUTONOMOUS" ||
+    baseData.changed === true
+  ) {
+    return null;
+  }
+
+  const baseReply = String(baseData.reply ?? "");
+  if (
+    /which day|what date|has not been generated|would you like me to generate|want to make sure i understood/i.test(
+      baseReply
+    )
+  ) {
+    return null;
+  }
+
+  const locationId = body.locationId?.trim() ?? "";
+  const date = String(baseData.effectiveDate ?? body.date ?? "");
+  if (!locationId || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return null;
+  }
+
+  await connectToDatabase();
+  const savedCount = await ScheduleAssignment.countDocuments({
+    locationId,
+    date,
+  });
+  if (savedCount === 0) {
+    return NextResponse.json({
+      ...baseData,
+      reply:
+        "The schedule for " +
+        date +
+        " has not been generated yet. Would you like me to generate the schedule for " +
+        date +
+        "?",
+      changed: false,
+      writeToolsUsed: [],
+      effectiveDate: date,
+    });
+  }
+
+  const repair = await invokeRepair({
+    locationId,
+    date,
+    mode: "COVERAGE",
+  });
+
+  if (!repair.ok) {
+    return NextResponse.json(
+      {
+        ...baseData,
+        reply:
+          "I could not complete the minimal schedule repair for " +
+          date +
+          ": " +
+          String(repair.error ?? "the scheduler rejected the repair") +
+          ". No additional repair changes were made.",
+        changed: false,
+        writeToolsUsed: [],
+        effectiveDate: date,
+      },
+      { status: responseStatus }
+    );
+  }
+
+  const metrics =
+    repair.metrics && typeof repair.metrics === "object"
+      ? (repair.metrics as JsonRecord)
+      : {};
+  const covered = Number(metrics.coveredClientSlots ?? 0);
+  const required = Number(metrics.requiredClientSlots ?? 0);
+  const uncovered = Number(metrics.uncoveredClientSlots ?? 0);
+  const priority = Number(repair.priorityUnplacedCount ?? 0);
+  const resolved = Number(repair.resolvedUnplacedCount ?? 0);
+  const remainingUnplaced = Number(repair.unplacedRemainingCount ?? 0);
+  const added = Number(repair.addedAssignmentCount ?? 0);
+  const removed = Number(repair.removedAssignmentCount ?? 0);
+  const uncoveredItems = Array.isArray(repair.uncoveredRequirements)
+    ? (repair.uncoveredRequirements as JsonRecord[])
+    : [];
+
+  const unresolvedText =
+    uncoveredItems.length > 0
+      ? " Remaining uncovered: " +
+        uncoveredItems
+          .slice(0, 8)
+          .map((item) => {
+            const code = String(item.clientCode ?? "client");
+            const start = String(item.startTime ?? "");
+            return code + " at " + (start ? displayTime(start) : "unknown time");
+          })
+          .join(", ") +
+        (uncoveredItems.length > 8
+          ? ", plus " + String(uncoveredItems.length - 8) + " more"
+          : "") +
+        "."
+      : "";
+
+  let reply = "Done. I minimally repaired the schedule for " + date + ". ";
+  if (priority > 0) {
+    reply +=
+      "I handled existing Unplaced assignments first and resolved " +
+      resolved +
+      " of " +
+      priority +
+      ". ";
+  }
+  reply +=
+    "Then I filled the remaining coverage gaps while preserving the working schedule wherever possible. " +
+    covered +
+    "/" +
+    required +
+    " required client blocks are covered, with " +
+    uncovered +
+    " still uncovered. " +
+    "The repair added " +
+    added +
+    " assignment" +
+    (added === 1 ? "" : "s") +
+    " and moved/removed " +
+    removed +
+    " existing AUTO assignment" +
+    (removed === 1 ? "" : "s") +
+    ". " +
+    remainingUnplaced +
+    " assignment" +
+    (remainingUnplaced === 1 ? " remains" : "s remain") +
+    " in Unplaced." +
+    unresolvedText;
+  if (uncovered === 0 && remainingUnplaced === 0) {
+    reply += "\n\nIs there anything else you would like help with?";
+  }
+
+  return NextResponse.json({
+    ...baseData,
+    reply,
+    toolsUsed: [
+      ...new Set([
+        ...(Array.isArray(baseData.toolsUsed) ? baseData.toolsUsed : []),
+        "repair_schedule",
+      ]),
+    ],
+    writeToolsUsed: ["repair_schedule"],
+    changed: added > 0 || removed > 0 || resolved > 0,
+    effectiveDate: date,
+  });
+}
+
 export async function POST(request: Request) {
   const rawBody = await request.text();
   let body: AiRequestBody;
@@ -291,7 +475,20 @@ export async function POST(request: Request) {
     return baseResponse;
   }
 
-  if (!baseResponse.ok || !pendingBreak || baseData.mode !== "AUTONOMOUS") {
+  if (!baseResponse.ok) {
+    return NextResponse.json(baseData, { status: baseResponse.status });
+  }
+
+  const minimalRepairResponse = await runMinimalRepairFallback(
+    body,
+    baseData,
+    baseResponse.status
+  );
+  if (minimalRepairResponse) {
+    return minimalRepairResponse;
+  }
+
+  if (!pendingBreak || baseData.mode !== "AUTONOMOUS") {
     return NextResponse.json(baseData, { status: baseResponse.status });
   }
 
