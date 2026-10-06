@@ -46,7 +46,8 @@ function setNativeInputValue(input: HTMLInputElement, value: string) {
 }
 
 export function ScheduleWorkspaceShell() {
-  const [scheduleRefreshKey, setScheduleRefreshKey] = useState(0);
+  const [staffReloadKey, setStaffReloadKey] = useState(0);
+  const [clientRefreshKey, setClientRefreshKey] = useState(0);
   const [view, setView] = useState<ScheduleView>("STAFF");
   const [activeDate, setActiveDate] = useState(getTodayForDateInput);
   const [context, setContext] = useState<WorkspaceContext | null>(null);
@@ -78,6 +79,7 @@ export function ScheduleWorkspaceShell() {
 
   const selectDate = useCallback((date: string, explicit = true) => {
     setActiveDate(date);
+    setClientRefreshKey((current) => current + 1);
     const input = document.querySelector(
       '.schedule-context-controls input[type="date"]'
     ) as HTMLInputElement | null;
@@ -98,7 +100,18 @@ export function ScheduleWorkspaceShell() {
       setNativeInputValue(input, activeDate);
     }, 80);
     return () => window.clearTimeout(timer);
-  }, [scheduleRefreshKey, activeDate, context?.dateSelectionExplicit]);
+  }, [staffReloadKey, activeDate, context?.dateSelectionExplicit]);
+
+  function handleViewChange(nextView: ScheduleView) {
+    setView(nextView);
+    if (nextView === "CLIENT") {
+      // The Client Schedule is a projection of the exact same saved day
+      // assignments used by the Staff Schedule. Force a fresh read whenever
+      // managers switch to it so every manual staff edit is reflected.
+      setClientRefreshKey((current) => current + 1);
+      window.setTimeout(syncFromWorkspace, 0);
+    }
+  }
 
   function handleAiChanged(effectiveDate?: string) {
     if (effectiveDate) {
@@ -109,22 +122,25 @@ export function ScheduleWorkspaceShell() {
           : current
       );
     }
-    setScheduleRefreshKey((current) => current + 1);
+    // AI changes can affect both staff assignments and the client-centric
+    // projection, so refresh both views from the shared saved schedule.
+    setStaffReloadKey((current) => current + 1);
+    setClientRefreshKey((current) => current + 1);
   }
 
   return (
     <>
       <SchedulerCalendarViews
         view={view}
-        onViewChange={setView}
+        onViewChange={handleViewChange}
         activeDate={activeDate}
         onActiveDateChange={selectDate}
         context={context}
-        refreshKey={scheduleRefreshKey}
+        refreshKey={clientRefreshKey}
       />
 
       <div style={{ display: view === "STAFF" ? "block" : "none" }}>
-        <ScheduleWorkspaceV3 key={scheduleRefreshKey} />
+        <ScheduleWorkspaceV3 key={staffReloadKey} />
       </div>
 
       <ScheduleAssistant onScheduleChanged={handleAiChanged} />
