@@ -1,0 +1,289 @@
+.calendarBar {
+  margin: 0 0 14px;
+  border: 1px solid #d6e3ee;
+  border-radius: 14px;
+  background: #ffffff;
+  padding: 14px;
+  box-shadow: 0 8px 24px rgba(29, 67, 99, 0.06);
+}
+
+.weekHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.weekHeader > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.eyebrow {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #51708a;
+}
+
+.weekActions {
+  display: flex;
+  gap: 8px;
+}
+
+.weekActions button,
+.viewTab,
+.viewTabActive,
+.dayTab,
+.dayTabActive {
+  border: 1px solid #cbdbe8;
+  background: #ffffff;
+  color: #16334a;
+  border-radius: 10px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.weekActions button {
+  padding: 8px 12px;
+  font-weight: 700;
+}
+
+.dayTabs {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.dayTab,
+.dayTabActive {
+  padding: 10px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: center;
+}
+
+.dayTab span,
+.dayTabActive span {
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.dayTab strong,
+.dayTabActive strong {
+  font-size: 0.92rem;
+}
+
+.dayTabActive {
+  background: #0f6f9c;
+  border-color: #0f6f9c;
+  color: #ffffff;
+  box-shadow: 0 5px 14px rgba(15, 111, 156, 0.22);
+}
+
+.viewTabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.viewTab,
+.viewTabActive {
+  padding: 12px 14px;
+  text-align: left;
+  font-weight: 800;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.viewTab small,
+.viewTabActive small {
+  font-weight: 500;
+  color: #688196;
+}
+
+.viewTabActive {
+  background: #e9f5fb;
+  border-color: #79b8d6;
+  color: #0d4f71;
+}
+
+.viewTabActive small {
+  color: #356c87;
+}
+
+.clientPanel {
+  border: 1px solid #d6e3ee;
+  border-radius: 14px;
+  background: #ffffff;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(29, 67, 99, 0.06);
+}
+
+.clientPanelHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 16px;
+  border-bottom: 1px solid #dfe8ef;
+  background: #f8fbfd;
+}
+
+.clientPanelHeader h2 {
+  margin: 2px 0 4px;
+  color: #15364f;
+}
+
+.clientPanelHeader p {
+  margin: 0;
+  color: #5d7487;
+  max-width: 760px;
+  font-size: 0.9rem;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-content: flex-start;
+  justify-content: flex-end;
+  font-size: 0.78rem;
+  color: #526b7e;
+}
+
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.legend i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  display: inline-block;
+}
+
+.legendCoverage { background: #d7eef8; }
+.legendNap { background: #fff0c7; }
+.legendSpeech { background: #e7ddf8; }
+.legendUncovered { background: #f7caca; }
+
+.clientGridScroll {
+  overflow: auto;
+  max-height: 68vh;
+}
+
+.clientGrid {
+  border-collapse: separate;
+  border-spacing: 0;
+  min-width: 100%;
+  width: max-content;
+  font-size: 0.82rem;
+}
+
+.clientGrid th,
+.clientGrid td {
+  min-width: 126px;
+  height: 48px;
+  border-right: 1px solid #cbd9e4;
+  border-bottom: 1px solid #cbd9e4;
+  padding: 0;
+  background: #ffffff;
+}
+
+.clientGrid thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: #cfe1f1;
+  color: #173950;
+  padding: 8px;
+  font-weight: 800;
+}
+
+.clientGrid th:first-child {
+  min-width: 150px;
+  position: sticky;
+  left: 0;
+  z-index: 4;
+  background: #e8f1f7;
+  padding: 8px;
+  text-align: left;
+}
+
+.clientGrid thead th:first-child {
+  z-index: 5;
+  background: #cfe1f1;
+}
+
+.clientDot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  margin-right: 6px;
+}
+
+.clientCell {
+  min-height: 48px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+}
+
+.clientCell strong {
+  color: #173950;
+}
+
+.clientCell span {
+  font-size: 0.72rem;
+  color: #587183;
+}
+
+.clientCell_coverage { background: #dff2fa; }
+.clientCell_nap { background: #fff2c9; }
+.clientCell_speech { background: #ece3fb; }
+.clientCell_uncovered { background: #f9d5d5; }
+
+.emptyState,
+.errorState {
+  padding: 28px;
+  text-align: center;
+  color: #607789;
+}
+
+.errorState {
+  color: #9a3333;
+  background: #fff5f5;
+}
+
+@media (max-width: 800px) {
+  .weekHeader,
+  .clientPanelHeader {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .dayTabs {
+    grid-template-columns: repeat(5, minmax(76px, 1fr));
+    overflow-x: auto;
+  }
+
+  .viewTabs {
+    grid-template-columns: 1fr;
+  }
+
+  .legend {
+    justify-content: flex-start;
+  }
+}
