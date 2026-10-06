@@ -567,10 +567,6 @@ export function repairCoverageMinimally(
 
     if (bestStaffMember) {
       assignments.push(createAutoAssignment(bestStaffMember, requirement));
-      warnings.push({
-        code: "MINIMAL_COVERAGE_FILL",
-        message: `${requirement.client.displayCode} at ${requirement.startTime} was filled without moving an existing assignment.`,
-      });
       continue;
     }
 
