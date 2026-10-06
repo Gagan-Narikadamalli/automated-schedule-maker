@@ -475,7 +475,20 @@ export async function POST(request: Request) {
     return baseResponse;
   }
 
-  if (!baseResponse.ok || !pendingBreak || baseData.mode !== "AUTONOMOUS") {
+  if (!baseResponse.ok) {
+    return NextResponse.json(baseData, { status: baseResponse.status });
+  }
+
+  const minimalRepairResponse = await runMinimalRepairFallback(
+    body,
+    baseData,
+    baseResponse.status
+  );
+  if (minimalRepairResponse) {
+    return minimalRepairResponse;
+  }
+
+  if (!pendingBreak || baseData.mode !== "AUTONOMOUS") {
     return NextResponse.json(baseData, { status: baseResponse.status });
   }
 
