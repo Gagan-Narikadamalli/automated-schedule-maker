@@ -1,12 +1,15 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
+import { SchedulerInteractionPolish } from "@/components/SchedulerInteractionPolish";
+
 import "./globals.css";
 import "./management.css";
 import "./navigation.css";
 import "./scheduler-enhancements.css";
 import "./responsive-management.css";
 import "./ui-polish.css";
+import "./scheduler-interaction-polish.css";
 
 export const metadata: Metadata = {
   title: "SOS Automated Schedule Maker",
@@ -21,7 +24,10 @@ type RootLayoutProps = {
 export default function RootLayout({ children }: RootLayoutProps) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        {children}
+        <SchedulerInteractionPolish />
+      </body>
     </html>
   );
 }
