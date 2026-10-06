@@ -143,11 +143,12 @@ export async function POST(request: Request) {
             status: "UNPLACED",
             clientId: { $ne: null },
           })
-            .select("clientId originalStartTime createdAt")
+            .select("_id clientId originalStartTime createdAt")
             .sort({ createdAt: 1 })
             .lean()) as unknown as Array<{
             clientId?: unknown;
             originalStartTime?: unknown;
+            _id?: unknown;
           }>)
         : [];
 
@@ -233,6 +234,18 @@ export async function POST(request: Request) {
       result.assignments
     );
 
+    const priorityUnplacedIds = priorityUnplaced
+      .map((record) => record._id)
+      .filter(Boolean);
+    const unresolvedPriorityCount =
+      repairMode === "COVERAGE" && priorityUnplacedIds.length > 0
+        ? await UnplacedAssignment.countDocuments({
+            _id: { $in: priorityUnplacedIds },
+            locationId,
+            date,
+            status: "UNPLACED",
+          })
+        : 0;
     const unplacedRemainingCount =
       repairMode === "COVERAGE"
         ? await UnplacedAssignment.countDocuments({
@@ -243,7 +256,7 @@ export async function POST(request: Request) {
         : 0;
     const resolvedUnplacedCount =
       repairMode === "COVERAGE"
-        ? Math.max(priorityRequirements.length - unplacedRemainingCount, 0)
+        ? Math.max(priorityUnplacedIds.length - unresolvedPriorityCount, 0)
         : 0;
 
     await writeAuditLog({
