@@ -8,6 +8,7 @@ import {
 import { createSchedulerAdvisoryTools } from "@/features/ai/schedulerAdvisoryTools";
 import { buildSchedulerDateContextSnapshot } from "@/features/ai/schedulerDateContext";
 import { buildSchedulerDateContextFallback } from "@/features/ai/schedulerDateContextFallback";
+import { analyzeNaturalTimeRange, naturalTimeConfirmationQuestion } from "@/features/ai/naturalTime";
 import { buildSchedulerAiInstructions } from "@/features/ai/schedulerPrompt";
 import { buildSchedulerReplyFallback } from "@/features/ai/schedulerReplyFallback";
 import { createSchedulerReadOnlyTools } from "@/features/ai/schedulerTools";
@@ -374,6 +375,26 @@ export async function POST(request: Request) {
       userId: auth.session.userId,
     };
 
+    const naturalTime = analyzeNaturalTimeRange(message);
+    if (naturalTime.status === "CONFIRM") {
+      const mode = autonomousWrites ? "AUTONOMOUS" : "READ_ONLY";
+      const response: SchedulerAiResponse = {
+        reply: naturalTimeConfirmationQuestion(naturalTime),
+        trainingExampleId: null,
+        toolsUsed: [],
+        writeToolsUsed: [],
+        changed: false,
+        mode,
+        effectiveDate: resolvedDate.date,
+      };
+      return NextResponse.json(response);
+    }
+
+    const normalizedMessage =
+      naturalTime.status === "PARSED"
+        ? `${message}\n\n[SCHEDULER TIME NORMALIZATION: The user's intended time range was deterministically parsed as ${naturalTime.normalizedText} (${naturalTime.startTime}-${naturalTime.endTime}). Use these exact times for scheduler lookups and tool calls.]`
+        : message;
+
     let dateContext: Awaited<ReturnType<typeof buildSchedulerDateContextSnapshot>> | null = null;
     if (resolvedDate.source !== "PASSIVE_SELECTION") {
       try {
@@ -415,7 +436,7 @@ export async function POST(request: Request) {
     });
 
     const result = await agent.generate({
-      prompt: buildConversationPrompt(history, message, dateContext),
+      prompt: buildConversationPrompt(history, normalizedMessage, dateContext),
       timeout: {
         totalMs: 260_000,
         stepMs: 65_000,
