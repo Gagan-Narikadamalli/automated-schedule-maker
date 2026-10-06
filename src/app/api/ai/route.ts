@@ -310,7 +310,7 @@ async function runMinimalRepairFallback(
 
   const locationId = body.locationId?.trim() ?? "";
   const date = String(baseData.effectiveDate ?? body.date ?? "");
-  if (!locationId || !/^\\d{4}-\\d{2}-\\d{2}$/.test(date)) {
+  if (!locationId || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     return null;
   }
 
@@ -423,7 +423,7 @@ async function runMinimalRepairFallback(
     " in Unplaced." +
     unresolvedText;
   if (uncovered === 0 && remainingUnplaced === 0) {
-    reply += "\\n\\nIs there anything else you would like help with?";
+    reply += "\n\nIs there anything else you would like help with?";
   }
 
   return NextResponse.json({
