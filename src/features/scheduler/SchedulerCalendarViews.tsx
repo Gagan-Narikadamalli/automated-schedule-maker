@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { DAILY_TIME_SLOTS } from "./constants";
 import styles from "./SchedulerCalendarViews.module.css";
@@ -25,6 +25,7 @@ type ClientRef = {
 type ScheduleStaff = {
   id: string;
   name: string;
+  color?: string;
 };
 
 type ScheduleAssignment = {
@@ -54,6 +55,7 @@ type UnplacedRecord = {
   id: string;
   clientId: string | null;
   clientCode: string | null;
+  clientColor?: string | null;
   originalStartTime: string;
 };
 
@@ -69,6 +71,19 @@ type SchedulerCalendarViewsProps = {
   onActiveDateChange: (date: string, explicit?: boolean) => void;
   context: WorkspaceContext | null;
   refreshKey: number;
+};
+
+type ClientColumn = {
+  id: string;
+  code: string;
+  name: string;
+  color: string;
+};
+
+type ClientCellResult = {
+  text: string;
+  detail: string;
+  kind: "coverage" | "nap" | "speech" | "uncovered";
 };
 
 function parseLocalDate(dateText: string): Date {
@@ -130,6 +145,19 @@ function timeLabel(time: string): string {
   const suffix = hour >= 12 ? "PM" : "AM";
   const twelveHour = hour % 12 || 12;
   return `${twelveHour}:${minute} ${suffix}`;
+}
+
+function accentForKind(kind: ClientCellResult["kind"]): string {
+  switch (kind) {
+    case "nap":
+      return "#E6B84A";
+    case "speech":
+      return "#8C72D9";
+    case "uncovered":
+      return "#E76B73";
+    default:
+      return "rgba(16, 80, 122, 0.22)";
+  }
 }
 
 export function SchedulerCalendarViews({
@@ -199,12 +227,13 @@ export function SchedulerCalendarViews({
           onClick={() => onViewChange("CLIENT")}
         >
           Client Schedule
-          <small>Coverage, Nap, Speech, and uncovered time</small>
+          <small>Live projection of the same saved day: coverage, Nap, Speech, and uncovered time</small>
         </button>
       </div>
 
       {view === "CLIENT" && (
         <ClientScheduleView
+          key={`${context?.locationId ?? "clinic"}-${activeDate}-${refreshKey}`}
           locationId={context?.locationId ?? ""}
           locationName={context?.locationName ?? "Clinic"}
           date={activeDate}
@@ -232,57 +261,62 @@ function ClientScheduleView({
   const [assignments, setAssignments] = useState<ScheduleAssignment[]>([]);
   const [unplaced, setUnplaced] = useState<UnplacedRecord[]>([]);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
-      if (!locationId || !date || locationId.startsWith("demo-")) {
-        setLoading(false);
-        return;
-      }
-      try {
-        setLoading(true);
-        setError("");
-        const [scheduleResponse, unplacedResponse] = await Promise.all([
-          fetch(`/api/schedule?locationId=${encodeURIComponent(locationId)}&date=${encodeURIComponent(date)}`, { cache: "no-store" }),
-          fetch(`/api/unplaced?locationId=${encodeURIComponent(locationId)}&date=${encodeURIComponent(date)}`, { cache: "no-store" }),
-        ]);
-        const scheduleData = (await scheduleResponse.json()) as ScheduleResponse;
-        const unplacedData = (await unplacedResponse.json()) as UnplacedResponse;
-        if (!scheduleResponse.ok) throw new Error(scheduleData.error || "Client schedule could not be loaded.");
-        if (!unplacedResponse.ok) throw new Error(unplacedData.error || "Unplaced coverage could not be loaded.");
-        if (cancelled) return;
-        setStaff(scheduleData.staff ?? []);
-        setAssignments(scheduleData.assignments ?? []);
-        setUnplaced(unplacedData.unplacedAssignments ?? []);
-      } catch (loadError) {
-        if (!cancelled) setError(loadError instanceof Error ? loadError.message : "Client schedule could not be loaded.");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+  const load = useCallback(async (silent = false) => {
+    if (!locationId || !date || locationId.startsWith("demo-")) {
+      setLoading(false);
+      return;
     }
+    try {
+      if (!silent) setLoading(true);
+      setError("");
+      const [scheduleResponse, unplacedResponse] = await Promise.all([
+        fetch(`/api/schedule?locationId=${encodeURIComponent(locationId)}&date=${encodeURIComponent(date)}`, { cache: "no-store" }),
+        fetch(`/api/unplaced?locationId=${encodeURIComponent(locationId)}&date=${encodeURIComponent(date)}`, { cache: "no-store" }),
+      ]);
+      const scheduleData = (await scheduleResponse.json()) as ScheduleResponse;
+      const unplacedData = (await unplacedResponse.json()) as UnplacedResponse;
+      if (!scheduleResponse.ok) throw new Error(scheduleData.error || "Client schedule could not be loaded.");
+      if (!unplacedResponse.ok) throw new Error(unplacedData.error || "Unplaced coverage could not be loaded.");
+      setStaff(scheduleData.staff ?? []);
+      setAssignments(scheduleData.assignments ?? []);
+      setUnplaced(unplacedData.unplacedAssignments ?? []);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Client schedule could not be loaded.");
+    } finally {
+      if (!silent) setLoading(false);
+    }
+  }, [locationId, date]);
 
-    void load();
-    return () => { cancelled = true; };
-  }, [locationId, date, refreshKey]);
+  useEffect(() => {
+    void load(false);
+  }, [load, refreshKey]);
+
+  useEffect(() => {
+    function handleFocus() {
+      void load(true);
+    }
+    window.addEventListener("focus", handleFocus);
+    return () => window.removeEventListener("focus", handleFocus);
+  }, [load]);
 
   const staffNameById = useMemo(
     () => new Map(staff.map((member) => [member.id, member.name])),
     [staff]
   );
 
-  const clients = useMemo(() => {
-    const byId = new Map<string, { id: string; code: string; name: string; color: string }>();
+  const clients = useMemo<ClientColumn[]>(() => {
+    const byId = new Map<string, ClientColumn>();
     for (const assignment of assignments) {
       const id = clientId(assignment);
       if (!id) continue;
       const client = clientObject(assignment);
       const code = client?.displayCode || "Client";
+      const existing = byId.get(id);
       byId.set(id, {
         id,
-        code,
-        name: client?.fullName || code,
-        color: client?.color || "#D9F4EE",
+        code: existing?.code || code,
+        name: existing?.name || client?.fullName || code,
+        color: client?.color || existing?.color || "#D9F4EE",
       });
     }
     for (const record of unplaced) {
@@ -292,14 +326,14 @@ function ClientScheduleView({
           id: record.clientId,
           code: record.clientCode || "Client",
           name: record.clientCode || "Client",
-          color: "#FDECEC",
+          color: record.clientColor || "#FDECEC",
         });
       }
     }
     return [...byId.values()].sort((a, b) => a.code.localeCompare(b.code));
   }, [assignments, unplaced]);
 
-  function cellFor(clientIdValue: string, startTime: string) {
+  function cellFor(clientIdValue: string, startTime: string): ClientCellResult | null {
     const matching = assignments.filter(
       (assignment) => clientId(assignment) === clientIdValue && assignment.startTime === startTime
     );
@@ -366,10 +400,10 @@ function ClientScheduleView({
         <div>
           <span className={styles.eyebrow}>CLIENT COVERAGE VIEW</span>
           <h2>{locationName} · {longDate(date)}</h2>
-          <p>Nap and speech stay visible in the client view. If another staff member covers the client while someone is on break, the covering staff member is shown in the same cell.</p>
+          <p>This view is rebuilt from the same saved assignments as Staff Schedule. Manual staff edits therefore change this client view for the same date, and each client's normal coverage keeps the same client color in both views.</p>
         </div>
         <div className={styles.legend}>
-          <span><i className={styles.legendCoverage} />1:1 coverage</span>
+          <span><i className={styles.legendCoverage} />Client color = 1:1 coverage</span>
           <span><i className={styles.legendNap} />Nap</span>
           <span><i className={styles.legendSpeech} />Speech</span>
           <span><i className={styles.legendUncovered} />Needs coverage</span>
@@ -385,7 +419,7 @@ function ClientScheduleView({
               <tr>
                 <th>Time</th>
                 {clients.map((client) => (
-                  <th key={client.id}>
+                  <th key={client.id} title={client.name}>
                     <span className={styles.clientDot} style={{ backgroundColor: client.color }} />
                     {client.code}
                   </th>
@@ -398,10 +432,17 @@ function ClientScheduleView({
                   <th>{timeLabel(slot.startTime)}</th>
                   {clients.map((client) => {
                     const cell = cellFor(client.id, slot.startTime);
+                    const preserveClientColor = cell?.kind === "coverage";
                     return (
                       <td key={`${client.id}-${slot.startTime}`}>
                         {cell ? (
-                          <div className={`${styles.clientCell} ${styles[`clientCell_${cell.kind}`]}`}>
+                          <div
+                            className={`${styles.clientCell} ${styles[`clientCell_${cell.kind}`]}`}
+                            style={{
+                              ...(preserveClientColor ? { background: client.color } : {}),
+                              borderLeft: `4px solid ${preserveClientColor ? client.color : accentForKind(cell.kind)}`,
+                            }}
+                          >
                             <strong>{cell.text}</strong>
                             <span>{cell.detail}</span>
                           </div>
