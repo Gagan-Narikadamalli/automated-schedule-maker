@@ -19,7 +19,9 @@ import {
 import { connectToDatabase } from "@/lib/db";
 import { AITrainingExample } from "@/models/AITrainingExample";
 
-const DEFAULT_SCHEDULER_AI_MODEL = "openai/gpt-5.4";
+export const maxDuration = 180;
+
+const DEFAULT_SCHEDULER_AI_MODEL = "openai/gpt-5-nano";
 const MAX_MESSAGE_LENGTH = 3000;
 
 function cleanLocationName(value: unknown): string | undefined {
@@ -101,8 +103,8 @@ export async function POST(request: Request) {
     const result = await agent.generate({
       prompt: message,
       timeout: {
-        totalMs: 75_000,
-        stepMs: 20_000,
+        totalMs: 160_000,
+        stepMs: 55_000,
       },
     });
 
@@ -159,14 +161,17 @@ export async function POST(request: Request) {
       /gateway|api.?key|oidc|unauthorized|authentication|credit|model.*not found/i.test(
         message
       );
+    const timeoutProblem = /abort|timeout|timed out/i.test(message);
 
     return NextResponse.json(
       {
         error: configurationProblem
           ? "Scheduler AI is not connected to a usable AI Gateway model yet. Enable Vercel AI Gateway/OIDC for the project or set AI_GATEWAY_API_KEY for local development."
-          : "Scheduler AI could not complete this request.",
+          : timeoutProblem
+            ? "Scheduler AI reached its execution limit before finishing. Try a more focused scheduler request."
+            : "Scheduler AI could not complete this request.",
       },
-      { status: configurationProblem ? 503 : 500 }
+      { status: configurationProblem ? 503 : timeoutProblem ? 504 : 500 }
     );
   }
 }
