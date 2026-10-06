@@ -24,6 +24,7 @@ type SchedulerAiResponse = {
   writeToolsUsed?: string[];
   changed?: boolean;
   mode?: SchedulerAiMode;
+  effectiveDate?: string;
   error?: string;
 };
 
@@ -39,10 +40,11 @@ type WorkspaceContext = {
   locationId: string;
   locationName: string;
   date: string;
+  dateSelectionExplicit: boolean;
 };
 
 type ScheduleAssistantProps = {
-  onScheduleChanged?: () => void;
+  onScheduleChanged?: (effectiveDate?: string) => void;
 };
 
 type SavedPromptGroup = {
@@ -108,6 +110,16 @@ function makeId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function setNativeInputValue(input: HTMLInputElement, value: string) {
+  const descriptor = Object.getOwnPropertyDescriptor(
+    HTMLInputElement.prototype,
+    "value"
+  );
+  descriptor?.set?.call(input, value);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
 function readWorkspaceContext(): WorkspaceContext | null {
   if (typeof document === "undefined") return null;
 
@@ -125,7 +137,12 @@ function readWorkspaceContext(): WorkspaceContext | null {
   const date = dateInput?.value?.trim() ?? "";
 
   if (!locationId || !date || locationId.startsWith("demo-")) return null;
-  return { locationId, locationName, date };
+  return {
+    locationId,
+    locationName,
+    date,
+    dateSelectionExplicit: dateInput?.dataset.aiDateExplicit === "true",
+  };
 }
 
 export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps) {
@@ -134,6 +151,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
   const [locations, setLocations] = useState<LocationOption[]>([]);
   const [locationId, setLocationId] = useState("");
   const [date, setDate] = useState(getTodayForDateInput);
+  const [dateSelectionExplicit, setDateSelectionExplicit] = useState(false);
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [working, setWorking] = useState(false);
@@ -163,6 +181,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
         if (workspaceContext) {
           setLocationId(workspaceContext.locationId);
           setDate(workspaceContext.date);
+          setDateSelectionExplicit(workspaceContext.dateSelectionExplicit);
         } else if (nextLocations.length > 0) {
           setLocationId(nextLocations[0].id);
         }
@@ -184,6 +203,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     if (!workspaceContext) return;
     setLocationId(workspaceContext.locationId);
     setDate(workspaceContext.date);
+    setDateSelectionExplicit(workspaceContext.dateSelectionExplicit);
     setStatus(
       `Linked to ${workspaceContext.locationName} on ${workspaceContext.date}.`
     );
@@ -198,6 +218,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
       if (workspaceContext.date !== date) {
         setDate(workspaceContext.date);
       }
+      setDateSelectionExplicit(workspaceContext.dateSelectionExplicit);
       return workspaceContext;
     }
 
@@ -205,7 +226,21 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
       locationId,
       locationName,
       date,
+      dateSelectionExplicit,
     };
+  }
+
+  function chooseAssistantDate(nextDate: string) {
+    setDate(nextDate);
+    setDateSelectionExplicit(true);
+    const workspaceDateInput = document.querySelector(
+      '.schedule-context-controls input[type="date"]'
+    ) as HTMLInputElement | null;
+    if (workspaceDateInput) {
+      workspaceDateInput.dataset.aiDateExplicit = "true";
+      setNativeInputValue(workspaceDateInput, nextDate);
+    }
+    setStatus(`Date selected for Scheduler AI: ${nextDate}.`);
   }
 
   function chooseSavedPrompt(prompt: string) {
@@ -220,6 +255,10 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     const requestContext = getRequestContext();
     if (!message || !requestContext.locationId || working) return;
 
+    const history = messages
+      .slice(-12)
+      .map((entry) => ({ role: entry.role, text: entry.text }));
+
     const userMessage: ChatMessage = {
       id: makeId("user"),
       role: "user",
@@ -230,7 +269,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     setInput("");
     setShowHelp(false);
     setWorking(true);
-    setStatus("Scheduler AI is analyzing the request, checking live data, and deciding the necessary actions...");
+    setStatus("Scheduler AI is analyzing the conversation, resolving the intended date, and deciding the necessary actions...");
 
     try {
       const response = await fetch("/api/ai", {
@@ -241,6 +280,8 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
           locationId: requestContext.locationId,
           locationName: requestContext.locationName,
           date: requestContext.date,
+          dateSelectionExplicit: requestContext.dateSelectionExplicit,
+          history,
         }),
       });
       const data = (await response.json()) as SchedulerAiResponse;
@@ -258,17 +299,21 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
       ]);
 
       if (data.changed) {
-        onScheduleChanged?.();
+        onScheduleChanged?.(data.effectiveDate);
+        if (data.effectiveDate) {
+          setDate(data.effectiveDate);
+          setDateSelectionExplicit(true);
+        }
         setStatus(
           data.writeToolsUsed?.length
-            ? `Scheduler website updated and live calendar refreshed. Actions: ${data.writeToolsUsed.join(", ")}`
-            : "Scheduler website updated and live calendar refreshed."
+            ? `Scheduler website updated for ${data.effectiveDate || requestContext.date}. Actions: ${data.writeToolsUsed.join(", ")}`
+            : `Scheduler website updated for ${data.effectiveDate || requestContext.date}.`
         );
       } else {
         setStatus(
           data.toolsUsed?.length
             ? `${data.mode === "AUTONOMOUS" ? "Autonomous" : "Read-only"} scheduler run used: ${data.toolsUsed.join(", ")}`
-            : "Scheduler AI request complete."
+            : "Scheduler AI request complete. Continue the conversation if the AI asked for a date or another required detail."
         );
       }
     } catch (error) {
@@ -369,10 +414,10 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
             </strong>
             <span>
               {mode === "AUTONOMOUS"
-                ? "Can analyze normal language and operate the scheduler website through its existing rules and APIs."
+                ? "Can analyze normal language, ask follow-up questions, resolve dates, and operate the scheduler through its existing rules and APIs."
                 : mode === "READ_ONLY"
                   ? "Can inspect the scheduler website but write actions are disabled."
-                  : "Type any scheduler-related request. Exact commands are not required."}
+                  : "Type any scheduler-related request. If a required date is missing, the AI will ask instead of guessing."}
             </span>
           </div>
 
@@ -398,13 +443,13 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
                 type="date"
                 value={date}
                 disabled={working}
-                onChange={(event) => setDate(event.target.value)}
+                onChange={(event) => chooseAssistantDate(event.target.value)}
               />
             </label>
           </div>
 
           <div className={styles.promptHint}>
-            <span>Ask naturally — for example, “Ana is out until noon, fix the schedule.”</span>
+            <span>Ask naturally — “Anias is out” will ask for a date; “Anias is out today” can act immediately.</span>
             <button
               type="button"
               disabled={working}
@@ -443,7 +488,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
           <div className={styles.messages} aria-live="polite">
             {messages.length === 0 ? (
               <div className={styles.emptyState}>
-                Type any request related to the scheduler website. The AI can inspect and change schedules, staff/client setup, call-outs, attendance, naps, speech, teams, rules, and supervision using the existing scheduler validations.
+                Type any request related to the scheduler website. The AI can inspect and change schedules, staff/client setup, call-outs, attendance, naps, speech, teams, rules, and supervision. It keeps the conversation so you can answer follow-up questions without repeating the original request.
               </div>
             ) : (
               messages.map((message) => (
@@ -525,7 +570,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
             )}
             {working && (
               <div className={styles.thinking}>
-                Analyzing the request and working through the scheduler…
+                Analyzing the conversation and working through the scheduler…
               </div>
             )}
           </div>
