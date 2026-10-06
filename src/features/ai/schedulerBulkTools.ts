@@ -23,6 +23,7 @@ type ReplacementInput = {
   endTime?: string;
   allowLockedOverride?: boolean;
   allowRuleOverride?: boolean;
+  allowOccupiedReplacement?: boolean;
 };
 
 type PlaceUnplacedInput = {
@@ -84,6 +85,11 @@ const replaceSchema = jsonSchema<ReplacementInput>({
     allowRuleOverride: {
       type: "boolean",
       description: "Set true only after the user explicitly approves the exact scheduler-rule conflicts returned by the first attempt.",
+    },
+    allowOccupiedReplacement: {
+      type: "boolean",
+      description:
+        "Set true only after the user confirms that the replacement may displace ordinary occupied destination blocks. This is a replacement-clash confirmation, not a scheduler-rule override.",
     },
   },
   required: ["entityType", "source", "replacement"],
@@ -324,7 +330,7 @@ export function createSchedulerBulkTools(context: SchedulerAiContext) {
   return {
     replace_schedule_blocks: tool({
       description:
-        "Deterministically replace MANY saved schedule blocks on the selected date. Use entityType=STAFF for requests like 'replace all Anias blocks with Areyana'. Use entityType=CLIENT for requests like 'replace CaMe with ZiBo everywhere/all blocks'. CLIENT replacement swaps same-time CaMe/ZiBo coverage when both already have coverage; source-only replaced cells leave the displaced source client in Unplaced. STAFF replacement moves every matching source block to the replacement staff at the same time. If the replacement staff already has ANY occupied block at one of those times, the first attempt returns a confirmation instead of overwriting it; after explicit approval, retry with the requested override and any displaced target-client blocks are preserved in Unplaced. The first attempt must keep override flags false.",
+        "Deterministically replace MANY saved schedule blocks on the selected date. Use entityType=STAFF for requests like 'replace all Anias blocks with Areyana'. Use entityType=CLIENT for requests like 'replace CaMe with ZiBo everywhere/all blocks'. CLIENT replacement swaps same-time CaMe/ZiBo coverage when both already have coverage; source-only replaced cells leave the displaced source client in Unplaced. STAFF replacement moves every matching source block to the replacement staff at the same time. If the replacement staff already has ANY occupied block at one of those times, the first attempt returns a replacement-clash confirmation instead of overwriting it; after the user says to proceed, retry with allowOccupiedReplacement=true and any displaced target-client blocks are preserved in Unplaced. This occupied-block confirmation is separate from true locked-cell or scheduler-rule overrides. The first attempt must keep all confirmation/override flags false.",
       inputSchema: replaceSchema,
       execute: async ({
         entityType,
@@ -334,6 +340,7 @@ export function createSchedulerBulkTools(context: SchedulerAiContext) {
         endTime,
         allowLockedOverride = false,
         allowRuleOverride = false,
+        allowOccupiedReplacement = false,
       }) => {
         if (source.trim().toLowerCase() === replacement.trim().toLowerCase()) {
           return { ok: false, error: "Source and replacement must be different." };
@@ -479,21 +486,21 @@ export function createSchedulerBulkTools(context: SchedulerAiContext) {
 
           const needsLockedOverride =
             protectedCells.length > 0 && !allowLockedOverride;
-          const needsOccupiedOverride =
-            occupiedTargetCells.length > 0 && !allowRuleOverride;
+          const needsOccupiedConfirmation =
+            occupiedTargetCells.length > 0 && !allowOccupiedReplacement;
 
-          if (needsLockedOverride || needsOccupiedOverride) {
+          if (needsLockedOverride || needsOccupiedConfirmation) {
             return {
               ok: false,
               requiresConfirmation: true,
               confirmationType:
-                needsLockedOverride && needsOccupiedOverride
+                needsLockedOverride && needsOccupiedConfirmation
                   ? "LOCKED_AND_OCCUPIED_TARGET"
                   : needsLockedOverride
                     ? "LOCKED_OR_MANUAL"
                     : "OCCUPIED_TARGET",
               requiresLockedOverride: needsLockedOverride,
-              requiresRuleOverride: needsOccupiedOverride,
+              requiresOccupiedReplacementConfirmation: needsOccupiedConfirmation,
               protectedCells: protectedCells.map((record) => ({
                 staffId: idFrom(record.staffId),
                 staffName:
@@ -505,7 +512,7 @@ export function createSchedulerBulkTools(context: SchedulerAiContext) {
               occupiedTargetCells,
               message:
                 occupiedTargetCells.length > 0
-                  ? `${String(replacementStaff.fullName)} already has ${occupiedTargetCells.length} occupied block(s) in the requested replacement times. No blocks were changed. Explain those occupied times to the user and ask whether they want to override them. If approved, retry this exact replacement with allowRuleOverride=true${protectedCells.length > 0 ? " and allowLockedOverride=true" : ""}. Any displaced client 1:1 blocks will be preserved in Unplaced.`
+                  ? `${String(replacementStaff.fullName)} already has ${occupiedTargetCells.length} occupied block(s) in the requested replacement times. No blocks were changed. Explain that those times clash and ask whether the user still wants to proceed with the replacement. If approved, retry this exact replacement with allowOccupiedReplacement=true${protectedCells.length > 0 ? ". Protected/manual cells still require allowLockedOverride=true separately" : ""}. Any displaced client 1:1 blocks will be preserved in Unplaced.`
                   : "One or more affected cells are locked/manual. Ask the user for explicit override permission before retrying with allowLockedOverride=true.",
             };
           }
