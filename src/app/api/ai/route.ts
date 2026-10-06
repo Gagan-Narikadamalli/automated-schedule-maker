@@ -69,6 +69,40 @@ function weekdayDate(anchorDate: string, weekday: number, weekShift = 0): string
   return formatLocalDate(value);
 }
 
+function parseNamedOrNumericDate(message: string, anchorDate: string): string | null {
+  const slash = message.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(20\d{2}|\d{2}))?\b/);
+  if (slash) {
+    const [, monthText, dayText, yearText] = slash;
+    const anchorYear = Number(anchorDate.slice(0, 4));
+    const year = yearText
+      ? Number(yearText.length === 2 ? `20${yearText}` : yearText)
+      : anchorYear;
+    const month = Number(monthText);
+    const day = Number(dayText);
+    const candidate = new Date(year, month - 1, day, 12, 0, 0);
+    if (
+      candidate.getFullYear() === year &&
+      candidate.getMonth() === month - 1 &&
+      candidate.getDate() === day
+    ) {
+      return formatLocalDate(candidate);
+    }
+  }
+
+  const monthNames =
+    "january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec";
+  const named = message.match(
+    new RegExp(`\\b(${monthNames})\\s+(\\d{1,2})(?:,?\\s+(20\\d{2}))?\\b`, "i")
+  );
+  if (named) {
+    const parsed = new Date(
+      `${named[1]} ${named[2]}, ${named[3] || anchorDate.slice(0, 4)} 12:00:00`
+    );
+    if (!Number.isNaN(parsed.getTime())) return formatLocalDate(parsed);
+  }
+  return null;
+}
+
 function resolveDateContext(
   message: string,
   selectedDate: string,
@@ -78,6 +112,11 @@ function resolveDateContext(
   const normalized = message.toLowerCase();
   const isoDate = message.match(/\b(20\d{2}-\d{2}-\d{2})\b/)?.[1];
   if (isoDate) return { date: isoDate, source: "EXPLICIT_DATE" };
+
+  const namedOrNumeric = parseNamedOrNumericDate(message, selectedDate);
+  if (namedOrNumeric) {
+    return { date: namedOrNumeric, source: "EXPLICIT_DATE" };
+  }
 
   if (/\btoday\b/.test(normalized)) {
     return { date: todayDate, source: "TODAY" };
@@ -113,8 +152,18 @@ function resolveDateContext(
     };
   }
 
-  if (/\b(this|current)\s+week\b/.test(normalized)) {
+  if (
+    /\b(this|current|the)\s+(work\s+)?week\b/.test(normalized) ||
+    /\b(generate|build|make|fix|repair)\s+(the\s+)?(work\s+)?week\b/.test(normalized)
+  ) {
     return { date: selectedDate, source: "SELECTED_WEEK" };
+  }
+
+  if (
+    /\b(this|selected)\s+day\b/.test(normalized) ||
+    /\b(current|this)\s+schedule\b/.test(normalized)
+  ) {
+    return { date: selectedDate, source: "SELECTED_DAY" };
   }
 
   if (dateSelectionExplicit) {
