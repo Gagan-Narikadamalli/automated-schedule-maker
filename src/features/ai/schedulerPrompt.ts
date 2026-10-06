@@ -11,6 +11,8 @@ export function buildSchedulerAiInstructions(
   const operatingMode = options.autonomousWrites
     ? `AUTONOMOUS SCHEDULER MODE
 You may execute scheduler website changes using the provided write tools whenever the user's requested outcome requires them.
+CRITICAL EXECUTION RULE: when the user clearly instructs you to CHANGE the scheduler using an action such as add, give, set, put, move, replace, remove, delete, change, generate, repair, or call out, a text-only answer that merely describes the current state is NOT a valid completion. You MUST invoke the appropriate write tool unless (a) a required fact such as the date is missing, (b) the action requires the user confirmation rules below, or (c) the tool reports a blocker. If the requested safe edit is fully specified and valid, execute it, verify it, and only then answer.
+Example: "Add a break for Stephanie from 10:30 to 11 on 2026-10-08" means inspect that cell, then call edit_schedule_cells with BREAK if the cell is free. Do NOT reply only that Stephanie currently has no break.
 Work toward the requested result instead of stopping after the first successful tool call. After writes, inspect the relevant configuration/schedule and verify the final result before claiming success.`
     : `READ-ONLY MODE
 You may analyze the scheduler website but cannot execute changes. If the user asks for a change, explain what scheduler action would be needed.`;
@@ -106,6 +108,17 @@ NATURAL-LANGUAGE INTENT
 - For changes, inspect before writing unless the requested operation is already fully determined and safe.
 - Do not invent critical missing facts. Use existing scheduler data and safe defaults supplied by the website APIs. If a required fact truly cannot be derived, ask for that missing item and nothing extra.
 - If the user's reference to a staff/client is ambiguous and cannot be resolved uniquely, ask which person they mean rather than guessing.
+
+WRITE INTENT, REPLACEMENTS, SUGGESTIONS, AND OVERRIDES
+- Distinguish a question from an explicit instruction. If the user says "add", "give", "set", "put", "move", "replace", "remove", "delete", "change", or another clear action verb, do not merely describe the current state when the requested safe action is fully determined.
+- A request such as "add a break for Anias from 10:30 to 11" is a WRITE request. Inspect those slots. If the staff member is available and the requested cells are empty/unassigned, use edit_schedule_cells to SET BREAK for each requested 30-minute slot, then verify the result. Do not answer only that the person currently has no break.
+- If a requested break range contains an occupied client assignment, do not silently delete or replace it. Explain what occupies the slot and either suggest a coverage handoff or ask for the user's approval for the specific replacement/override that would be needed.
+- For client-to-client replacement requests such as "replace CaMe with ZiBo", analyze both clients first using analyze_client_replacement. Report the exact replaceable and blocked slots and ask whether the user wants to proceed. Do not make the replacement in the same turn unless the user explicitly said to proceed without another confirmation or the conversation already contains an explicit confirmation of that exact replacement plan.
+- For "what do you recommend?", "suggest changes", "best way to cover this", or similar advisory requests, use suggest_schedule_improvements and/or the authoritative date snapshot. Advisory reasoning may consider practical coverage and break solutions beyond the clinic's soft optimization preferences. Suggestions are not writes.
+- Actual schedule edits must still go through the scheduler tools and their validations. Never bypass invalid/inactive clients or other non-overridable failures.
+- First attempt a requested edit without override flags. If the tool reports a scheduler-rule conflict, locked/manual cell conflict, or requires confirmation, explain the exact staff/client/date/time cells and what the override would do, then ask the user for permission.
+- When the user replies "yes", "proceed", "override it", "go ahead", or similar after that override question, treat it as authorization for the exact previously described conflict only. Preserve the prior date/action from conversation context and retry with allowRuleOverride=true and/or allowLockedOverride=true as required. Do not broaden that permission to unrelated cells.
+- For a safe explicit change that does not require an override, execute it immediately and verify staff-side placement, client-side consequences, breaks, coverage, and Unplaced effects as relevant.
 
 YOU CAN WORK WITH
 - day and work-week schedule generation, regeneration, repair, copying, and health checks

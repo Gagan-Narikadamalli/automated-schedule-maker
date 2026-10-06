@@ -1,456 +1,376 @@
-import { ToolLoopAgent, generateText, stepCountIs } from "ai";
 import { NextResponse } from "next/server";
 
-import { buildSchedulerAiInstructions } from "@/features/ai/schedulerPrompt";
-import { buildSchedulerReplyFallback } from "@/features/ai/schedulerReplyFallback";
-import { createSchedulerReadOnlyTools } from "@/features/ai/schedulerTools";
-import {
-  createSchedulerWebsiteTools,
-  SCHEDULER_WEBSITE_WRITE_TOOL_NAMES,
-} from "@/features/ai/schedulerWebsiteTools";
-import {
-  createSchedulerWriteTools,
-  SCHEDULER_WRITE_TOOL_NAMES,
-} from "@/features/ai/schedulerWriteTools";
-import type {
-  SchedulerAiDateSource,
-  SchedulerAiHistoryMessage,
-  SchedulerAiRequest,
-  SchedulerAiResponse,
-} from "@/features/ai/types";
-import {
-  forbiddenResponse,
-  requireApiSession,
-  sessionCanAccessLocation,
-} from "@/lib/api/auth";
+import { PUT as updateScheduleBatch } from "@/app/api/schedule/batch/route";
 import { connectToDatabase } from "@/lib/db";
-import { AITrainingExample } from "@/models/AITrainingExample";
+import { ScheduleAssignment } from "@/models/ScheduleAssignment";
+import { Staff } from "@/models/Staff";
 
-export const maxDuration = 300;
+import { POST as basePOST, maxDuration } from "./routeBase";
 
-const DEFAULT_SCHEDULER_AI_MODEL = "openai/gpt-5-nano";
-const MAX_MESSAGE_LENGTH = 5000;
-const MAX_HISTORY_MESSAGES = 12;
-const MAX_TOOL_EVIDENCE_LENGTH = 24_000;
+export { maxDuration };
 
-function cleanLocationName(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const cleaned = value.replace(/[\r\n\t]+/g, " ").trim().slice(0, 120);
-  return cleaned || undefined;
+type JsonRecord = Record<string, any>;
+
+type HistoryMessage = {
+  role?: string;
+  text?: string;
+};
+
+type AiRequestBody = {
+  message?: string;
+  locationId?: string;
+  locationName?: string;
+  date?: string;
+  dateSelectionExplicit?: boolean;
+  history?: HistoryMessage[];
+};
+
+function normalize(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-function dateInNewYork(): string {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date());
-  const values = new Map(parts.map((part) => [part.type, part.value]));
-  return `${values.get("year")}-${values.get("month")}-${values.get("day")}`;
-}
-
-function formatLocalDate(value: Date): string {
-  const year = value.getFullYear();
-  const month = String(value.getMonth() + 1).padStart(2, "0");
-  const day = String(value.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function shiftDate(dateText: string, days: number): string {
-  const value = new Date(`${dateText}T12:00:00`);
-  value.setDate(value.getDate() + days);
-  return formatLocalDate(value);
-}
-
-function weekdayDate(anchorDate: string, weekday: number, weekShift = 0): string {
-  const value = new Date(`${anchorDate}T12:00:00`);
-  const currentDay = value.getDay();
-  const mondayOffset = currentDay === 0 ? -6 : 1 - currentDay;
-  value.setDate(value.getDate() + mondayOffset + weekday + weekShift * 7);
-  return formatLocalDate(value);
-}
-
-function parseNamedOrNumericDate(message: string, anchorDate: string): string | null {
-  const slash = message.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(20\d{2}|\d{2}))?\b/);
-  if (slash) {
-    const [, monthText, dayText, yearText] = slash;
-    const anchorYear = Number(anchorDate.slice(0, 4));
-    const year = yearText
-      ? Number(yearText.length === 2 ? `20${yearText}` : yearText)
-      : anchorYear;
-    const month = Number(monthText);
-    const day = Number(dayText);
-    const candidate = new Date(year, month - 1, day, 12, 0, 0);
-    if (
-      candidate.getFullYear() === year &&
-      candidate.getMonth() === month - 1 &&
-      candidate.getDate() === day
-    ) {
-      return formatLocalDate(candidate);
-    }
-  }
-
-  const monthNames =
-    "january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec";
-  const named = message.match(
-    new RegExp(`\\b(${monthNames})\\s+(\\d{1,2})(?:,?\\s+(20\\d{2}))?\\b`, "i")
-  );
-  if (named) {
-    const parsed = new Date(
-      `${named[1]} ${named[2]}, ${named[3] || anchorDate.slice(0, 4)} 12:00:00`
-    );
-    if (!Number.isNaN(parsed.getTime())) return formatLocalDate(parsed);
-  }
-  return null;
-}
-
-function cleanHistory(value: unknown): SchedulerAiHistoryMessage[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .filter(
-      (entry): entry is SchedulerAiHistoryMessage =>
-        Boolean(entry) &&
-        typeof entry === "object" &&
-        ((entry as SchedulerAiHistoryMessage).role === "user" ||
-          (entry as SchedulerAiHistoryMessage).role === "assistant") &&
-        typeof (entry as SchedulerAiHistoryMessage).text === "string"
-    )
-    .slice(-MAX_HISTORY_MESSAGES)
-    .map((entry) => ({
-      role: entry.role,
-      text: entry.text.trim().slice(0, 2200),
-    }))
-    .filter((entry) => entry.text.length > 0);
-}
-
-function isAffirmativeContinuation(message: string): boolean {
-  const normalized = message
+function isAffirmative(value: string): boolean {
+  const text = value
     .trim()
     .toLowerCase()
-    .replace(/[.!?]+$/g, "")
-    .replace(/\s+/g, " ");
-  return /^(yes|yeah|yep|sure|ok|okay|yes please|please do|go ahead|proceed|do it|generate it|create it|make it)$/.test(
-    normalized
-  );
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return /^(yes|yeah|yep|sure|ok|okay|yes please|please do|go ahead|proceed|do it|allow it|override it|yes override|yes override it|yes proceed|yes go ahead)$/.test(text);
 }
 
-function recentConversationDate(
-  history: SchedulerAiHistoryMessage[],
-  anchorDate: string
-): string | null {
-  for (const entry of [...history].slice(-4).reverse()) {
-    const isoDate = entry.text.match(/\b(20\d{2}-\d{2}-\d{2})\b/)?.[1];
-    if (isoDate) return isoDate;
-    const namedOrNumeric = parseNamedOrNumericDate(entry.text, anchorDate);
-    if (namedOrNumeric) return namedOrNumeric;
+function isExplicitBreakWrite(value: string): boolean {
+  return /\b(add|give|set|put|schedule|insert)\b[\s\S]*\bbreak\b/i.test(value);
+}
+
+function pendingBreakRequest(
+  message: string,
+  history: HistoryMessage[]
+): { intentMessage: string; overrideConfirmed: boolean } | null {
+  if (isExplicitBreakWrite(message)) {
+    return { intentMessage: message, overrideConfirmed: false };
+  }
+
+  if (!isAffirmative(message)) return null;
+  const recent = history.slice(-8);
+  const latestAssistantIndex = [...recent]
+    .map((entry, index) => ({ entry, index }))
+    .reverse()
+    .find(
+      ({ entry }) =>
+        entry.role === "assistant" &&
+        /do you allow me to override|allow me to override|override this and proceed/i.test(
+          entry.text ?? ""
+        )
+    )?.index;
+  if (latestAssistantIndex === undefined) return null;
+
+  for (let index = latestAssistantIndex - 1; index >= 0; index -= 1) {
+    const entry = recent[index];
+    if (entry.role === "user" && isExplicitBreakWrite(entry.text ?? "")) {
+      return { intentMessage: entry.text ?? "", overrideConfirmed: true };
+    }
   }
   return null;
 }
 
-function resolveDateContext(
-  message: string,
-  selectedDate: string,
-  todayDate: string,
-  dateSelectionExplicit: boolean,
-  history: SchedulerAiHistoryMessage[]
-): { date: string; source: SchedulerAiDateSource } {
-  const normalized = message.toLowerCase();
-  const isoDate = message.match(/\b(20\d{2}-\d{2}-\d{2})\b/)?.[1];
-  if (isoDate) return { date: isoDate, source: "EXPLICIT_DATE" };
-
-  const namedOrNumeric = parseNamedOrNumericDate(message, selectedDate);
-  if (namedOrNumeric) {
-    return { date: namedOrNumeric, source: "EXPLICIT_DATE" };
+function inferHour(hour: number, meridiem?: string): number {
+  if (meridiem) {
+    const suffix = meridiem.toLowerCase();
+    if (suffix === "am") return hour === 12 ? 0 : hour;
+    return hour === 12 ? 12 : hour + 12;
   }
+  if (hour === 12) return 12;
+  return hour >= 1 && hour <= 7 ? hour + 12 : hour;
+}
 
-  if (/\b(today|current date|right now|now)\b/.test(normalized)) {
-    return { date: todayDate, source: "TODAY" };
+function parseTimeToken(
+  hourText: string,
+  minuteText?: string,
+  meridiem?: string
+): string | null {
+  const hour = Number(hourText);
+  const minute = Number(minuteText ?? "0");
+  if (!Number.isInteger(hour) || !Number.isInteger(minute) || minute < 0 || minute > 59) {
+    return null;
   }
-  if (/\btomorrow\b/.test(normalized)) {
-    return { date: shiftDate(todayDate, 1), source: "RELATIVE_DATE" };
-  }
-  if (/\byesterday\b/.test(normalized)) {
-    return { date: shiftDate(todayDate, -1), source: "RELATIVE_DATE" };
-  }
+  const converted = inferHour(hour, meridiem);
+  if (converted < 0 || converted > 23) return null;
+  return `${String(converted).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
 
-  const weekdays = [
-    { names: ["monday", "mon"], offset: 0 },
-    { names: ["tuesday", "tue", "tues"], offset: 1 },
-    { names: ["wednesday", "wed"], offset: 2 },
-    { names: ["thursday", "thu", "thur", "thurs"], offset: 3 },
-    { names: ["friday", "fri"], offset: 4 },
-    { names: ["saturday", "sat"], offset: 5 },
-    { names: ["sunday", "sun"], offset: 6 },
-  ];
-
-  for (const weekday of weekdays) {
-    const pattern = new RegExp(`\\b(${weekday.names.join("|")})\\b`, "i");
-    if (!pattern.test(message)) continue;
-    const weekShift = /\bnext\b/i.test(message)
-      ? 1
-      : /\b(last|previous)\b/i.test(message)
-        ? -1
-        : 0;
-    return {
-      date: weekdayDate(selectedDate, weekday.offset, weekShift),
-      source: "WEEKDAY",
-    };
-  }
-
-  if (
-    /\b(this|current|the)\s+(work\s+)?week\b/.test(normalized) ||
-    /\b(generate|build|make|fix|repair)\s+(the\s+)?(work\s+)?week\b/.test(normalized)
-  ) {
-    return { date: selectedDate, source: "SELECTED_WEEK" };
-  }
-
-  if (
-    /\b(this|selected)\s+day\b/.test(normalized) ||
-    /\b(current|this)\s+schedule\b/.test(normalized)
-  ) {
-    return { date: selectedDate, source: "SELECTED_DAY" };
-  }
-
-  if (isAffirmativeContinuation(message)) {
-    const conversationDate = recentConversationDate(history, selectedDate);
-    if (conversationDate) {
-      return { date: conversationDate, source: "CONVERSATION" };
+function parseBreakRange(message: string): { startTime: string; endTime: string } | null {
+  const withoutDates = message.replace(/\b20\d{2}-\d{2}-\d{2}\b/g, " ");
+  const range = withoutDates.match(
+    /\b(?:from\s+|at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:-|–|to|until|through)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i
+  );
+  if (range) {
+    let firstMeridiem = range[3];
+    let secondMeridiem = range[6];
+    const firstHour = Number(range[1]);
+    const secondHour = Number(range[4]);
+    if (!firstMeridiem && secondMeridiem) {
+      firstMeridiem = firstHour >= 8 && secondHour <= 7 ? "am" : secondMeridiem;
     }
+    if (firstMeridiem && !secondMeridiem) {
+      secondMeridiem =
+        firstMeridiem.toLowerCase() === "am" && secondHour <= 7
+          ? "pm"
+          : firstMeridiem;
+    }
+    const startTime = parseTimeToken(range[1], range[2], firstMeridiem);
+    const endTime = parseTimeToken(range[4], range[5], secondMeridiem);
+    if (startTime && endTime && endTime > startTime) return { startTime, endTime };
   }
 
-  if (dateSelectionExplicit) {
-    return { date: selectedDate, source: "SELECTED_DAY" };
+  const single = withoutDates.match(
+    /\b(?:at|from)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i
+  );
+  if (!single) return null;
+  const startTime = parseTimeToken(single[1], single[2], single[3]);
+  if (!startTime) return null;
+  const [hourText, minuteText] = startTime.split(":");
+  const total = Number(hourText) * 60 + Number(minuteText) + 30;
+  const endTime = `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+  return { startTime, endTime };
+}
+
+function timeToMinutes(time: string): number {
+  const [hour, minute] = time.split(":").map(Number);
+  return hour * 60 + minute;
+}
+
+function minutesToTime(minutes: number): string {
+  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+}
+
+function breakSlots(startTime: string, endTime: string): string[] {
+  const slots: string[] = [];
+  for (
+    let cursor = timeToMinutes(startTime);
+    cursor < timeToMinutes(endTime);
+    cursor += 30
+  ) {
+    slots.push(minutesToTime(cursor));
   }
-
-  return { date: selectedDate, source: "PASSIVE_SELECTION" };
+  return slots;
 }
 
-function buildConversationPrompt(
-  history: SchedulerAiHistoryMessage[],
-  message: string
-): string {
-  if (history.length === 0) return message;
-  const transcript = history
-    .map((entry) => `${entry.role === "user" ? "User" : "Scheduler AI"}: ${entry.text}`)
-    .join("\n");
-  return `Conversation so far:\n${transcript}\n\nUser's latest message:\n${message}`;
+function displayTime(time: string): string {
+  const [hourText, minute] = time.split(":");
+  const hour = Number(hourText);
+  const suffix = hour >= 12 ? "PM" : "AM";
+  return `${hour % 12 || 12}:${minute} ${suffix}`;
 }
 
-function safeToolEvidence(value: unknown): string {
+async function invokeBatch(body: JsonRecord): Promise<JsonRecord> {
+  const response = await updateScheduleBatch(
+    new Request("http://scheduler-ai.internal/api/schedule/batch", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+  );
+  let data: JsonRecord = {};
   try {
-    const serialized = JSON.stringify(value, null, 2);
-    if (!serialized) return "No structured tool output was available.";
-    return serialized.slice(0, MAX_TOOL_EVIDENCE_LENGTH);
+    data = (await response.json()) as JsonRecord;
   } catch {
-    return "The scheduler tools completed, but their structured output could not be serialized.";
+    data = {};
   }
+  return { ok: response.ok, status: response.status, ...data };
+}
+
+function conflictText(conflicts: unknown): string {
+  if (!Array.isArray(conflicts) || conflicts.length === 0) {
+    return "the scheduler reported a rule conflict";
+  }
+  return conflicts
+    .slice(0, 6)
+    .map((conflict) => {
+      const item = conflict as JsonRecord;
+      const time = typeof item.startTime === "string" ? displayTime(item.startTime) : "the requested time";
+      return `${time}: ${String(item.message ?? item.code ?? "scheduler conflict")}`;
+    })
+    .join("; ");
 }
 
 export async function POST(request: Request) {
-  const auth = await requireApiSession();
-  if (auth.error) return auth.error;
-
+  const rawBody = await request.text();
+  let body: AiRequestBody;
   try {
-    const body = (await request.json()) as SchedulerAiRequest;
-    const message = body.message?.trim() ?? "";
-    const locationId = body.locationId?.trim() ?? "";
-    const selectedDate = body.date?.trim() ?? "";
-    const locationName = cleanLocationName(body.locationName);
-    const history = cleanHistory(body.history);
-    const dateSelectionExplicit = body.dateSelectionExplicit === true;
-
-    if (!message || !locationId || !selectedDate) {
-      return NextResponse.json(
-        { error: "message, locationId, and date are required." },
-        { status: 400 }
-      );
-    }
-
-    if (message.length > MAX_MESSAGE_LENGTH) {
-      return NextResponse.json(
-        { error: `Scheduler AI messages are limited to ${MAX_MESSAGE_LENGTH} characters.` },
-        { status: 400 }
-      );
-    }
-
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(selectedDate)) {
-      return NextResponse.json(
-        { error: "Date must use YYYY-MM-DD format." },
-        { status: 400 }
-      );
-    }
-
-    if (locationId.startsWith("demo-")) {
-      return NextResponse.json(
-        { error: "Scheduler AI is available only for live clinic data." },
-        { status: 400 }
-      );
-    }
-
-    if (!sessionCanAccessLocation(auth.session, locationId)) {
-      return forbiddenResponse("You do not have access to this scheduler location.");
-    }
-
-    const model =
-      process.env.SCHEDULER_AI_MODEL?.trim() || DEFAULT_SCHEDULER_AI_MODEL;
-    const autonomousWrites =
-      process.env.SCHEDULER_AI_AUTONOMOUS_WRITES?.trim().toLowerCase() === "true";
-    const todayDate = dateInNewYork();
-    const resolvedDate = resolveDateContext(
-      message,
-      selectedDate,
-      todayDate,
-      dateSelectionExplicit,
-      history
-    );
-    const context = {
-      locationId,
-      locationName,
-      date: resolvedDate.date,
-      selectedDate,
-      todayDate,
-      dateSource: resolvedDate.source,
-      dateSelectionExplicit,
-      userId: auth.session.userId,
-    };
-
-    const readTools = createSchedulerReadOnlyTools(context);
-    const websiteTools = createSchedulerWebsiteTools(context);
-    const tools = autonomousWrites
-      ? {
-          ...readTools,
-          ...websiteTools,
-          ...createSchedulerWriteTools(context),
-        }
-      : {
-          ...readTools,
-          get_scheduler_configuration: websiteTools.get_scheduler_configuration,
-        };
-
-    const agent = new ToolLoopAgent({
-      model,
-      instructions: buildSchedulerAiInstructions(context, {
-        autonomousWrites,
-      }),
-      tools,
-      toolChoice: "auto",
-      stopWhen: stepCountIs(20),
-      maxOutputTokens: 2400,
-    });
-
-    const result = await agent.generate({
-      prompt: buildConversationPrompt(history, message),
-      timeout: {
-        totalMs: 260_000,
-        stepMs: 65_000,
-      },
-    });
-
-    const toolsUsed = [
-      ...new Set(
-        result.steps.flatMap((step) =>
-          step.toolCalls.map((toolCall) => toolCall.toolName)
-        )
-      ),
-    ];
-    const writeToolsUsed = toolsUsed.filter(
-      (toolName) =>
-        SCHEDULER_WRITE_TOOL_NAMES.has(toolName) ||
-        SCHEDULER_WEBSITE_WRITE_TOOL_NAMES.has(toolName)
-    );
-    const changed = autonomousWrites && writeToolsUsed.length > 0;
-    const mode = autonomousWrites ? "AUTONOMOUS" : "READ_ONLY";
-    const toolEvidence = result.steps.flatMap((step) =>
-      step.toolResults.map((toolResult) => ({
-        toolName: toolResult.toolName,
-        input: toolResult.input,
-        output: toolResult.output,
-      }))
-    );
-
-    let reply = result.text.trim();
-
-    if (!reply && toolsUsed.length > 0) {
-      try {
-        const synthesis = await generateText({
-          model,
-          instructions: `You are the final-response writer for the Automatic Schedule Maker assistant. Write a concise, natural answer to the user's scheduler request using ONLY the supplied scheduler tool evidence. Do not call tools. Do not invent names, coverage, conflicts, or changes. Clearly say what date was checked or changed. If the evidence says scheduleAvailable=false, state that the schedule has not been generated for that date and ask whether the user wants you to generate it; do not infer staff availability from an ungenerated schedule. If the evidence contains detailed schedule segments, answer with those names/codes and time ranges instead of a generic assignment count. If the evidence shows uncovered work or break problems, state them. If no write tool was used, do not imply that anything was changed. If a write tool was used, distinguish completed changes from remaining problems. Sound like a helpful scheduling assistant rather than a system log.`,
-          prompt: `Clinic: ${locationName || "Clinic"}\nEffective date: ${resolvedDate.date}\nOriginal user request: ${message}\nWrite tools used: ${writeToolsUsed.join(", ") || "none"}\n\nScheduler tool evidence:\n${safeToolEvidence(toolEvidence)}`,
-          maxOutputTokens: 1400,
-          timeout: {
-            totalMs: 55_000,
-          },
-        });
-        reply = synthesis.text.trim();
-      } catch (synthesisError) {
-        console.error("Scheduler AI final response synthesis failed:", synthesisError);
-      }
-    }
-
-    if (!reply && toolsUsed.length > 0) {
-      reply = buildSchedulerReplyFallback({
-        date: resolvedDate.date,
-        locationName,
-        toolEvidence,
-        writeToolsUsed,
-      });
-    }
-
-    if (!reply) {
-      reply =
-        "I'm unable to understand that request yet. Please explain or elaborate what you want me to check or change in the scheduler.";
-    }
-
-    let trainingExampleId: string | null = null;
-    try {
-      await connectToDatabase();
-      const example = await AITrainingExample.create({
-        locationId,
-        date: resolvedDate.date,
-        userId: auth.session.userId,
-        request: message,
-        assistantResponse: reply,
-        model,
-        mode,
-        toolsSelected: toolsUsed,
-        managerAccepted: null,
-        managerCorrection: "",
-      });
-      trainingExampleId = String(example._id);
-    } catch (trainingError) {
-      console.error("Scheduler AI training example could not be stored:", trainingError);
-    }
-
-    const response: SchedulerAiResponse = {
-      reply,
-      trainingExampleId,
-      toolsUsed,
-      writeToolsUsed,
-      changed,
-      mode,
-      effectiveDate: resolvedDate.date,
-    };
-
-    return NextResponse.json(response);
-  } catch (error) {
-    console.error("Scheduler AI request failed:", error);
-    const message = error instanceof Error ? error.message : "";
-    const configurationProblem =
-      /gateway|api.?key|oidc|unauthorized|authentication|credit|model.*not found/i.test(
-        message
-      );
-    const timeoutProblem = /abort|timeout|timed out/i.test(message);
-
-    return NextResponse.json(
-      {
-        error: configurationProblem
-          ? "Scheduler AI is not connected to a usable AI Gateway model yet. Enable Vercel AI Gateway/OIDC for the project or set AI_GATEWAY_API_KEY for local development."
-          : timeoutProblem
-            ? "Scheduler AI reached its execution limit before finishing. Try splitting a very large scheduler request into two prompts."
-            : "Scheduler AI could not complete this request.",
-      },
-      { status: configurationProblem ? 503 : timeoutProblem ? 504 : 500 }
+    body = JSON.parse(rawBody) as AiRequestBody;
+  } catch {
+    return basePOST(
+      new Request(request.url, {
+        method: "POST",
+        headers: request.headers,
+        body: rawBody,
+      })
     );
   }
+
+  const message = body.message?.trim() ?? "";
+  const history = Array.isArray(body.history) ? body.history : [];
+  const pendingBreak = pendingBreakRequest(message, history);
+
+  const baseResponse = await basePOST(
+    new Request(request.url, {
+      method: "POST",
+      headers: request.headers,
+      body: rawBody,
+    })
+  );
+
+  let baseData: JsonRecord = {};
+  try {
+    baseData = (await baseResponse.json()) as JsonRecord;
+  } catch {
+    return baseResponse;
+  }
+
+  if (!baseResponse.ok || !pendingBreak || baseData.mode !== "AUTONOMOUS") {
+    return NextResponse.json(baseData, { status: baseResponse.status });
+  }
+
+  const baseReply = String(baseData.reply ?? "");
+  if (
+    /which day|what date|has not been generated|would you like me to generate/i.test(
+      baseReply
+    )
+  ) {
+    return NextResponse.json(baseData, { status: baseResponse.status });
+  }
+
+  const locationId = body.locationId?.trim() ?? "";
+  const date = String(baseData.effectiveDate ?? body.date ?? "");
+  const range = parseBreakRange(pendingBreak.intentMessage);
+  if (!locationId || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !range) {
+    return NextResponse.json(baseData, { status: baseResponse.status });
+  }
+
+  const slots = breakSlots(range.startTime, range.endTime);
+  if (slots.length === 0 || slots.length > 12) {
+    return NextResponse.json(baseData, { status: baseResponse.status });
+  }
+
+  await connectToDatabase();
+  const activeStaff = (await Staff.find({ locationId, active: true })
+    .select("_id fullName")
+    .lean()) as unknown as JsonRecord[];
+  const normalizedIntent = normalize(pendingBreak.intentMessage);
+  const matchedStaff = activeStaff.filter((member) => {
+    const name = normalize(String(member.fullName ?? ""));
+    return Boolean(name) && normalizedIntent.includes(name);
+  });
+  if (matchedStaff.length !== 1) {
+    return NextResponse.json(baseData, { status: baseResponse.status });
+  }
+
+  const staff = matchedStaff[0];
+  const staffId = String(staff._id);
+  const staffName = String(staff.fullName);
+
+  const dayAssignmentCount = await ScheduleAssignment.countDocuments({
+    locationId,
+    date,
+  });
+  if (dayAssignmentCount === 0) {
+    return NextResponse.json({
+      ...baseData,
+      reply: `The schedule for ${date} has not been generated yet. Would you like me to generate the schedule for ${date}?`,
+      changed: false,
+      writeToolsUsed: [],
+    });
+  }
+
+  const existing = (await ScheduleAssignment.find({
+    locationId,
+    date,
+    staffId,
+    startTime: { $in: slots },
+  })
+    .select("startTime assignmentType clientId locked manuallyOverridden")
+    .sort({ startTime: 1 })
+    .lean()) as unknown as JsonRecord[];
+
+  if (existing.length > 0) {
+    const alreadyBreak = existing.every((assignment) => assignment.assignmentType === "BREAK");
+    if (alreadyBreak && existing.length === slots.length) {
+      return NextResponse.json({
+        ...baseData,
+        reply: `${staffName} already has a break from ${displayTime(range.startTime)} to ${displayTime(range.endTime)} on ${date}.\n\nIs there anything else you'd like help with?`,
+        changed: false,
+        writeToolsUsed: [],
+      });
+    }
+
+    const details = existing
+      .map((assignment) => `${displayTime(String(assignment.startTime))}: ${String(assignment.assignmentType).replaceAll("_", " ")}`)
+      .join("; ");
+    return NextResponse.json({
+      ...baseData,
+      reply: `I did not add the break because ${staffName} already has scheduled work in that period on ${date}: ${details}. Replacing an occupied block could affect client coverage. I can analyze a safe handoff or replacement first if you want.`,
+      changed: false,
+      writeToolsUsed: [],
+    });
+  }
+
+  const batchResult = await invokeBatch({
+    locationId,
+    date,
+    force: pendingBreak.overrideConfirmed,
+    changes: slots.map((startTime) => ({
+      staffId,
+      startTime,
+      assignmentType: "BREAK",
+      text: "Break",
+      clientId: null,
+    })),
+  });
+
+  if (!batchResult.ok) {
+    if (batchResult.status === 409 || batchResult.requiresConfirmation === true) {
+      return NextResponse.json({
+        ...baseData,
+        reply: `I checked the requested break for ${staffName} on ${date}. The scheduler would normally block it because ${conflictText(batchResult.conflicts)}. Do you allow me to override this and proceed?`,
+        changed: false,
+        writeToolsUsed: [],
+      });
+    }
+    return NextResponse.json({
+      ...baseData,
+      reply: `I could not add the break for ${staffName} on ${date}: ${String(batchResult.error ?? "the scheduler rejected the change")}. No schedule changes were made.`,
+      changed: false,
+      writeToolsUsed: [],
+    });
+  }
+
+  const verifiedCount = await ScheduleAssignment.countDocuments({
+    locationId,
+    date,
+    staffId,
+    startTime: { $in: slots },
+    assignmentType: "BREAK",
+  });
+
+  if (verifiedCount !== slots.length) {
+    return NextResponse.json({
+      ...baseData,
+      reply: `The break update returned successfully, but I could not verify every requested break cell for ${staffName} on ${date}. Please refresh the schedule before making another change.`,
+      changed: true,
+      toolsUsed: ["edit_schedule_cells"],
+      writeToolsUsed: ["edit_schedule_cells"],
+    });
+  }
+
+  return NextResponse.json({
+    ...baseData,
+    reply: `Done. I added ${staffName}'s break from ${displayTime(range.startTime)} to ${displayTime(range.endTime)} on ${date} and verified the saved break block.\n\nIs there anything else you'd like help with?`,
+    toolsUsed: [
+      ...new Set([...(Array.isArray(baseData.toolsUsed) ? baseData.toolsUsed : []), "edit_schedule_cells"]),
+    ],
+    writeToolsUsed: ["edit_schedule_cells"],
+    changed: true,
+    effectiveDate: date,
+  });
 }

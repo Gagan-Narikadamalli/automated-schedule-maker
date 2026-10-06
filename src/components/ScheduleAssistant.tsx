@@ -110,16 +110,6 @@ function makeId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function setNativeInputValue(input: HTMLInputElement, value: string) {
-  const descriptor = Object.getOwnPropertyDescriptor(
-    HTMLInputElement.prototype,
-    "value"
-  );
-  descriptor?.set?.call(input, value);
-  input.dispatchEvent(new Event("input", { bubbles: true }));
-  input.dispatchEvent(new Event("change", { bubbles: true }));
-}
-
 function readWorkspaceContext(): WorkspaceContext | null {
   if (typeof document === "undefined") return null;
 
@@ -143,6 +133,31 @@ function readWorkspaceContext(): WorkspaceContext | null {
     date,
     dateSelectionExplicit: dateInput?.dataset.aiDateExplicit === "true",
   };
+}
+
+function normalizeShortReply(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[.!?]+$/g, "")
+    .replace(/\s+/g, " ");
+}
+
+function isConversationEndReply(value: string): boolean {
+  const normalized = normalizeShortReply(value);
+  return /^(no|nope|nah|no thanks|no thank you|nothing else|that's all|thats all|all done|done|i'm done|im done|that is all)$/.test(
+    normalized
+  );
+}
+
+function assistantInvitedMoreHelp(messages: ChatMessage[]): boolean {
+  const latestAssistant = [...messages]
+    .reverse()
+    .find((message) => message.role === "assistant");
+  if (!latestAssistant) return false;
+  return /is there anything else (you('|’)d|you would) like help with\??/i.test(
+    latestAssistant.text
+  );
 }
 
 export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps) {
@@ -205,7 +220,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     setDate(workspaceContext.date);
     setDateSelectionExplicit(workspaceContext.dateSelectionExplicit);
     setStatus(
-      `Linked to ${workspaceContext.locationName} on ${workspaceContext.date}.`
+      `Connected to ${workspaceContext.locationName}. Date context follows the scheduler conversation and selected calendar day.`
     );
   }, [open]);
 
@@ -230,17 +245,40 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     };
   }
 
-  function chooseAssistantDate(nextDate: string) {
-    setDate(nextDate);
-    setDateSelectionExplicit(true);
-    const workspaceDateInput = document.querySelector(
-      '.schedule-context-controls input[type="date"]'
-    ) as HTMLInputElement | null;
-    if (workspaceDateInput) {
-      workspaceDateInput.dataset.aiDateExplicit = "true";
-      setNativeInputValue(workspaceDateInput, nextDate);
+  function resetConversation() {
+    const workspaceContext = readWorkspaceContext();
+    if (workspaceContext) {
+      setLocationId(workspaceContext.locationId);
+      setDate(workspaceContext.date);
+      setDateSelectionExplicit(workspaceContext.dateSelectionExplicit);
     }
-    setStatus(`Date selected for Scheduler AI: ${nextDate}.`);
+    setMessages([]);
+    setInput("");
+    setShowHelp(false);
+    setMode(null);
+    setCorrectionFor(null);
+    setCorrection("");
+    setWorking(false);
+    setStatus("New Scheduler AI conversation ready.");
+  }
+
+  function completeConversation(message: string) {
+    const userMessage: ChatMessage = {
+      id: makeId("user"),
+      role: "user",
+      text: message,
+    };
+    const closingMessage: ChatMessage = {
+      id: makeId("assistant-complete"),
+      role: "assistant",
+      text: "Okay. Conversation complete — starting a fresh Scheduler AI chat.",
+      trainingExampleId: null,
+    };
+    setMessages((current) => [...current, userMessage, closingMessage]);
+    setInput("");
+    setShowHelp(false);
+    setStatus("Conversation complete. Refreshing chat...");
+    window.setTimeout(resetConversation, 850);
   }
 
   function chooseSavedPrompt(prompt: string) {
@@ -254,6 +292,11 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     const message = input.trim();
     const requestContext = getRequestContext();
     if (!message || !requestContext.locationId || working) return;
+
+    if (isConversationEndReply(message) && assistantInvitedMoreHelp(messages)) {
+      completeConversation(message);
+      return;
+    }
 
     const history = messages
       .slice(-12)
@@ -269,7 +312,9 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     setInput("");
     setShowHelp(false);
     setWorking(true);
-    setStatus("Scheduler AI is analyzing the conversation, resolving the intended date, and deciding the necessary actions...");
+    setStatus(
+      "Scheduler AI is resolving the date and loading the relevant staff, client, availability, break, coverage, event, and unplaced information..."
+    );
 
     try {
       const response = await fetch("/api/ai", {
@@ -312,15 +357,15 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
       } else {
         setStatus(
           data.toolsUsed?.length
-            ? `${data.mode === "AUTONOMOUS" ? "Autonomous" : "Read-only"} scheduler run used: ${data.toolsUsed.join(", ")}`
-            : "Scheduler AI request complete. Continue the conversation if the AI asked for a date or another required detail."
+            ? `${data.mode === "AUTONOMOUS" ? "Autonomous" : "Read-only"} scheduler analysis used: ${data.toolsUsed.join(", ")}`
+            : "Scheduler AI response complete. Continue naturally if it asked for a date, clarification, or confirmation."
         );
       }
     } catch (error) {
       const messageText =
         error instanceof Error
           ? error.message
-          : "Scheduler AI could not complete the request.";
+          : "Scheduler AI could not complete the request. Please try again with different or more specific scheduler information.";
       setMessages((current) => [
         ...current,
         {
@@ -407,17 +452,17 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
           <div className={styles.readOnlyNotice}>
             <strong>
               {mode === "AUTONOMOUS"
-                ? "Autonomous scheduler mode"
+                ? "Autonomous scheduler assistant"
                 : mode === "READ_ONLY"
-                  ? "Read-only scheduler mode"
-                  : "Scheduler website control"}
+                  ? "Read-only scheduler assistant"
+                  : "Scheduler conversation"}
             </strong>
             <span>
               {mode === "AUTONOMOUS"
-                ? "Can analyze normal language, ask follow-up questions, resolve dates, and operate the scheduler through its existing rules and APIs."
+                ? "Can answer schedule questions, ask follow-ups, inspect date-specific context, and make scheduler changes through the existing rules and APIs."
                 : mode === "READ_ONLY"
-                  ? "Can inspect the scheduler website but write actions are disabled."
-                  : "Type any scheduler-related request. If a required date is missing, the AI will ask instead of guessing."}
+                  ? "Can inspect the scheduler website and answer schedule questions, but write actions are disabled."
+                  : "Ask any scheduler-related question naturally. The assistant will ask for a day/date when one is required instead of guessing."}
             </span>
           </div>
 
@@ -437,19 +482,12 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
                 ))}
               </select>
             </label>
-            <label>
-              Date
-              <input
-                type="date"
-                value={date}
-                disabled={working}
-                onChange={(event) => chooseAssistantDate(event.target.value)}
-              />
-            </label>
           </div>
 
           <div className={styles.promptHint}>
-            <span>Ask naturally — “Anias is out” will ask for a date; “Anias is out today” can act immediately.</span>
+            <span>
+              Ask naturally — assignments, availability, clients, breaks, coverage, call-outs, naps/speech, rules, changes, or generation. Dates are handled through the conversation and scheduler calendar.
+            </span>
             <button
               type="button"
               disabled={working}
@@ -488,7 +526,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
           <div className={styles.messages} aria-live="polite">
             {messages.length === 0 ? (
               <div className={styles.emptyState}>
-                Type any request related to the scheduler website. The AI can inspect and change schedules, staff/client setup, call-outs, attendance, naps, speech, teams, rules, and supervision. It keeps the conversation so you can answer follow-up questions without repeating the original request.
+                Ask a question or request a change in normal language. For a clear date, Scheduler AI loads that day's staff availability, client requirements, saved assignments, breaks, events, call-outs, unplaced work, and coverage before answering. If a day is unclear, it will ask which day. If the requested day has no generated schedule, it will offer to generate it.
               </div>
             ) : (
               messages.map((message) => (
@@ -570,7 +608,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
             )}
             {working && (
               <div className={styles.thinking}>
-                Analyzing the conversation and working through the scheduler…
+                Loading the relevant date context and working through the scheduler…
               </div>
             )}
           </div>

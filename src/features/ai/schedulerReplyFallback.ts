@@ -1,3 +1,5 @@
+import { buildSchedulerAdvisoryReplyFallback } from "./schedulerAdvisoryReplyFallback";
+
 type ToolEvidence = {
   toolName: string;
   output: unknown;
@@ -190,6 +192,9 @@ export function buildSchedulerReplyFallback({
   toolEvidence,
   writeToolsUsed,
 }: FallbackOptions): string {
+  const advisory = buildSchedulerAdvisoryReplyFallback({ date, toolEvidence });
+  if (advisory) return advisory;
+
   if (writeToolsUsed.length === 0 && missingSchedule(toolEvidence)) {
     return `The schedule for ${date} has not been generated yet. Would you like me to generate the schedule for ${date}?`;
   }
