@@ -1,4 +1,4 @@
-import { ToolLoopAgent, stepCountIs } from "ai";
+import { ToolLoopAgent, generateText, stepCountIs } from "ai";
 import { NextResponse } from "next/server";
 
 import { buildSchedulerAiInstructions } from "@/features/ai/schedulerPrompt";
@@ -30,6 +30,7 @@ export const maxDuration = 300;
 const DEFAULT_SCHEDULER_AI_MODEL = "openai/gpt-5-nano";
 const MAX_MESSAGE_LENGTH = 5000;
 const MAX_HISTORY_MESSAGES = 12;
+const MAX_TOOL_EVIDENCE_LENGTH = 24_000;
 
 function cleanLocationName(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -203,6 +204,16 @@ function buildConversationPrompt(
   return `Conversation so far:\n${transcript}\n\nUser's latest message:\n${message}`;
 }
 
+function safeToolEvidence(value: unknown): string {
+  try {
+    const serialized = JSON.stringify(value, null, 2);
+    if (!serialized) return "No structured tool output was available.";
+    return serialized.slice(0, MAX_TOOL_EVIDENCE_LENGTH);
+  } catch {
+    return "The scheduler tools completed, but their structured output could not be serialized.";
+  }
+}
+
 export async function POST(request: Request) {
   const auth = await requireApiSession();
   if (auth.error) return auth.error;
@@ -302,9 +313,6 @@ export async function POST(request: Request) {
       },
     });
 
-    const reply =
-      result.text.trim() ||
-      "I could not produce a scheduler result for that request.";
     const toolsUsed = [
       ...new Set(
         result.steps.flatMap((step) =>
@@ -319,6 +327,43 @@ export async function POST(request: Request) {
     );
     const changed = autonomousWrites && writeToolsUsed.length > 0;
     const mode = autonomousWrites ? "AUTONOMOUS" : "READ_ONLY";
+
+    let reply = result.text.trim();
+
+    // Some tool-capable models occasionally finish immediately after the final
+    // tool result without emitting a user-facing text message. The scheduler
+    // work still succeeded in that case, so synthesize a response from the
+    // actual tool evidence instead of returning an unhelpful generic fallback.
+    if (!reply && toolsUsed.length > 0) {
+      const toolEvidence = result.steps.flatMap((step) =>
+        step.toolResults.map((toolResult) => ({
+          toolName: toolResult.toolName,
+          input: toolResult.input,
+          output: toolResult.output,
+        }))
+      );
+
+      try {
+        const synthesis = await generateText({
+          model,
+          instructions: `You are the final-response writer for the Automatic Schedule Maker assistant. Write a concise, natural answer to the user's scheduler request using ONLY the supplied scheduler tool evidence. Do not call tools. Do not invent names, coverage, conflicts, or changes. Clearly say what date was checked or changed. If the evidence shows uncovered work or break problems, state them. If no write tool was used, do not imply that anything was changed. If a write tool was used, distinguish completed changes from remaining problems. Sound like a helpful scheduling assistant rather than a system log.`,
+          prompt: `Clinic: ${locationName || "Clinic"}\nEffective date: ${resolvedDate.date}\nOriginal user request: ${message}\nWrite tools used: ${writeToolsUsed.join(", ") || "none"}\n\nScheduler tool evidence:\n${safeToolEvidence(toolEvidence)}`,
+          maxOutputTokens: 1400,
+          timeout: {
+            totalMs: 55_000,
+          },
+        });
+        reply = synthesis.text.trim();
+      } catch (synthesisError) {
+        console.error("Scheduler AI final response synthesis failed:", synthesisError);
+      }
+    }
+
+    if (!reply) {
+      reply = toolsUsed.length > 0
+        ? `I completed the scheduler checks for ${resolvedDate.date}, but the response summary could not be generated. ${changed ? "The requested scheduler action may have changed saved data; please review the selected day before making another edit." : "No scheduler write action was performed."}`
+        : "I could not produce a scheduler result for that request. Please rephrase the scheduler task or provide the missing detail.";
+    }
 
     let trainingExampleId: string | null = null;
     try {
