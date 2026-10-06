@@ -10,13 +10,78 @@ import type { SchedulerAiContext } from "./types";
 
 type DatabaseRecord = Record<string, any>;
 
+type ScheduleLookupInput = {
+  staffName?: string;
+  clientCode?: string;
+  startTime?: string;
+  endTime?: string;
+  includeBreaks?: boolean;
+  includeFreeStaff?: boolean;
+};
+
+type EnrichedAssignment = {
+  staffId: string | null;
+  staffName: string | null;
+  clientId: string | null;
+  clientCode: string | null;
+  startTime: string;
+  endTime: string;
+  assignmentType: string;
+  source: string;
+  locked: boolean;
+  manuallyOverridden: boolean;
+};
+
 const noInputSchema = jsonSchema<Record<string, never>>({
   type: "object",
   properties: {},
   additionalProperties: false,
 });
 
+const scheduleLookupSchema = jsonSchema<ScheduleLookupInput>({
+  type: "object",
+  properties: {
+    staffName: {
+      type: "string",
+      description:
+        "Optional staff name from the user's question, for example Anias or Areyana. Partial/case-insensitive matching is supported.",
+    },
+    clientCode: {
+      type: "string",
+      description:
+        "Optional client display code from the user's question, for example CaMe or MiSm. Partial/case-insensitive matching is supported.",
+    },
+    startTime: {
+      type: "string",
+      description: "Optional range start in 24-hour HH:MM format, for example 08:00.",
+    },
+    endTime: {
+      type: "string",
+      description: "Optional range end in 24-hour HH:MM format, for example 14:00.",
+    },
+    includeBreaks: {
+      type: "boolean",
+      description: "Include Break, Break/Nap, Break/Speech, Nap, and Speech segments. Defaults to true.",
+    },
+    includeFreeStaff: {
+      type: "boolean",
+      description:
+        "Also calculate which staff are available but unassigned during the requested time range. Use for questions such as who is free/available.",
+    },
+  },
+  additionalProperties: false,
+});
+
 const BREAK_TYPES = new Set(["BREAK", "BREAK_NAP", "BREAK_SPEECH"]);
+const NON_CLIENT_TYPES = new Set([
+  "BREAK",
+  "BREAK_NAP",
+  "BREAK_SPEECH",
+  "NAP",
+  "SPEECH",
+  "UNAVAILABLE",
+  "OPEN",
+]);
 
 function idFrom(value: unknown): string | null {
   if (!value) return null;
@@ -25,6 +90,63 @@ function idFrom(value: unknown): string | null {
     return id ? String(id) : null;
   }
   return String(value);
+}
+
+function normalize(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function overlapsRange(
+  assignment: { startTime: string; endTime: string },
+  startTime?: string,
+  endTime?: string
+): boolean {
+  if (startTime && assignment.endTime <= startTime) return false;
+  if (endTime && assignment.startTime >= endTime) return false;
+  return true;
+}
+
+function mergeSegments(assignments: EnrichedAssignment[]) {
+  const sorted = [...assignments].sort((left, right) => {
+    const staffCompare = (left.staffName ?? "").localeCompare(right.staffName ?? "");
+    if (staffCompare !== 0) return staffCompare;
+    const clientCompare = (left.clientCode ?? "").localeCompare(right.clientCode ?? "");
+    if (clientCompare !== 0) return clientCompare;
+    const typeCompare = left.assignmentType.localeCompare(right.assignmentType);
+    if (typeCompare !== 0) return typeCompare;
+    return left.startTime.localeCompare(right.startTime);
+  });
+
+  const segments: Array<{
+    staffName: string | null;
+    clientCode: string | null;
+    assignmentType: string;
+    startTime: string;
+    endTime: string;
+  }> = [];
+
+  for (const assignment of sorted) {
+    const previous = segments.at(-1);
+    if (
+      previous &&
+      previous.staffName === assignment.staffName &&
+      previous.clientCode === assignment.clientCode &&
+      previous.assignmentType === assignment.assignmentType &&
+      previous.endTime === assignment.startTime
+    ) {
+      previous.endTime = assignment.endTime;
+      continue;
+    }
+    segments.push({
+      staffName: assignment.staffName,
+      clientCode: assignment.clientCode,
+      assignmentType: assignment.assignmentType,
+      startTime: assignment.startTime,
+      endTime: assignment.endTime,
+    });
+  }
+
+  return segments;
 }
 
 async function loadAssignments(locationId: string, date: string): Promise<DatabaseRecord[]> {
@@ -38,13 +160,160 @@ async function loadAssignments(locationId: string, date: string): Promise<Databa
   return records as unknown as DatabaseRecord[];
 }
 
+function enrichAssignments(
+  assignments: DatabaseRecord[],
+  staffNames: Map<string, string>,
+  clientCodes: Map<string, string>
+): EnrichedAssignment[] {
+  return assignments.map((assignment) => {
+    const staffId = idFrom(assignment.staffId);
+    const clientId = idFrom(assignment.clientId);
+    return {
+      staffId,
+      staffName: staffId ? staffNames.get(staffId) ?? "Unknown staff" : null,
+      clientId,
+      clientCode: clientId ? clientCodes.get(clientId) ?? null : null,
+      startTime: String(assignment.startTime ?? ""),
+      endTime: String(assignment.endTime ?? ""),
+      assignmentType: String(assignment.assignmentType ?? ""),
+      source: String(assignment.source ?? ""),
+      locked: assignment.locked === true,
+      manuallyOverridden: assignment.manuallyOverridden === true,
+    };
+  });
+}
+
 export function createSchedulerReadOnlyTools(context: SchedulerAiContext) {
   const { locationId, date } = context;
 
   return {
+    lookup_schedule: tool({
+      description:
+        "Answer detailed conversational questions about the selected day's schedule by staff name, client code, and/or time range. Prefer this tool for questions such as: who is Anias with from 8 to 2, what clients does Areyana have, who is covering CaMe at 10, when is Danna on break, what is JeMa's coverage, or who is free between 12 and 1. It returns merged human-friendly schedule segments and can calculate free staff.",
+      inputSchema: scheduleLookupSchema,
+      execute: async (input) => {
+        const [dayData, assignments] = await Promise.all([
+          buildDaySchedulerInput(locationId, date),
+          loadAssignments(locationId, date),
+        ]);
+        const staffNames = new Map(dayData.staff.map((member) => [member.id, member.name]));
+        const clientCodes = new Map(dayData.clients.map((client) => [client.id, client.displayCode]));
+        const enriched = enrichAssignments(assignments, staffNames, clientCodes);
+
+        let resolvedStaffId: string | null = null;
+        let resolvedStaffName: string | null = null;
+        let staffMatches: Array<{ id: string; name: string }> = [];
+        if (input.staffName?.trim()) {
+          const target = normalize(input.staffName);
+          staffMatches = dayData.staff
+            .filter((member) => {
+              const candidate = normalize(member.name);
+              return candidate === target || candidate.includes(target) || target.includes(candidate);
+            })
+            .map((member) => ({ id: member.id, name: member.name }));
+          if (staffMatches.length === 1) {
+            resolvedStaffId = staffMatches[0].id;
+            resolvedStaffName = staffMatches[0].name;
+          }
+        }
+
+        let resolvedClientId: string | null = null;
+        let resolvedClientCode: string | null = null;
+        let clientMatches: Array<{ id: string; displayCode: string }> = [];
+        if (input.clientCode?.trim()) {
+          const target = normalize(input.clientCode);
+          clientMatches = dayData.clients
+            .filter((client) => {
+              const candidate = normalize(client.displayCode);
+              return candidate === target || candidate.includes(target) || target.includes(candidate);
+            })
+            .map((client) => ({ id: client.id, displayCode: client.displayCode }));
+          if (clientMatches.length === 1) {
+            resolvedClientId = clientMatches[0].id;
+            resolvedClientCode = clientMatches[0].displayCode;
+          }
+        }
+
+        const ambiguousStaff = Boolean(input.staffName?.trim()) && staffMatches.length !== 1;
+        const ambiguousClient = Boolean(input.clientCode?.trim()) && clientMatches.length !== 1;
+        if (ambiguousStaff || ambiguousClient) {
+          return {
+            locationId,
+            date,
+            needsClarification: true,
+            staffQuery: input.staffName ?? null,
+            staffMatches,
+            clientQuery: input.clientCode ?? null,
+            clientMatches,
+            message: ambiguousStaff
+              ? staffMatches.length === 0
+                ? `No active staff matched ${input.staffName}.`
+                : `More than one staff member matched ${input.staffName}.`
+              : clientMatches.length === 0
+                ? `No client matched ${input.clientCode}.`
+                : `More than one client matched ${input.clientCode}.`,
+          };
+        }
+
+        const includeBreaks = input.includeBreaks !== false;
+        const filtered = enriched.filter((assignment) => {
+          if (resolvedStaffId && assignment.staffId !== resolvedStaffId) return false;
+          if (resolvedClientId && assignment.clientId !== resolvedClientId) return false;
+          if (!overlapsRange(assignment, input.startTime, input.endTime)) return false;
+          if (!includeBreaks && NON_CLIENT_TYPES.has(assignment.assignmentType)) return false;
+          return true;
+        });
+
+        const result: Record<string, unknown> = {
+          locationId,
+          date,
+          needsClarification: false,
+          resolvedStaffName,
+          resolvedClientCode,
+          requestedRange: {
+            startTime: input.startTime ?? null,
+            endTime: input.endTime ?? null,
+          },
+          count: filtered.length,
+          segments: mergeSegments(filtered),
+          assignments: filtered,
+        };
+
+        if (input.includeFreeStaff) {
+          const rangeSlots = new Set(
+            dayData.input.timeSlots.filter((slot: string) => {
+              if (input.startTime && slot < input.startTime) return false;
+              if (input.endTime && slot >= input.endTime) return false;
+              return true;
+            })
+          );
+          const freeStaff = dayData.staff.map((member) => {
+            const scheduledSlots = new Set(
+              enriched
+                .filter((assignment) => assignment.staffId === member.id)
+                .map((assignment) => assignment.startTime)
+            );
+            const freeSlots = member.availableSlots.filter(
+              (slot) => rangeSlots.has(slot) && !scheduledSlots.has(slot)
+            );
+            return {
+              id: member.id,
+              name: member.name,
+              freeSlots,
+              freeForEntireRequestedRange:
+                rangeSlots.size > 0 && freeSlots.length === rangeSlots.size,
+            };
+          });
+          result.freeStaff = freeStaff;
+        }
+
+        return result;
+      },
+    }),
+
     get_day_schedule: tool({
       description:
-        "Read the saved assignments for the currently selected scheduler location and date. Use this before answering questions about who is assigned, breaks, locked/manual blocks, naps, speech, or the day's current state.",
+        "Read all saved assignments for the currently selected scheduler location and date. Use this for broad day questions, comparisons, locked/manual blocks, naps, speech, or when lookup_schedule is too narrow.",
       inputSchema: noInputSchema,
       execute: async () => {
         const [dayData, assignments] = await Promise.all([
@@ -56,6 +325,7 @@ export function createSchedulerReadOnlyTools(context: SchedulerAiContext) {
         const clientCodes = new Map(
           dayData.clients.map((client) => [client.id, client.displayCode])
         );
+        const enriched = enrichAssignments(assignments, staffNames, clientCodes);
 
         return {
           locationId,
@@ -65,28 +335,15 @@ export function createSchedulerReadOnlyTools(context: SchedulerAiContext) {
             0
           ),
           assignmentCount: assignments.length,
-          assignments: assignments.map((assignment) => {
-            const staffId = idFrom(assignment.staffId);
-            const clientId = idFrom(assignment.clientId);
-            return {
-              staffId,
-              staffName: staffId ? staffNames.get(staffId) ?? "Unknown staff" : null,
-              clientCode: clientId ? clientCodes.get(clientId) ?? null : null,
-              startTime: String(assignment.startTime ?? ""),
-              endTime: String(assignment.endTime ?? ""),
-              assignmentType: String(assignment.assignmentType ?? ""),
-              source: String(assignment.source ?? ""),
-              locked: assignment.locked === true,
-              manuallyOverridden: assignment.manuallyOverridden === true,
-            };
-          }),
+          assignments: enriched,
+          segments: mergeSegments(enriched),
         };
       },
     }),
 
     get_staff: tool({
       description:
-        "Read active scheduler staff, their availability, current scheduled client workload, and required-break status for the selected day. Use this for questions such as who is available or who is missing a break.",
+        "Read active scheduler staff, their availability, current scheduled client workload, and required-break status for the selected day. Use this for questions such as who is available, who is called out, workload, or who is missing a break.",
       inputSchema: noInputSchema,
       execute: async () => {
         const [dayData, assignments] = await Promise.all([
