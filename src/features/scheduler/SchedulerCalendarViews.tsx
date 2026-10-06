@@ -304,34 +304,48 @@ function ClientScheduleView({
       (assignment) => clientId(assignment) === clientIdValue && assignment.startTime === startTime
     );
     const coverage = matching.find((assignment) => assignment.assignmentType === "CLIENT_1_TO_1");
+    const coverageName = coverage
+      ? staffNameById.get(coverage.staffId) || "another staff member"
+      : null;
+
+    const napBreak = matching.find((assignment) => assignment.assignmentType === "BREAK_NAP");
+    const nap = matching.find((assignment) => assignment.assignmentType === "NAP");
+    if (napBreak || nap) {
+      const breakStaff = napBreak
+        ? staffNameById.get(napBreak.staffId) || "Staff"
+        : null;
+      const detail = coverageName
+        ? napBreak
+          ? `Covered by ${coverageName}; ${breakStaff} on break`
+          : `Covered by ${coverageName}`
+        : napBreak
+          ? `${breakStaff} on break during nap`
+          : "Client nap";
+      return { text: "Nap", detail, kind: "nap" };
+    }
+
+    const speechBreak = matching.find((assignment) => assignment.assignmentType === "BREAK_SPEECH");
+    const speech = matching.find((assignment) => assignment.assignmentType === "SPEECH");
+    if (speechBreak || speech) {
+      const breakStaff = speechBreak
+        ? staffNameById.get(speechBreak.staffId) || "Staff"
+        : null;
+      const detail = coverageName
+        ? speechBreak
+          ? `Covered by ${coverageName}; ${breakStaff} on break`
+          : `Covered by ${coverageName}`
+        : speechBreak
+          ? `${breakStaff} on break during speech`
+          : "Fixed speech event";
+      return { text: "Speech", detail, kind: "speech" };
+    }
+
     if (coverage) {
       return {
-        text: staffNameById.get(coverage.staffId) || "Covered",
+        text: coverageName || "Covered",
         detail: "1:1 coverage",
         kind: "coverage",
       };
-    }
-    const napBreak = matching.find((assignment) => assignment.assignmentType === "BREAK_NAP");
-    if (napBreak) {
-      return {
-        text: "Nap",
-        detail: `${staffNameById.get(napBreak.staffId) || "Staff"} break`,
-        kind: "nap",
-      };
-    }
-    const speechBreak = matching.find((assignment) => assignment.assignmentType === "BREAK_SPEECH");
-    if (speechBreak) {
-      return {
-        text: "Speech",
-        detail: `${staffNameById.get(speechBreak.staffId) || "Staff"} break`,
-        kind: "speech",
-      };
-    }
-    if (matching.some((assignment) => assignment.assignmentType === "NAP")) {
-      return { text: "Nap", detail: "Client nap", kind: "nap" };
-    }
-    if (matching.some((assignment) => assignment.assignmentType === "SPEECH")) {
-      return { text: "Speech", detail: "Fixed event", kind: "speech" };
     }
     if (unplaced.some((record) => record.clientId === clientIdValue && record.originalStartTime === startTime)) {
       return { text: "Needs coverage", detail: "Unplaced", kind: "uncovered" };
@@ -352,7 +366,7 @@ function ClientScheduleView({
         <div>
           <span className={styles.eyebrow}>CLIENT COVERAGE VIEW</span>
           <h2>{locationName} · {longDate(date)}</h2>
-          <p>Staff breaks are not shown as client downtime. If another staff member covers a client during a break, that covering staff member appears here.</p>
+          <p>Nap and speech stay visible in the client view. If another staff member covers the client while someone is on break, the covering staff member is shown in the same cell.</p>
         </div>
         <div className={styles.legend}>
           <span><i className={styles.legendCoverage} />1:1 coverage</span>
