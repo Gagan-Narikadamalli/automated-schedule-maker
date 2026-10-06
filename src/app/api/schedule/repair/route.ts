@@ -233,6 +233,19 @@ export async function POST(request: Request) {
       result.assignments
     );
 
+    const unplacedRemainingCount =
+      repairMode === "COVERAGE"
+        ? await UnplacedAssignment.countDocuments({
+            locationId,
+            date,
+            status: "UNPLACED",
+          })
+        : 0;
+    const resolvedUnplacedCount =
+      repairMode === "COVERAGE"
+        ? Math.max(priorityRequirements.length - unplacedRemainingCount, 0)
+        : 0;
+
     await writeAuditLog({
       locationId,
       userId: auth.session.userId,
@@ -246,6 +259,8 @@ export async function POST(request: Request) {
       after: {
         repairMode,
         priorityUnplacedCount: priorityRequirements.length,
+        resolvedUnplacedCount,
+        unplacedRemainingCount,
         affectedStaffIds,
         affectedSlots,
         removedAssignmentCount: removedOriginalIds.length,
@@ -266,6 +281,8 @@ export async function POST(request: Request) {
       locationId,
       repairMode,
       priorityUnplacedCount: priorityRequirements.length,
+      resolvedUnplacedCount,
+      unplacedRemainingCount,
       affectedStaffIds,
       affectedSlots,
       removedAssignmentCount: removedOriginalIds.length,
