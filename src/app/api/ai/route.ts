@@ -33,9 +33,10 @@ function isAffirmative(value: string): boolean {
   const text = value
     .trim()
     .toLowerCase()
-    .replace(/[.!?]+$/g, "")
-    .replace(/\s+/g, " ");
-  return /^(yes|yeah|yep|sure|ok|okay|yes please|please do|go ahead|proceed|do it|allow it|override it|yes override|yes proceed)$/.test(text);
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return /^(yes|yeah|yep|sure|ok|okay|yes please|please do|go ahead|proceed|do it|allow it|override it|yes override|yes override it|yes proceed|yes go ahead)$/.test(text);
 }
 
 function isExplicitBreakWrite(value: string): boolean {
