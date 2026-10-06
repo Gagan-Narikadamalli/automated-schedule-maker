@@ -54,10 +54,9 @@ function countUnplacedBlocks(tray: Element | null): number {
 /**
  * DOM-level affordance layer for the scheduler workspace.
  *
- * It keeps the Unplaced tray out of the schedule's permanent grid width and
- * exposes it as a compact side launcher with a live count. It also mounts the
- * Daily Schedule Excel export into the existing toolbar without coupling the
- * export feature to the grid's internal selection state.
+ * The daily schedule owns the full workspace width until the manager explicitly
+ * opens Unplaced Assignments. When open, the original tray is restored beside
+ * the schedule so blocks can be dragged a short distance into the calendar.
  */
 export function SchedulerInteractionPolish() {
   const [unplacedOpen, setUnplacedOpen] = useState(false);
@@ -117,13 +116,26 @@ export function SchedulerInteractionPolish() {
         currentTray.classList.remove(styles.floatingTray, styles.floatingTrayOpen);
         currentTray.removeAttribute("aria-hidden");
       }
-      currentLayout?.classList.remove(styles.singleColumnLayout);
+      if (currentLayout) {
+        currentLayout.classList.remove(styles.singleColumnLayout, styles.drawerLayout);
+      }
       currentTray = null;
       currentLayout = null;
     }
 
     function updateCount() {
       setUnplacedCount(countUnplacedBlocks(currentTray));
+    }
+
+    function applyOpenState() {
+      if (!currentTray || !currentLayout) return;
+
+      currentTray.classList.add(styles.floatingTray);
+      currentTray.classList.toggle(styles.floatingTrayOpen, unplacedOpen);
+      currentTray.setAttribute("aria-hidden", unplacedOpen ? "false" : "true");
+
+      currentLayout.classList.toggle(styles.singleColumnLayout, !unplacedOpen);
+      currentLayout.classList.toggle(styles.drawerLayout, unplacedOpen);
     }
 
     function bindWorkspace() {
@@ -134,11 +146,8 @@ export function SchedulerInteractionPolish() {
       if (nextToolbar !== toolbarTarget) setToolbarTarget(nextToolbar);
 
       if (nextTray === currentTray) {
-        if (currentTray) {
-          currentTray.classList.toggle(styles.floatingTrayOpen, unplacedOpen);
-          currentTray.setAttribute("aria-hidden", unplacedOpen ? "false" : "true");
-          updateCount();
-        }
+        applyOpenState();
+        updateCount();
         return;
       }
 
@@ -147,15 +156,12 @@ export function SchedulerInteractionPolish() {
       currentLayout = nextTray?.closest(".schedule-layout") as HTMLElement | null;
       setHasUnplacedTray(Boolean(currentTray));
 
-      if (!currentTray) {
+      if (!currentTray || !currentLayout) {
         setUnplacedCount(0);
         return;
       }
 
-      currentTray.classList.add(styles.floatingTray);
-      currentTray.classList.toggle(styles.floatingTrayOpen, unplacedOpen);
-      currentTray.setAttribute("aria-hidden", unplacedOpen ? "false" : "true");
-      currentLayout?.classList.add(styles.singleColumnLayout);
+      applyOpenState();
       updateCount();
 
       trayObserver = new MutationObserver(updateCount);
