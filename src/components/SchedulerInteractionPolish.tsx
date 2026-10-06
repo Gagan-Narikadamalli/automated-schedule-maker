@@ -1,6 +1,11 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
+
+import { exportDailyScheduleXlsx } from "@/features/scheduler/exportDailyScheduleXlsx";
+
+import styles from "./SchedulerInteractionPolish.module.css";
 
 function findManualModeButton(): HTMLButtonElement | null {
   return (
@@ -22,18 +27,45 @@ function findCancelPlacementButton(): HTMLButtonElement | null {
 
 function isUnplacedDragSource(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
-  return Boolean(target.closest('.unplaced-tray [draggable="true"]'));
+  return Boolean(target.closest('.unplaced-tray [title^="Drag this block"]'));
+}
+
+function readExportContext(): {
+  locationId: string;
+  locationName: string;
+  date: string;
+} | null {
+  const container = document.querySelector(".schedule-context-controls");
+  if (!container) return null;
+  const select = container.querySelector("select") as HTMLSelectElement | null;
+  const dateInput = container.querySelector('input[type="date"]') as HTMLInputElement | null;
+  const locationId = select?.value?.trim() ?? "";
+  const locationName = select?.selectedOptions?.[0]?.textContent?.trim() || "Clinic";
+  const date = dateInput?.value?.trim() ?? "";
+  if (!locationId || !date) return null;
+  return { locationId, locationName, date };
+}
+
+function countUnplacedBlocks(tray: Element | null): number {
+  if (!tray) return 0;
+  return tray.querySelectorAll('button[title^="Drag this block"]').length;
 }
 
 /**
- * Small DOM-level affordance layer for the scheduler workspace.
+ * DOM-level affordance layer for the scheduler workspace.
  *
- * Unplaced blocks still use the scheduler's existing drag/drop implementation,
- * but the temporary placement state is automatically cleaned up when the drag
- * ends. This prevents a canceled drag from leaving the grid in click-to-place
- * mode and restores Manual Mode to the manager's previous setting.
+ * It keeps the Unplaced tray out of the schedule's permanent grid width and
+ * exposes it as a compact side launcher with a live count. It also mounts the
+ * Daily Schedule Excel export into the existing toolbar without coupling the
+ * export feature to the grid's internal selection state.
  */
 export function SchedulerInteractionPolish() {
+  const [unplacedOpen, setUnplacedOpen] = useState(false);
+  const [unplacedCount, setUnplacedCount] = useState(0);
+  const [hasUnplacedTray, setHasUnplacedTray] = useState(false);
+  const [toolbarTarget, setToolbarTarget] = useState<HTMLElement | null>(null);
+  const [exporting, setExporting] = useState(false);
+
   useEffect(() => {
     let draggingUnplaced = false;
     let manualModeWasOn = false;
@@ -51,14 +83,8 @@ export function SchedulerInteractionPolish() {
       draggingUnplaced = false;
 
       window.setTimeout(() => {
-        // The existing scheduler internally enters placement state while an
-        // external block is being dragged. Clear it immediately after the drag
-        // finishes so placement remains drag-only from the manager's perspective.
         findCancelPlacementButton()?.click();
 
-        // Dragging an Unplaced assignment temporarily enables Manual Mode in the
-        // current scheduler implementation. If the manager had it off before the
-        // drag, return it to Auto-safe after the drop/cancel completes.
         const manualModeButton = findManualModeButton();
         if (
           !manualModeWasOn &&
@@ -79,5 +105,132 @@ export function SchedulerInteractionPolish() {
     };
   }, []);
 
-  return null;
+  useEffect(() => {
+    let currentTray: HTMLElement | null = null;
+    let currentLayout: HTMLElement | null = null;
+    let trayObserver: MutationObserver | null = null;
+
+    function cleanupCurrentTray() {
+      trayObserver?.disconnect();
+      trayObserver = null;
+      if (currentTray) {
+        currentTray.classList.remove(styles.floatingTray, styles.floatingTrayOpen);
+        currentTray.removeAttribute("aria-hidden");
+      }
+      currentLayout?.classList.remove(styles.singleColumnLayout);
+      currentTray = null;
+      currentLayout = null;
+    }
+
+    function updateCount() {
+      setUnplacedCount(countUnplacedBlocks(currentTray));
+    }
+
+    function bindWorkspace() {
+      const nextTray = document.querySelector(".unplaced-tray") as HTMLElement | null;
+      const nextToolbar = document.querySelector(
+        ".toolbar-card .toolbar-group"
+      ) as HTMLElement | null;
+      if (nextToolbar !== toolbarTarget) setToolbarTarget(nextToolbar);
+
+      if (nextTray === currentTray) {
+        if (currentTray) {
+          currentTray.classList.toggle(styles.floatingTrayOpen, unplacedOpen);
+          currentTray.setAttribute("aria-hidden", unplacedOpen ? "false" : "true");
+          updateCount();
+        }
+        return;
+      }
+
+      cleanupCurrentTray();
+      currentTray = nextTray;
+      currentLayout = nextTray?.closest(".schedule-layout") as HTMLElement | null;
+      setHasUnplacedTray(Boolean(currentTray));
+
+      if (!currentTray) {
+        setUnplacedCount(0);
+        return;
+      }
+
+      currentTray.classList.add(styles.floatingTray);
+      currentTray.classList.toggle(styles.floatingTrayOpen, unplacedOpen);
+      currentTray.setAttribute("aria-hidden", unplacedOpen ? "false" : "true");
+      currentLayout?.classList.add(styles.singleColumnLayout);
+      updateCount();
+
+      trayObserver = new MutationObserver(updateCount);
+      trayObserver.observe(currentTray, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+      });
+    }
+
+    const bodyObserver = new MutationObserver(bindWorkspace);
+    bodyObserver.observe(document.body, { childList: true, subtree: true });
+    bindWorkspace();
+
+    return () => {
+      bodyObserver.disconnect();
+      cleanupCurrentTray();
+    };
+  }, [unplacedOpen, toolbarTarget]);
+
+  async function handleExport() {
+    const context = readExportContext();
+    if (!context) {
+      window.alert("Choose a clinic and date before exporting the Daily Schedule.");
+      return;
+    }
+
+    try {
+      setExporting(true);
+      await exportDailyScheduleXlsx(context);
+    } catch (error) {
+      window.alert(
+        error instanceof Error
+          ? error.message
+          : "The Daily Schedule Excel workbook could not be created."
+      );
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  return (
+    <>
+      {toolbarTarget &&
+        createPortal(
+          <button
+            type="button"
+            className="button button-secondary"
+            disabled={exporting}
+            onClick={() => void handleExport()}
+            title="Export this date as a real Excel workbook (.xlsx)"
+          >
+            {exporting ? "Exporting Excel..." : "Export Excel (.xlsx)"}
+          </button>,
+          toolbarTarget
+        )}
+
+      {hasUnplacedTray && (
+        <button
+          type="button"
+          className={styles.unplacedLauncher}
+          aria-expanded={unplacedOpen}
+          aria-label={`${unplacedCount} unplaced assignment${unplacedCount === 1 ? "" : "s"}. ${unplacedOpen ? "Close" : "Open"} Unplaced Assignments.`}
+          onClick={() => setUnplacedOpen((current) => !current)}
+        >
+          <span className={styles.launcherIcon} aria-hidden="true">!</span>
+          <span>{unplacedOpen ? "Close Unplaced" : "Unplaced"}</span>
+          <span
+            className={`${styles.launcherBadge} ${unplacedCount === 0 ? styles.launcherBadgeEmpty : ""}`}
+            aria-hidden="true"
+          >
+            {unplacedCount > 99 ? "99+" : unplacedCount}
+          </span>
+        </button>
+      )}
+    </>
+  );
 }
