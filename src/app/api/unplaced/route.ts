@@ -9,6 +9,7 @@ import {
 } from "@/lib/api/auth";
 import { writeAuditLog } from "@/lib/api/audit";
 import { connectToDatabase } from "@/lib/db";
+import { Client } from "@/models/Client";
 import { UnplacedAssignment } from "@/models/UnplacedAssignment";
 
 type CreateRequest = {
@@ -87,7 +88,11 @@ export async function GET(request: Request) {
       date,
       status: "UNPLACED",
     })
-      .populate("clientId", "displayCode fullName color")
+      .populate({
+        path: "clientId",
+        model: Client,
+        select: "displayCode fullName color",
+      })
       .sort({ originalStartTime: 1, createdAt: 1 })
       .lean();
 
