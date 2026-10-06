@@ -1,33 +1,46 @@
 .singleColumnLayout {
   grid-template-columns: minmax(0, 1fr) !important;
+  gap: 0 !important;
+}
+
+.drawerLayout {
+  grid-template-columns: minmax(0, 1fr) 310px !important;
+  gap: 16px !important;
+  align-items: start;
 }
 
 .floatingTray {
-  position: fixed !important;
-  top: 118px !important;
-  right: 24px !important;
-  bottom: 158px !important;
-  width: min(390px, calc(100vw - 48px));
-  max-height: none !important;
-  overflow: auto;
-  z-index: 75;
-  margin: 0 !important;
-  transform: translateX(calc(100% + 48px));
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
-  box-shadow: 0 24px 60px rgba(11, 55, 91, 0.24) !important;
-  transition:
-    transform 180ms ease,
-    opacity 160ms ease,
-    visibility 160ms ease;
+  display: none !important;
 }
 
 .floatingTrayOpen {
-  transform: translateX(0);
-  opacity: 1;
-  visibility: visible;
-  pointer-events: auto;
+  display: block !important;
+  position: sticky !important;
+  top: 92px !important;
+  right: auto !important;
+  bottom: auto !important;
+  width: auto !important;
+  max-height: calc(100vh - 118px) !important;
+  overflow: auto;
+  z-index: 20;
+  margin: 0 !important;
+  transform: none !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
+  box-shadow: 0 18px 42px rgba(11, 55, 91, 0.14) !important;
+  animation: trayIn 160ms ease-out;
+}
+
+@keyframes trayIn {
+  from {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 .unplacedLauncher {
@@ -98,12 +111,29 @@
   background: #718396;
 }
 
-@media (max-width: 800px) {
-  .floatingTray {
-    top: 92px !important;
-    right: 12px !important;
+@media (max-width: 1100px) {
+  .drawerLayout {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 0 !important;
+  }
+
+  .floatingTrayOpen {
+    position: fixed !important;
+    top: 96px !important;
+    right: 16px !important;
     bottom: 154px !important;
-    width: calc(100vw - 24px);
+    width: min(360px, calc(100vw - 32px)) !important;
+    max-height: none !important;
+    z-index: 76;
+  }
+}
+
+@media (max-width: 800px) {
+  .floatingTrayOpen {
+    top: 84px !important;
+    right: 12px !important;
+    bottom: 150px !important;
+    width: calc(100vw - 24px) !important;
   }
 
   .unplacedLauncher {
