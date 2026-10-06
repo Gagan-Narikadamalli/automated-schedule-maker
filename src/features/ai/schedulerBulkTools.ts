@@ -324,7 +324,7 @@ export function createSchedulerBulkTools(context: SchedulerAiContext) {
   return {
     replace_schedule_blocks: tool({
       description:
-        "Deterministically replace MANY saved schedule blocks on the selected date. Use entityType=STAFF for requests like 'replace all Anias blocks with Areyana'. Use entityType=CLIENT for requests like 'replace CaMe with ZiBo everywhere/all blocks'. CLIENT replacement swaps same-time CaMe/ZiBo coverage when both already have coverage; source-only replaced cells leave the displaced source client in Unplaced. STAFF replacement moves every matching source block to the replacement staff at the same time and leaves any displaced target-client blocks in Unplaced. The first attempt must keep override flags false. If protected/rule conflicts are returned, ask the user before retrying with the needed override flag.",
+        "Deterministically replace MANY saved schedule blocks on the selected date. Use entityType=STAFF for requests like 'replace all Anias blocks with Areyana'. Use entityType=CLIENT for requests like 'replace CaMe with ZiBo everywhere/all blocks'. CLIENT replacement swaps same-time CaMe/ZiBo coverage when both already have coverage; source-only replaced cells leave the displaced source client in Unplaced. STAFF replacement moves every matching source block to the replacement staff at the same time. If the replacement staff already has ANY occupied block at one of those times, the first attempt returns a confirmation instead of overwriting it; after explicit approval, retry with the requested override and any displaced target-client blocks are preserved in Unplaced. The first attempt must keep override flags false.",
       inputSchema: replaceSchema,
       execute: async ({
         entityType,
@@ -368,6 +368,7 @@ export function createSchedulerBulkTools(context: SchedulerAiContext) {
         const swapped: JsonRecord[] = [];
         const replaced: JsonRecord[] = [];
         const overwrittenActivities: JsonRecord[] = [];
+        const occupiedTargetCells: JsonRecord[] = [];
 
         if (entityType === "STAFF") {
           const [sourceStaff, replacementStaff] = await Promise.all([
@@ -424,24 +425,45 @@ export function createSchedulerBulkTools(context: SchedulerAiContext) {
 
             const targetClientId = idFrom(targetAssignment?.clientId);
             const sourceClientId = idFrom(sourceAssignment.clientId);
+            let targetClientCode: string | null = null;
+            if (targetClientId) {
+              const targetClient = await Client.findById(targetClientId)
+                .select("displayCode")
+                .lean();
+              targetClientCode = targetClient
+                ? String((targetClient as unknown as JsonRecord).displayCode ?? "Client")
+                : "Client";
+            }
+
+            if (targetAssignment && targetAssignment.assignmentType !== "OPEN") {
+              occupiedTargetCells.push({
+                staffId: replacementStaffId,
+                staffName: String(replacementStaff.fullName),
+                startTime: slot,
+                assignmentType: String(targetAssignment.assignmentType),
+                clientId: targetClientId,
+                clientCode: targetClientCode,
+                protected: isProtected(targetAssignment),
+              });
+            }
+
             if (
               targetAssignment?.assignmentType === "CLIENT_1_TO_1" &&
               targetClientId &&
               targetClientId !== sourceClientId
             ) {
-              const targetClient = await Client.findById(targetClientId)
-                .select("displayCode")
-                .lean();
               unplacedAfterWrite.push({
                 clientId: targetClientId,
-                clientCode: targetClient
-                  ? String((targetClient as unknown as JsonRecord).displayCode ?? "Client")
-                  : "Client",
+                clientCode: targetClientCode ?? "Client",
                 staffId: replacementStaffId,
                 startTime: slot,
                 reason: `Displaced when all ${String(sourceStaff.fullName)} blocks were moved to ${String(replacementStaff.fullName)}.`,
               });
-            } else if (targetAssignment && targetAssignment.assignmentType !== "CLIENT_1_TO_1") {
+            } else if (
+              targetAssignment &&
+              targetAssignment.assignmentType !== "CLIENT_1_TO_1" &&
+              targetAssignment.assignmentType !== "OPEN"
+            ) {
               overwrittenActivities.push({
                 startTime: slot,
                 assignmentType: String(targetAssignment.assignmentType),
@@ -455,8 +477,37 @@ export function createSchedulerBulkTools(context: SchedulerAiContext) {
             });
           }
 
-          if (protectedCells.length > 0 && !allowLockedOverride) {
-            return protectedResult(protectedCells, staffNames);
+          const needsLockedOverride =
+            protectedCells.length > 0 && !allowLockedOverride;
+          const needsOccupiedOverride =
+            occupiedTargetCells.length > 0 && !allowRuleOverride;
+
+          if (needsLockedOverride || needsOccupiedOverride) {
+            return {
+              ok: false,
+              requiresConfirmation: true,
+              confirmationType:
+                needsLockedOverride && needsOccupiedOverride
+                  ? "LOCKED_AND_OCCUPIED_TARGET"
+                  : needsLockedOverride
+                    ? "LOCKED_OR_MANUAL"
+                    : "OCCUPIED_TARGET",
+              requiresLockedOverride: needsLockedOverride,
+              requiresRuleOverride: needsOccupiedOverride,
+              protectedCells: protectedCells.map((record) => ({
+                staffId: idFrom(record.staffId),
+                staffName:
+                  staffNames.get(idFrom(record.staffId) ?? "") ?? "Unknown staff",
+                startTime: String(record.startTime ?? ""),
+                assignmentType: String(record.assignmentType ?? ""),
+              })),
+              occupiedTargetCount: occupiedTargetCells.length,
+              occupiedTargetCells,
+              message:
+                occupiedTargetCells.length > 0
+                  ? `${String(replacementStaff.fullName)} already has ${occupiedTargetCells.length} occupied block(s) in the requested replacement times. No blocks were changed. Explain those occupied times to the user and ask whether they want to override them. If approved, retry this exact replacement with allowRuleOverride=true${protectedCells.length > 0 ? " and allowLockedOverride=true" : ""}. Any displaced client 1:1 blocks will be preserved in Unplaced.`
+                  : "One or more affected cells are locked/manual. Ask the user for explicit override permission before retrying with allowLockedOverride=true.",
+            };
           }
         } else {
           const [sourceClient, replacementClient] = await Promise.all([
