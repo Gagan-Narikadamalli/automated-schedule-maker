@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { PUT as updateScheduleBatch } from "@/app/api/schedule/batch/route";
 import { connectToDatabase } from "@/lib/db";
+import { analyzeNaturalTimeRange } from "@/features/ai/naturalTime";
 import { ScheduleAssignment } from "@/models/ScheduleAssignment";
 import { Staff } from "@/models/Staff";
 
@@ -73,29 +74,47 @@ function pendingBreakRequest(
 
   if (!isAffirmative(message)) return null;
   const recent = history.slice(-8);
-  const latestAssistantIndex = [...recent]
+  const assistantMatch = [...recent]
     .map((entry, index) => ({ entry, index }))
     .reverse()
     .find(
       ({ entry }) =>
         entry.role === "assistant" &&
-        /do you allow me to override|allow me to override|override this and proceed/i.test(
+        (/do you allow me to override|allow me to override|override this and proceed/i.test(
           entry.text ?? ""
-        )
-    )?.index;
-  if (latestAssistantIndex === undefined) return null;
+        ) ||
+          /want to make sure i understood the time|do you mean .*\d{1,2}:\d{2}/i.test(
+            entry.text ?? ""
+          ))
+    );
+  if (!assistantMatch) return null;
 
-  for (let index = latestAssistantIndex - 1; index >= 0; index -= 1) {
+  const assistantText = assistantMatch.entry.text ?? "";
+  const isOverrideConfirmation =
+    /do you allow me to override|allow me to override|override this and proceed/i.test(
+      assistantText
+    );
+  const confirmedTime = analyzeNaturalTimeRange(assistantText);
+
+  for (let index = assistantMatch.index - 1; index >= 0; index -= 1) {
     const entry = recent[index];
     if (entry.role !== "user") continue;
     const action = breakAction(entry.text ?? "");
-    if (action) {
+    if (!action) continue;
+
+    if (!isOverrideConfirmation && confirmedTime.status === "PARSED") {
       return {
-        intentMessage: entry.text ?? "",
-        overrideConfirmed: true,
+        intentMessage: `${entry.text ?? ""} from ${confirmedTime.startTime} to ${confirmedTime.endTime}`,
+        overrideConfirmed: false,
         action,
       };
     }
+
+    return {
+      intentMessage: entry.text ?? "",
+      overrideConfirmed: isOverrideConfirmation,
+      action,
+    };
   }
   return null;
 }
@@ -126,33 +145,22 @@ function parseTimeToken(
 }
 
 function parseBreakRange(message: string): { startTime: string; endTime: string } | null {
+  const natural = analyzeNaturalTimeRange(message);
+  if (natural.status === "PARSED") {
+    return { startTime: natural.startTime, endTime: natural.endTime };
+  }
+  if (natural.status === "CONFIRM") {
+    // routeBase asks the user to confirm this range before any deterministic write.
+    return null;
+  }
+
+  // Preserve the convenient single-time shorthand: "add a break at 10:30"
+  // means the 10:30-11:00 scheduler cell.
   const withoutDates = message.replace(/\b20\d{2}-\d{2}-\d{2}\b/g, " ");
   const normalizedSpacing = withoutDates.replace(
     /\b(\d{1,2})\s+(\d{2})\s*(am|pm)\b/gi,
     "$1:$2 $3"
   );
-  const range = normalizedSpacing.match(
-    /\b(?:from\s+|at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:-|–|to|until|through)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i
-  );
-  if (range) {
-    let firstMeridiem = range[3];
-    let secondMeridiem = range[6];
-    const firstHour = Number(range[1]);
-    const secondHour = Number(range[4]);
-    if (!firstMeridiem && secondMeridiem) {
-      firstMeridiem = firstHour >= 8 && secondHour <= 7 ? "am" : secondMeridiem;
-    }
-    if (firstMeridiem && !secondMeridiem) {
-      secondMeridiem =
-        firstMeridiem.toLowerCase() === "am" && secondHour <= 7
-          ? "pm"
-          : firstMeridiem;
-    }
-    const startTime = parseTimeToken(range[1], range[2], firstMeridiem);
-    const endTime = parseTimeToken(range[4], range[5], secondMeridiem);
-    if (startTime && endTime && endTime > startTime) return { startTime, endTime };
-  }
-
   const single = normalizedSpacing.match(
     /\b(?:at|from)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i
   );
@@ -287,9 +295,19 @@ export async function POST(request: Request) {
     return NextResponse.json(baseData, { status: baseResponse.status });
   }
 
+  // If the general Scheduler AI already completed and verified this write,
+  // do not run the deterministic break fallback a second time.
+  if (
+    baseData.changed === true &&
+    Array.isArray(baseData.writeToolsUsed) &&
+    baseData.writeToolsUsed.length > 0
+  ) {
+    return NextResponse.json(baseData, { status: baseResponse.status });
+  }
+
   const baseReply = String(baseData.reply ?? "");
   if (
-    /which day|what date|has not been generated|would you like me to generate/i.test(
+    /which day|what date|has not been generated|would you like me to generate|want to make sure i understood the time|do you mean .*\d{1,2}:\d{2}/i.test(
       baseReply
     )
   ) {
