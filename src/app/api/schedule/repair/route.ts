@@ -22,6 +22,7 @@ import { writeAuditLog } from "@/lib/api/audit";
 import { connectToDatabase } from "@/lib/db";
 import { CallOut } from "@/models/CallOut";
 import { ScheduleAssignment } from "@/models/ScheduleAssignment";
+import { UnplacedAssignment } from "@/models/UnplacedAssignment";
 
 type RepairRequest = {
   locationId?: string;
@@ -134,9 +135,36 @@ export async function POST(request: Request) {
             }))
         : [];
 
+    const priorityUnplaced =
+      repairMode === "COVERAGE"
+        ? ((await UnplacedAssignment.find({
+            locationId,
+            date,
+            status: "UNPLACED",
+            clientId: { $ne: null },
+          })
+            .select("clientId originalStartTime createdAt")
+            .sort({ createdAt: 1 })
+            .lean()) as unknown as Array<{
+            clientId?: unknown;
+            originalStartTime?: unknown;
+          }>)
+        : [];
+
+    const priorityRequirements = priorityUnplaced
+      .map((record) => ({
+        clientId: record.clientId ? String(record.clientId) : "",
+        startTime: String(record.originalStartTime ?? ""),
+      }))
+      .filter(
+        (record) =>
+          Boolean(record.clientId) &&
+          /^\d{2}:\d{2}$/.test(record.startTime)
+      );
+
     const result =
       repairMode === "COVERAGE"
-        ? repairCoverageMinimally(schedulerInput)
+        ? repairCoverageMinimally(schedulerInput, priorityRequirements)
         : repairSchedule(
             schedulerInput,
             affectedStaffIds,
@@ -217,6 +245,7 @@ export async function POST(request: Request) {
           : `Repaired only the schedule cells affected by ${affectedStaffIds.length} staff call-out(s) on ${date}.`,
       after: {
         repairMode,
+        priorityUnplacedCount: priorityRequirements.length,
         affectedStaffIds,
         affectedSlots,
         removedAssignmentCount: removedOriginalIds.length,
@@ -236,6 +265,7 @@ export async function POST(request: Request) {
       date,
       locationId,
       repairMode,
+      priorityUnplacedCount: priorityRequirements.length,
       affectedStaffIds,
       affectedSlots,
       removedAssignmentCount: removedOriginalIds.length,
