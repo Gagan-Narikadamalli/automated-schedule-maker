@@ -7,6 +7,7 @@ export type SchedulerAiDateSource =
   | "WEEKDAY"
   | "SELECTED_DAY"
   | "SELECTED_WEEK"
+  | "CONVERSATION"
   | "PASSIVE_SELECTION";
 
 export type SchedulerAiContext = {
