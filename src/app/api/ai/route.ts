@@ -2,6 +2,7 @@ import { ToolLoopAgent, generateText, stepCountIs } from "ai";
 import { NextResponse } from "next/server";
 
 import { buildSchedulerAiInstructions } from "@/features/ai/schedulerPrompt";
+import { buildSchedulerReplyFallback } from "@/features/ai/schedulerReplyFallback";
 import { createSchedulerReadOnlyTools } from "@/features/ai/schedulerTools";
 import {
   createSchedulerWebsiteTools,
@@ -327,22 +328,20 @@ export async function POST(request: Request) {
     );
     const changed = autonomousWrites && writeToolsUsed.length > 0;
     const mode = autonomousWrites ? "AUTONOMOUS" : "READ_ONLY";
+    const toolEvidence = result.steps.flatMap((step) =>
+      step.toolResults.map((toolResult) => ({
+        toolName: toolResult.toolName,
+        input: toolResult.input,
+        output: toolResult.output,
+      }))
+    );
 
     let reply = result.text.trim();
 
     // Some tool-capable models occasionally finish immediately after the final
-    // tool result without emitting a user-facing text message. The scheduler
-    // work still succeeded in that case, so synthesize a response from the
-    // actual tool evidence instead of returning an unhelpful generic fallback.
+    // tool result without emitting a user-facing text message. First ask the
+    // same model for an answer-only synthesis from the actual tool evidence.
     if (!reply && toolsUsed.length > 0) {
-      const toolEvidence = result.steps.flatMap((step) =>
-        step.toolResults.map((toolResult) => ({
-          toolName: toolResult.toolName,
-          input: toolResult.input,
-          output: toolResult.output,
-        }))
-      );
-
       try {
         const synthesis = await generateText({
           model,
@@ -359,10 +358,19 @@ export async function POST(request: Request) {
       }
     }
 
+    // If the model still omits text, build a useful scheduler answer directly
+    // from the verified tool outputs instead of showing a generic failure.
+    if (!reply && toolsUsed.length > 0) {
+      reply = buildSchedulerReplyFallback({
+        date: resolvedDate.date,
+        locationName,
+        toolEvidence,
+        writeToolsUsed,
+      });
+    }
+
     if (!reply) {
-      reply = toolsUsed.length > 0
-        ? `I completed the scheduler checks for ${resolvedDate.date}, but the response summary could not be generated. ${changed ? "The requested scheduler action may have changed saved data; please review the selected day before making another edit." : "No scheduler write action was performed."}`
-        : "I could not produce a scheduler result for that request. Please rephrase the scheduler task or provide the missing detail.";
+      reply = "I could not produce a scheduler result for that request. Please rephrase the scheduler task or provide the missing detail.";
     }
 
     let trainingExampleId: string | null = null;
