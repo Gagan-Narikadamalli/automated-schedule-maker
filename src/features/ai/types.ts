@@ -1,4 +1,4 @@
-export type SchedulerAiMode = "READ_ONLY";
+export type SchedulerAiMode = "READ_ONLY" | "AUTONOMOUS";
 
 export type SchedulerAiContext = {
   locationId: string;
@@ -18,6 +18,8 @@ export type SchedulerAiResponse = {
   reply: string;
   trainingExampleId: string | null;
   toolsUsed: string[];
+  writeToolsUsed: string[];
+  changed: boolean;
   mode: SchedulerAiMode;
 };
 
