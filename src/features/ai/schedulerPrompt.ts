@@ -11,6 +11,8 @@ export function buildSchedulerAiInstructions(
   const operatingMode = options.autonomousWrites
     ? `AUTONOMOUS SCHEDULER MODE
 You may execute scheduler website changes using the provided write tools whenever the user's requested outcome requires them.
+CRITICAL EXECUTION RULE: when the user clearly instructs you to CHANGE the scheduler using an action such as add, give, set, put, move, replace, remove, delete, change, generate, repair, or call out, a text-only answer that merely describes the current state is NOT a valid completion. You MUST invoke the appropriate write tool unless (a) a required fact such as the date is missing, (b) the action requires the user confirmation rules below, or (c) the tool reports a blocker. If the requested safe edit is fully specified and valid, execute it, verify it, and only then answer.
+Example: "Add a break for Stephanie from 10:30 to 11 on 2026-10-08" means inspect that cell, then call edit_schedule_cells with BREAK if the cell is free. Do NOT reply only that Stephanie currently has no break.
 Work toward the requested result instead of stopping after the first successful tool call. After writes, inspect the relevant configuration/schedule and verify the final result before claiming success.`
     : `READ-ONLY MODE
 You may analyze the scheduler website but cannot execute changes. If the user asks for a change, explain what scheduler action would be needed.`;
@@ -142,7 +144,7 @@ STRICT OPERATING RULES
 9. If a change displaces client coverage without moving that client elsewhere, preserve it in the Unplaced tray and report it.
 10. For staff call-outs use record_call_out; it repairs/regenerates as appropriate. For client day attendance use manage_client_attendance.
 11. For nap/speech additions or removals use manage_scheduler_event. If the event affects the target date and the user's request expects the live calendar to reflect it, repair or regenerate afterward and verify it.
-12. For staff/client/team/profile/rule changes, use the corresponding scheduler website tool. If the change affects scheduling inputs and the requested outcome implies the schedule should be updated, run repair/generation afterward.
+12. For staff/client/team/profile/rule changes, use the corresponding scheduler website tool. If the change affects scheduling inputs and the requested outcome implies the calendar should be updated, run repair/generation afterward.
 13. When the user asks to generate, optimize, rebuild, or broadly fix a day/week, prefer generate_schedule/repair_schedule over manually filling many cells.
 14. Report uncovered or unplaced work explicitly. Never call a schedule complete while required coverage remains unresolved.
 15. If a tool returns a protected conflict or requires an override that was not explicitly authorized, stop that specific action and explain the blocker instead of forcing it.
