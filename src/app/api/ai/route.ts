@@ -1,7 +1,9 @@
 import { ToolLoopAgent, generateText, stepCountIs } from "ai";
 import { NextResponse } from "next/server";
 
+import { createSchedulerAdvisoryTools } from "@/features/ai/schedulerAdvisoryTools";
 import { buildSchedulerDateContextSnapshot } from "@/features/ai/schedulerDateContext";
+import { buildSchedulerDateContextFallback } from "@/features/ai/schedulerDateContextFallback";
 import { buildSchedulerAiInstructions } from "@/features/ai/schedulerPrompt";
 import { buildSchedulerReplyFallback } from "@/features/ai/schedulerReplyFallback";
 import { createSchedulerReadOnlyTools } from "@/features/ai/schedulerTools";
@@ -134,7 +136,7 @@ function isAffirmativeContinuation(message: string): boolean {
     .toLowerCase()
     .replace(/[.!?]+$/g, "")
     .replace(/\s+/g, " ");
-  return /^(yes|yeah|yep|sure|ok|okay|yes please|please do|go ahead|proceed|do it|generate it|create it|make it)$/.test(
+  return /^(yes|yeah|yep|sure|ok|okay|yes please|please do|go ahead|proceed|do it|generate it|create it|make it|allow it|override it|yes override|yes proceed)$/.test(
     normalized
   );
 }
@@ -225,7 +227,9 @@ function resolveDateContext(
     (isAffirmativeContinuation(message) ||
       Boolean(latestAssistant?.includes("which day")) ||
       Boolean(latestAssistant?.includes("what date")) ||
-      Boolean(latestAssistant?.includes("would you like me to generate")))
+      Boolean(latestAssistant?.includes("would you like me to generate")) ||
+      Boolean(latestAssistant?.includes("would you like to proceed")) ||
+      Boolean(latestAssistant?.includes("do you allow me to override")))
   ) {
     return { date: conversationDate, source: "CONVERSATION" };
   }
@@ -277,7 +281,9 @@ function answerNeedsFollowUp(reply: string): boolean {
     normalized.includes("please clarify") ||
     normalized.includes("which day") ||
     normalized.includes("what date") ||
-    normalized.includes("would you like me to generate")
+    normalized.includes("would you like me to generate") ||
+    normalized.includes("would you like to proceed") ||
+    normalized.includes("do you allow me to override")
   );
 }
 
@@ -367,19 +373,22 @@ export async function POST(request: Request) {
     }
 
     const readTools = createSchedulerReadOnlyTools(context);
+    const advisoryTools = createSchedulerAdvisoryTools(context);
     const websiteTools = createSchedulerWebsiteTools(context);
     const tools = autonomousWrites
       ? {
           ...readTools,
+          ...advisoryTools,
           ...websiteTools,
           ...createSchedulerWriteTools(context),
         }
       : {
           ...readTools,
+          ...advisoryTools,
           get_scheduler_configuration: websiteTools.get_scheduler_configuration,
         };
 
-    const dateContextInstructions = `\n\nDATE-CONTEXT ANSWERING RULES\n- Whenever a date is clear, a complete scheduler snapshot for that date may be included with the user's prompt. Use that date-scoped evidence before answering factual questions.\n- Consider all relevant date information together: staff availability and call-outs, saved staff/client assignments, client required slots/attendance, breaks, nap/speech/fixed events, uncovered requirements, unplaced work, and scheduler readiness.\n- Answer whatever scheduler question the user asks from that evidence and any tool results. Do not limit yourself to call-outs or schedule generation.\n- If the available scheduler evidence does not support a reliable answer, say: \"I couldn't generate a reliable answer from the available scheduler information. Please try again with a different date, person, client, time, or more detail.\" Never invent an answer.\n- If the schedule for the requested date is not generated, say that clearly and ask whether the user wants you to generate it. Do not present profile availability as if it were the completed schedule.\n- When the user's request is fully answered or a requested action is fully completed, finish naturally. The server may append a brief offer for additional help. Do not add that offer when you are already asking a required clarification or asking permission to generate a missing schedule.`;
+    const dateContextInstructions = `\n\nDATE-CONTEXT, PLANNING, AND CONFIRMATION RULES\n- Whenever a date is clear, a complete scheduler snapshot for that date may be included with the user's prompt. Use that date-scoped evidence before answering factual questions.\n- Consider all relevant date information together: staff availability and call-outs, saved staff/client assignments, client required slots/attendance, breaks, nap/speech/fixed events, uncovered requirements, unplaced work, and scheduler readiness.\n- Answer whatever scheduler question the user asks from that evidence and any tool results. Do not limit yourself to call-outs or schedule generation.\n- If the available scheduler evidence does not support a reliable answer, say: \"I couldn't generate a reliable answer from the available scheduler information. Please try again with a different date, person, client, time, or more detail.\" Never invent an answer.\n- If the schedule for the requested date is not generated, say that clearly and ask whether the user wants you to generate it. Do not present profile availability as if it were the completed schedule.\n\nDIRECT BREAK EDITS\n- If the user directly says to add a break for a named staff member at a specific time/range, inspect that staff member's schedule and availability for the date first.\n- If the requested 30-minute cell(s) are unassigned/open and the staff member is available, you may execute the BREAK cell edit immediately when writes are enabled; do not ask an extra confirmation merely because it is a break.\n- Translate ranges into the scheduler's 30-minute cells. Example: 10:30-11:00 is the 10:30 cell; 10:30-11:30 is the 10:30 and 11:00 cells.\n- If an existing assignment would be displaced, explain what would move or become uncovered. If the request explicitly told you to replace/delete it, that is authorization for the ordinary replacement, but protected/rule overrides still require the override confirmation below.\n\nCLIENT-FOR-CLIENT REPLACEMENTS\n- For an initial request such as \"replace CaMe with ZiBo\", DO NOT edit immediately. First call analyze_client_replacement for the relevant date/range.\n- Compare both clients' requirements and saved coverage. Present ONLY the slots returned as replaceable, mention blocked slots/reasons, and explain whether the source client would become uncovered or be sent to Unplaced.\n- End with a clear confirmation such as \"Would you like to proceed with these replacement slots on <date>?\"\n- Only after the user answers yes/go ahead/proceed should you call edit_schedule_cells for the exact confirmed slots. Do not silently expand the replacement beyond the presented plan.\n\nAI SUGGESTIONS\n- When the user asks what you recommend, how to cover gaps, how to fit breaks, or asks for the best schedule change, call suggest_schedule_improvements.\n- Advisory suggestions may use broad scheduling judgment instead of following every soft clinic optimization preference exactly. Prefer practical coverage and breaks, and explain the reasoning in normal language.\n- Suggestions are NOT permission to edit. If the user only asked for recommendations, present them without making changes.\n- When the user asks to apply a suggestion, use the normal write tools. The write tools remain authoritative for actual edits and will enforce availability, attendance, hard restrictions, protected cells, and scheduler conflicts.\n- For a useful two-step recommendation, you may propose a handoff such as: move client Y at 12:00 from Staff A to free Staff B, then use Staff A to cover uncovered client X; or move Y to Staff B and give Staff A a break.\n\nOVERRIDE CONFIRMATION\n- NEVER set allowLockedOverride=true or allowRuleOverride=true on the first attempt merely because you think the change is best.\n- If a write tool reports protected cells, requiresConfirmation, a locked/manual conflict, staff unavailability, client double-booking, outside-attendance, or another overridable conflict, stop the write workflow for that change. Explain the exact staff/client/date/time changes and the conflict in plain language, then ask: \"Do you allow me to override this and proceed?\"\n- A later clear affirmative answer to that exact pending override question is explicit permission. On that follow-up turn, retry the confirmed change with only the required override flag(s) set to true, then verify the final schedule.\n- Non-overridable failures such as an invalid/inactive client must never be forced; explain the blocker instead.\n\nCONVERSATION COMPLETION\n- When the user's request is fully answered or a requested action is fully completed, finish naturally. The server may append a brief offer for additional help. Do not add that offer when you are already asking for a date, clarification, generation confirmation, replacement confirmation, or override permission.`;
 
     const agent = new ToolLoopAgent({
       model,
@@ -440,7 +449,7 @@ export async function POST(request: Request) {
       try {
         const synthesis = await generateText({
           model,
-          instructions: `You are the final-response writer for the Automatic Schedule Maker assistant. Answer the user's actual scheduler question using ONLY the supplied date context and scheduler tool evidence. You may discuss staff availability, client attendance/requirements, assignments, who is taking care of whom, time ranges, breaks, nap/speech, call-outs, uncovered work, unplaced work, schedule health, and completed changes. Do not invent anything. If scheduleAvailable=false for a live-calendar question, state that the schedule has not been generated and ask whether the user wants it generated. If the evidence cannot support a reliable answer, say that you couldn't generate a reliable answer and ask for a different date/person/client/time or more detail. If no write tool was used, do not imply anything changed.`,
+          instructions: `You are the final-response writer for the Automatic Schedule Maker assistant. Answer the user's actual scheduler question using ONLY the supplied date context and scheduler tool evidence. You may discuss staff availability, client attendance/requirements, assignments, who is taking care of whom, time ranges, breaks, nap/speech, call-outs, uncovered work, unplaced work, schedule health, replacement-analysis results, advisory suggestions, override conflicts, and completed changes. Do not invent anything. If scheduleAvailable=false for a live-calendar question, state that the schedule has not been generated and ask whether the user wants it generated. For analyze_client_replacement evidence, list only replaceable slots and blocked reasons and ask whether to proceed; do not imply the replacement was already made. For advisory suggestions, clearly label them as recommendations rather than completed changes. If a write result requires confirmation or override, explain the exact conflict and ask whether the user allows the override. If the evidence cannot support a reliable answer, say that you couldn't generate a reliable answer and ask for a different date/person/client/time or more detail. If no write tool was used, do not imply anything changed.`,
           prompt: `Clinic: ${locationName || "Clinic"}\nEffective date: ${resolvedDate.date}\nOriginal user request: ${message}\nWrite tools used: ${writeToolsUsed.join(", ") || "none"}\n\nScheduler evidence:\n${stringifyLimited(
             toolEvidence,
             MAX_TOOL_EVIDENCE_LENGTH
@@ -463,6 +472,15 @@ export async function POST(request: Request) {
         toolEvidence,
         writeToolsUsed,
       });
+    }
+
+    if (!reply && dateContext) {
+      reply =
+        buildSchedulerDateContextFallback({
+          request: message,
+          date: resolvedDate.date,
+          dateContext: dateContext as unknown as Record<string, any>,
+        }) ?? "";
     }
 
     if (!reply && dateContext && dateContext.scheduleAvailable === false) {
