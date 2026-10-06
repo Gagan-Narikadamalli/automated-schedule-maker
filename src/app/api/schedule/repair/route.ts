@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
+import { repairCoverageMinimally } from "@/features/scheduler/engine/generateSchedule";
 import {
   repairSchedule,
   type RepairAffectedSlot,
@@ -25,6 +26,7 @@ import { ScheduleAssignment } from "@/models/ScheduleAssignment";
 type RepairRequest = {
   locationId?: string;
   date?: string;
+  mode?: "CALL_OUT" | "COVERAGE";
 };
 
 type CallOutRecord = {
@@ -60,6 +62,7 @@ export async function POST(request: Request) {
     const body = (await request.json()) as RepairRequest;
     const locationId = body.locationId?.trim();
     const date = body.date?.trim();
+    const repairMode = body.mode === "COVERAGE" ? "COVERAGE" : "CALL_OUT";
 
     if (!locationId || !date) {
       return NextResponse.json(
@@ -95,7 +98,7 @@ export async function POST(request: Request) {
       new Set(callOuts.map((callOut) => callOut.staffId))
     );
 
-    if (affectedStaffIds.length === 0) {
+    if (repairMode === "CALL_OUT" && affectedStaffIds.length === 0) {
       return NextResponse.json(
         {
           error:
@@ -120,20 +123,25 @@ export async function POST(request: Request) {
 
     const schedulerInput = historicalTraining.input;
     const affectedSlots: RepairAffectedSlot[] =
-      schedulerInput.existingAssignments
-        .filter((assignment) =>
-          assignmentOverlapsCallOut(assignment, callOuts)
-        )
-        .map((assignment) => ({
-          staffId: assignment.staffId,
-          startTime: assignment.startTime,
-        }));
+      repairMode === "CALL_OUT"
+        ? schedulerInput.existingAssignments
+            .filter((assignment) =>
+              assignmentOverlapsCallOut(assignment, callOuts)
+            )
+            .map((assignment) => ({
+              staffId: assignment.staffId,
+              startTime: assignment.startTime,
+            }))
+        : [];
 
-    const result = repairSchedule(
-      schedulerInput,
-      affectedStaffIds,
-      affectedSlots
-    );
+    const result =
+      repairMode === "COVERAGE"
+        ? repairCoverageMinimally(schedulerInput)
+        : repairSchedule(
+            schedulerInput,
+            affectedStaffIds,
+            affectedSlots
+          );
 
     const originalAssignmentIds = new Set(
       schedulerInput.existingAssignments.map(
@@ -183,7 +191,9 @@ export async function POST(request: Request) {
           manuallyOverridden: false,
           note:
             assignment.note ||
-            "Added by targeted call-out schedule repair.",
+            (repairMode === "COVERAGE"
+              ? "Added by minimal uncovered coverage repair."
+              : "Added by targeted call-out schedule repair."),
         }))
       );
     }
@@ -201,8 +211,12 @@ export async function POST(request: Request) {
       action: "REPAIR",
       entityType: "SCHEDULE_DAY",
       entityId: date,
-      summary: `Repaired only the schedule cells affected by ${affectedStaffIds.length} staff call-out(s) on ${date}.`,
+      summary:
+        repairMode === "COVERAGE"
+          ? `Minimally repaired uncovered client coverage on ${date}, preserving the existing schedule wherever possible.`
+          : `Repaired only the schedule cells affected by ${affectedStaffIds.length} staff call-out(s) on ${date}.`,
       after: {
+        repairMode,
         affectedStaffIds,
         affectedSlots,
         removedAssignmentCount: removedOriginalIds.length,
@@ -221,6 +235,7 @@ export async function POST(request: Request) {
       success: true,
       date,
       locationId,
+      repairMode,
       affectedStaffIds,
       affectedSlots,
       removedAssignmentCount: removedOriginalIds.length,
