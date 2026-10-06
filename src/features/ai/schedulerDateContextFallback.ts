@@ -45,8 +45,6 @@ function inferHour(hour: number, meridiem: string | undefined): number {
     return hour === 12 ? 12 : hour + 12;
   }
   if (hour === 12) return 12;
-  // The scheduler day is primarily 8 AM–6/8 PM. In ordinary scheduling
-  // shorthand, 1–7 therefore means PM while 8–11 means AM.
   if (hour >= 1 && hour <= 7) return hour + 12;
   return hour;
 }
@@ -68,7 +66,8 @@ function parseTimeToken(
 }
 
 function parseTimeRange(request: string, slotMinutes: number): TimeRange {
-  const range = request.match(
+  const timeRequest = request.replace(/\b20\d{2}-\d{2}-\d{2}\b/g, " ");
+  const range = timeRequest.match(
     /\b(?:from\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:-|–|to|until|through)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i
   );
   if (range) {
@@ -78,7 +77,6 @@ function parseTimeRange(request: string, slotMinutes: number): TimeRange {
     const secondHour = Number(range[4]);
 
     if (!firstMeridiem && secondMeridiem) {
-      // "8 to 2 PM" means 8 AM–2 PM in a normal clinic day.
       firstMeridiem = firstHour >= 8 && secondHour <= 7 ? "am" : secondMeridiem;
     }
     if (firstMeridiem && !secondMeridiem) {
@@ -91,7 +89,7 @@ function parseTimeRange(request: string, slotMinutes: number): TimeRange {
     return { startTime, endTime };
   }
 
-  const at = request.match(/\b(?:at|around)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i);
+  const at = timeRequest.match(/\b(?:at|around)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i);
   if (at) {
     const startTime = parseTimeToken(at[1], at[2], at[3]);
     if (!startTime) return { startTime: null, endTime: null };
@@ -102,10 +100,7 @@ function parseTimeRange(request: string, slotMinutes: number): TimeRange {
   return { startTime: null, endTime: null };
 }
 
-function overlaps(
-  segment: JsonRecord,
-  range: TimeRange
-): boolean {
+function overlaps(segment: JsonRecord, range: TimeRange): boolean {
   if (!range.startTime && !range.endTime) return true;
   const start = String(segment.startTime ?? "");
   const end = String(segment.endTime ?? "");
@@ -346,8 +341,6 @@ export function buildSchedulerDateContextFallback({
     )} uncovered required blocks and ${Number(summary.unplacedCount ?? 0)} Unplaced assignments.`;
   }
 
-  // We intentionally return null for unsupported/unclear questions. The caller
-  // will use the assistant's reliability message rather than inventing data.
   if (normalizedRequest.trim()) return null;
   return null;
 }
