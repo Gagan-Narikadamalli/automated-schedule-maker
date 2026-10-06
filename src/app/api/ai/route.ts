@@ -3,6 +3,10 @@ import { NextResponse } from "next/server";
 
 import { buildSchedulerAiInstructions } from "@/features/ai/schedulerPrompt";
 import { createSchedulerReadOnlyTools } from "@/features/ai/schedulerTools";
+import {
+  createSchedulerWriteTools,
+  SCHEDULER_WRITE_TOOL_NAMES,
+} from "@/features/ai/schedulerWriteTools";
 import type {
   SchedulerAiRequest,
   SchedulerAiResponse,
@@ -15,7 +19,7 @@ import {
 import { connectToDatabase } from "@/lib/db";
 import { AITrainingExample } from "@/models/AITrainingExample";
 
-const DEFAULT_SCHEDULER_AI_MODEL = "openai/gpt-5.6-luna";
+const DEFAULT_SCHEDULER_AI_MODEL = "openai/gpt-5.4";
 const MAX_MESSAGE_LENGTH = 3000;
 
 function cleanLocationName(value: unknown): string | undefined {
@@ -69,6 +73,8 @@ export async function POST(request: Request) {
 
     const model =
       process.env.SCHEDULER_AI_MODEL?.trim() || DEFAULT_SCHEDULER_AI_MODEL;
+    const autonomousWrites =
+      process.env.SCHEDULER_AI_AUTONOMOUS_WRITES?.trim().toLowerCase() === "true";
     const context = {
       locationId,
       locationName,
@@ -76,25 +82,33 @@ export async function POST(request: Request) {
       userId: auth.session.userId,
     };
 
-    const tools = createSchedulerReadOnlyTools(context);
+    const readTools = createSchedulerReadOnlyTools(context);
+    const tools = autonomousWrites
+      ? { ...readTools, ...createSchedulerWriteTools(context) }
+      : readTools;
+
     const agent = new ToolLoopAgent({
       model,
-      instructions: buildSchedulerAiInstructions(context),
+      instructions: buildSchedulerAiInstructions(context, {
+        autonomousWrites,
+      }),
       tools,
       toolChoice: "auto",
-      stopWhen: stepCountIs(6),
-      maxOutputTokens: 1400,
+      stopWhen: stepCountIs(14),
+      maxOutputTokens: 1800,
     });
 
     const result = await agent.generate({
       prompt: message,
       timeout: {
-        totalMs: 45_000,
-        stepMs: 15_000,
+        totalMs: 75_000,
+        stepMs: 20_000,
       },
     });
 
-    const reply = result.text.trim() || "I could not produce a scheduler analysis for that request.";
+    const reply =
+      result.text.trim() ||
+      "I could not produce a scheduler result for that request.";
     const toolsUsed = [
       ...new Set(
         result.steps.flatMap((step) =>
@@ -102,6 +116,11 @@ export async function POST(request: Request) {
         )
       ),
     ];
+    const writeToolsUsed = toolsUsed.filter((toolName) =>
+      SCHEDULER_WRITE_TOOL_NAMES.has(toolName)
+    );
+    const changed = autonomousWrites && writeToolsUsed.length > 0;
+    const mode = autonomousWrites ? "AUTONOMOUS" : "READ_ONLY";
 
     let trainingExampleId: string | null = null;
     try {
@@ -113,7 +132,7 @@ export async function POST(request: Request) {
         request: message,
         assistantResponse: reply,
         model,
-        mode: "READ_ONLY",
+        mode,
         toolsSelected: toolsUsed,
         managerAccepted: null,
         managerCorrection: "",
@@ -127,7 +146,9 @@ export async function POST(request: Request) {
       reply,
       trainingExampleId,
       toolsUsed,
-      mode: "READ_ONLY",
+      writeToolsUsed,
+      changed,
+      mode,
     };
 
     return NextResponse.json(response);
@@ -135,13 +156,15 @@ export async function POST(request: Request) {
     console.error("Scheduler AI request failed:", error);
     const message = error instanceof Error ? error.message : "";
     const configurationProblem =
-      /gateway|api.?key|oidc|unauthorized|authentication|credit/i.test(message);
+      /gateway|api.?key|oidc|unauthorized|authentication|credit|model.*not found/i.test(
+        message
+      );
 
     return NextResponse.json(
       {
         error: configurationProblem
-          ? "Scheduler AI is not connected to an AI Gateway yet. Enable Vercel AI Gateway/OIDC for the project or set AI_GATEWAY_API_KEY for local development."
-          : "Scheduler AI could not analyze this request.",
+          ? "Scheduler AI is not connected to a usable AI Gateway model yet. Enable Vercel AI Gateway/OIDC for the project or set AI_GATEWAY_API_KEY for local development."
+          : "Scheduler AI could not complete this request.",
       },
       { status: configurationProblem ? 503 : 500 }
     );
