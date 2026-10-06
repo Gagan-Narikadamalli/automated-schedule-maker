@@ -105,11 +105,55 @@ function parseNamedOrNumericDate(message: string, anchorDate: string): string | 
   return null;
 }
 
+function cleanHistory(value: unknown): SchedulerAiHistoryMessage[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter(
+      (entry): entry is SchedulerAiHistoryMessage =>
+        Boolean(entry) &&
+        typeof entry === "object" &&
+        ((entry as SchedulerAiHistoryMessage).role === "user" ||
+          (entry as SchedulerAiHistoryMessage).role === "assistant") &&
+        typeof (entry as SchedulerAiHistoryMessage).text === "string"
+    )
+    .slice(-MAX_HISTORY_MESSAGES)
+    .map((entry) => ({
+      role: entry.role,
+      text: entry.text.trim().slice(0, 2200),
+    }))
+    .filter((entry) => entry.text.length > 0);
+}
+
+function isAffirmativeContinuation(message: string): boolean {
+  const normalized = message
+    .trim()
+    .toLowerCase()
+    .replace(/[.!?]+$/g, "")
+    .replace(/\s+/g, " ");
+  return /^(yes|yeah|yep|sure|ok|okay|yes please|please do|go ahead|proceed|do it|generate it|create it|make it)$/.test(
+    normalized
+  );
+}
+
+function recentConversationDate(
+  history: SchedulerAiHistoryMessage[],
+  anchorDate: string
+): string | null {
+  for (const entry of [...history].slice(-4).reverse()) {
+    const isoDate = entry.text.match(/\b(20\d{2}-\d{2}-\d{2})\b/)?.[1];
+    if (isoDate) return isoDate;
+    const namedOrNumeric = parseNamedOrNumericDate(entry.text, anchorDate);
+    if (namedOrNumeric) return namedOrNumeric;
+  }
+  return null;
+}
+
 function resolveDateContext(
   message: string,
   selectedDate: string,
   todayDate: string,
-  dateSelectionExplicit: boolean
+  dateSelectionExplicit: boolean,
+  history: SchedulerAiHistoryMessage[]
 ): { date: string; source: SchedulerAiDateSource } {
   const normalized = message.toLowerCase();
   const isoDate = message.match(/\b(20\d{2}-\d{2}-\d{2})\b/)?.[1];
@@ -120,7 +164,7 @@ function resolveDateContext(
     return { date: namedOrNumeric, source: "EXPLICIT_DATE" };
   }
 
-  if (/\btoday\b/.test(normalized)) {
+  if (/\b(today|current date|right now|now)\b/.test(normalized)) {
     return { date: todayDate, source: "TODAY" };
   }
   if (/\btomorrow\b/.test(normalized)) {
@@ -168,30 +212,18 @@ function resolveDateContext(
     return { date: selectedDate, source: "SELECTED_DAY" };
   }
 
+  if (isAffirmativeContinuation(message)) {
+    const conversationDate = recentConversationDate(history, selectedDate);
+    if (conversationDate) {
+      return { date: conversationDate, source: "CONVERSATION" };
+    }
+  }
+
   if (dateSelectionExplicit) {
     return { date: selectedDate, source: "SELECTED_DAY" };
   }
 
   return { date: selectedDate, source: "PASSIVE_SELECTION" };
-}
-
-function cleanHistory(value: unknown): SchedulerAiHistoryMessage[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .filter(
-      (entry): entry is SchedulerAiHistoryMessage =>
-        Boolean(entry) &&
-        typeof entry === "object" &&
-        ((entry as SchedulerAiHistoryMessage).role === "user" ||
-          (entry as SchedulerAiHistoryMessage).role === "assistant") &&
-        typeof (entry as SchedulerAiHistoryMessage).text === "string"
-    )
-    .slice(-MAX_HISTORY_MESSAGES)
-    .map((entry) => ({
-      role: entry.role,
-      text: entry.text.trim().slice(0, 2200),
-    }))
-    .filter((entry) => entry.text.length > 0);
 }
 
 function buildConversationPrompt(
@@ -269,7 +301,8 @@ export async function POST(request: Request) {
       message,
       selectedDate,
       todayDate,
-      dateSelectionExplicit
+      dateSelectionExplicit,
+      history
     );
     const context = {
       locationId,
@@ -338,14 +371,11 @@ export async function POST(request: Request) {
 
     let reply = result.text.trim();
 
-    // Some tool-capable models occasionally finish immediately after the final
-    // tool result without emitting a user-facing text message. First ask the
-    // same model for an answer-only synthesis from the actual tool evidence.
     if (!reply && toolsUsed.length > 0) {
       try {
         const synthesis = await generateText({
           model,
-          instructions: `You are the final-response writer for the Automatic Schedule Maker assistant. Write a concise, natural answer to the user's scheduler request using ONLY the supplied scheduler tool evidence. Do not call tools. Do not invent names, coverage, conflicts, or changes. Clearly say what date was checked or changed. If the evidence shows uncovered work or break problems, state them. If no write tool was used, do not imply that anything was changed. If a write tool was used, distinguish completed changes from remaining problems. Sound like a helpful scheduling assistant rather than a system log.`,
+          instructions: `You are the final-response writer for the Automatic Schedule Maker assistant. Write a concise, natural answer to the user's scheduler request using ONLY the supplied scheduler tool evidence. Do not call tools. Do not invent names, coverage, conflicts, or changes. Clearly say what date was checked or changed. If the evidence says scheduleAvailable=false, state that the schedule has not been generated for that date and ask whether the user wants you to generate it; do not infer staff availability from an ungenerated schedule. If the evidence contains detailed schedule segments, answer with those names/codes and time ranges instead of a generic assignment count. If the evidence shows uncovered work or break problems, state them. If no write tool was used, do not imply that anything was changed. If a write tool was used, distinguish completed changes from remaining problems. Sound like a helpful scheduling assistant rather than a system log.`,
           prompt: `Clinic: ${locationName || "Clinic"}\nEffective date: ${resolvedDate.date}\nOriginal user request: ${message}\nWrite tools used: ${writeToolsUsed.join(", ") || "none"}\n\nScheduler tool evidence:\n${safeToolEvidence(toolEvidence)}`,
           maxOutputTokens: 1400,
           timeout: {
@@ -358,8 +388,6 @@ export async function POST(request: Request) {
       }
     }
 
-    // If the model still omits text, build a useful scheduler answer directly
-    // from the verified tool outputs instead of showing a generic failure.
     if (!reply && toolsUsed.length > 0) {
       reply = buildSchedulerReplyFallback({
         date: resolvedDate.date,
@@ -370,7 +398,8 @@ export async function POST(request: Request) {
     }
 
     if (!reply) {
-      reply = "I could not produce a scheduler result for that request. Please rephrase the scheduler task or provide the missing detail.";
+      reply =
+        "I'm unable to understand that request yet. Please explain or elaborate what you want me to check or change in the scheduler.";
     }
 
     let trainingExampleId: string | null = null;
