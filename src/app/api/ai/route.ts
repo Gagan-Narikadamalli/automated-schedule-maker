@@ -208,7 +208,10 @@ function normalizeChangedFlag(data: JsonRecord): JsonRecord {
     /\bno changes? (?:were|was) made\b/i.test(reply) ||
     /\bdid not change anything\b/i.test(reply) ||
     /\bdo you allow me to override\b/i.test(reply) ||
-    /\brequires an override\b/i.test(reply)
+    /\brequires an override\b/i.test(reply) ||
+    /\bblocked by locked\/manual cells\b/i.test(reply) ||
+    (/\bexplicit override permission\b/i.test(reply) &&
+      /\b(?:confirm|proceed)\b/i.test(reply))
   ) {
     return { ...data, changed: false };
   }
