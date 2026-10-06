@@ -497,6 +497,113 @@ function attemptSingleSwapRepair(
   return true;
 }
 
+/**
+ * Fill uncovered client requirements while disturbing as little of the saved
+ * schedule as possible.
+ *
+ * Strategy:
+ * 1. Keep every existing assignment exactly where it is.
+ * 2. Fill uncovered requirements into genuinely free eligible staff slots.
+ * 3. Only when direct placement is impossible, allow one AUTO 1:1 assignment
+ *    to move to another eligible staff member so the newly uncovered client can
+ *    use that staff member. Manual/locked assignments and reserved activities
+ *    are never selected as swap candidates.
+ *
+ * This is intentionally different from full generation: it is for manager/AI
+ * requests such as "fix the uncovered blocks" where preserving the current day
+ * is more important than globally re-optimizing it.
+ */
+export function repairCoverageMinimally(input: SchedulerInput): SchedulerResult {
+  const callOutStaffIds = new Set(input.callOutStaffIds);
+  const assignments: SchedulerAssignment[] = input.existingAssignments.map(
+    (assignment) => ({ ...assignment })
+  );
+
+  const warnings: SchedulerResult["warnings"] = findProtectedConflicts(
+    assignments.filter(
+      (assignment) => assignment.locked || assignment.source === "MANUAL"
+    )
+  ).map((message) => ({
+    code: "LOCKED_CONFLICT",
+    message,
+  }));
+
+  const allRequirements = buildRequirements(input.clients);
+  const requirementsToFill = allRequirements.filter(
+    (requirement) => !requirementIsAlreadyCovered(requirement, assignments)
+  );
+  const sortedRequirements = sortRequirementsForClinicFlow(
+    requirementsToFill,
+    input,
+    assignments,
+    callOutStaffIds
+  );
+  const uncoveredRequirements: UncoveredRequirement[] = [];
+
+  for (const requirement of sortedRequirements) {
+    const bestStaffMember = findBestStaffMember(
+      requirement,
+      input,
+      assignments,
+      callOutStaffIds
+    );
+
+    if (bestStaffMember) {
+      assignments.push(createAutoAssignment(bestStaffMember, requirement));
+      warnings.push({
+        code: "MINIMAL_COVERAGE_FILL",
+        message: `${requirement.client.displayCode} at ${requirement.startTime} was filled without moving an existing assignment.`,
+      });
+      continue;
+    }
+
+    const repairedBySwap = attemptSingleSwapRepair(
+      requirement,
+      input,
+      assignments,
+      callOutStaffIds
+    );
+
+    if (repairedBySwap) {
+      warnings.push({
+        code: "REPAIRED_BY_SWAP",
+        message: `${requirement.client.displayCode} at ${requirement.startTime} was covered by one minimal staff swap.`,
+      });
+      continue;
+    }
+
+    uncoveredRequirements.push({
+      clientId: requirement.client.id,
+      clientCode: requirement.client.displayCode,
+      startTime: requirement.startTime,
+      reason:
+        "No eligible free staff member or one-step AUTO assignment swap can cover this requirement without changing protected/manual schedule cells.",
+    });
+    warnings.push({
+      code: "NO_ELIGIBLE_STAFF",
+      message: `${requirement.client.displayCode} is still uncovered at ${requirement.startTime}.`,
+    });
+  }
+
+  const requiredClientSlots = allRequirements.length;
+  const uncoveredClientSlots = uncoveredRequirements.length;
+  const coveredClientSlots = requiredClientSlots - uncoveredClientSlots;
+  const metrics = calculateCapacityMetrics(
+    input,
+    assignments,
+    requiredClientSlots,
+    coveredClientSlots,
+    uncoveredClientSlots
+  );
+
+  return {
+    assignments,
+    uncoveredRequirements,
+    warnings,
+    metrics,
+  };
+}
+
 export function generateSchedule(input: SchedulerInput): SchedulerResult {
   const callOutStaffIds = new Set(input.callOutStaffIds);
 
