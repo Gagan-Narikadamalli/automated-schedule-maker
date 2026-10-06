@@ -37,7 +37,7 @@ const AITrainingExampleSchema = new Schema(
     },
     mode: {
       type: String,
-      enum: ["READ_ONLY"],
+      enum: ["READ_ONLY", "AUTONOMOUS"],
       default: "READ_ONLY",
       index: true,
     },

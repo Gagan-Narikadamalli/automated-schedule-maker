@@ -15,11 +15,15 @@ type LocationsResponse = {
   error?: string;
 };
 
+type SchedulerAiMode = "READ_ONLY" | "AUTONOMOUS";
+
 type SchedulerAiResponse = {
   reply?: string;
   trainingExampleId?: string | null;
   toolsUsed?: string[];
-  mode?: "READ_ONLY";
+  writeToolsUsed?: string[];
+  changed?: boolean;
+  mode?: SchedulerAiMode;
   error?: string;
 };
 
@@ -31,11 +35,21 @@ type ChatMessage = {
   feedback?: "accepted" | "corrected";
 };
 
+type WorkspaceContext = {
+  locationId: string;
+  locationName: string;
+  date: string;
+};
+
+type ScheduleAssistantProps = {
+  onScheduleChanged?: () => void;
+};
+
 const SUGGESTIONS = [
+  "Check the schedule and fix anything safely fixable.",
   "Who is missing a break?",
-  "What assignments are unplaced?",
-  "Why is this day incomplete?",
-  "Are there scheduling problems?",
+  "Repair the schedule after the current call-outs.",
+  "Generate this day and verify all required coverage.",
 ];
 
 function getTodayForDateInput(): string {
@@ -48,7 +62,27 @@ function makeId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export function ScheduleAssistant() {
+function readWorkspaceContext(): WorkspaceContext | null {
+  if (typeof document === "undefined") return null;
+
+  const container = document.querySelector(".schedule-context-controls");
+  if (!container) return null;
+
+  const select = container.querySelector("select") as HTMLSelectElement | null;
+  const dateInput = container.querySelector(
+    'input[type="date"]'
+  ) as HTMLInputElement | null;
+
+  const locationId = select?.value?.trim() ?? "";
+  const locationName =
+    select?.selectedOptions?.[0]?.textContent?.trim() || "Clinic";
+  const date = dateInput?.value?.trim() ?? "";
+
+  if (!locationId || !date || locationId.startsWith("demo-")) return null;
+  return { locationId, locationName, date };
+}
+
+export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps) {
   const [open, setOpen] = useState(false);
   const [locations, setLocations] = useState<LocationOption[]>([]);
   const [locationId, setLocationId] = useState("");
@@ -56,7 +90,8 @@ export function ScheduleAssistant() {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [working, setWorking] = useState(false);
-  const [status, setStatus] = useState("Read-only scheduler analysis");
+  const [status, setStatus] = useState("Connected to the Automatic Scheduler");
+  const [mode, setMode] = useState<SchedulerAiMode | null>(null);
   const [correctionFor, setCorrectionFor] = useState<string | null>(null);
   const [correction, setCorrection] = useState("");
 
@@ -76,7 +111,14 @@ export function ScheduleAssistant() {
         if (cancelled) return;
         const nextLocations = data.locations ?? [];
         setLocations(nextLocations);
-        if (nextLocations.length > 0) setLocationId(nextLocations[0].id);
+
+        const workspaceContext = readWorkspaceContext();
+        if (workspaceContext) {
+          setLocationId(workspaceContext.locationId);
+          setDate(workspaceContext.date);
+        } else if (nextLocations.length > 0) {
+          setLocationId(nextLocations[0].id);
+        }
       } catch (error) {
         if (cancelled) return;
         setStatus(error instanceof Error ? error.message : "Locations could not be loaded.");
@@ -89,10 +131,41 @@ export function ScheduleAssistant() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!open) return;
+    const workspaceContext = readWorkspaceContext();
+    if (!workspaceContext) return;
+    setLocationId(workspaceContext.locationId);
+    setDate(workspaceContext.date);
+    setStatus(
+      `Linked to ${workspaceContext.locationName} on ${workspaceContext.date}.`
+    );
+  }, [open]);
+
+  function getRequestContext(): WorkspaceContext {
+    const workspaceContext = readWorkspaceContext();
+    if (workspaceContext) {
+      if (workspaceContext.locationId !== locationId) {
+        setLocationId(workspaceContext.locationId);
+      }
+      if (workspaceContext.date !== date) {
+        setDate(workspaceContext.date);
+      }
+      return workspaceContext;
+    }
+
+    return {
+      locationId,
+      locationName,
+      date,
+    };
+  }
+
   async function askScheduler(event?: FormEvent) {
     event?.preventDefault();
     const message = input.trim();
-    if (!message || !locationId || working) return;
+    const requestContext = getRequestContext();
+    if (!message || !requestContext.locationId || working) return;
 
     const userMessage: ChatMessage = {
       id: makeId("user"),
@@ -103,7 +176,7 @@ export function ScheduleAssistant() {
     setMessages((current) => [...current, userMessage]);
     setInput("");
     setWorking(true);
-    setStatus("Checking the scheduler...");
+    setStatus("Scheduler AI is checking the live schedule and deciding what to do...");
 
     try {
       const response = await fetch("/api/ai", {
@@ -111,31 +184,44 @@ export function ScheduleAssistant() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message,
-          locationId,
-          locationName,
-          date,
+          locationId: requestContext.locationId,
+          locationName: requestContext.locationName,
+          date: requestContext.date,
         }),
       });
       const data = (await response.json()) as SchedulerAiResponse;
-      if (!response.ok) throw new Error(data.error || "Scheduler AI could not answer.");
+      if (!response.ok) throw new Error(data.error || "Scheduler AI could not complete the request.");
 
+      setMode(data.mode ?? null);
       setMessages((current) => [
         ...current,
         {
           id: makeId("assistant"),
           role: "assistant",
-          text: data.reply || "No scheduler analysis was returned.",
+          text: data.reply || "No scheduler result was returned.",
           trainingExampleId: data.trainingExampleId ?? null,
         },
       ]);
-      setStatus(
-        data.toolsUsed?.length
-          ? `Read-only analysis used: ${data.toolsUsed.join(", ")}`
-          : "Read-only scheduler analysis complete"
-      );
+
+      if (data.changed) {
+        onScheduleChanged?.();
+        setStatus(
+          data.writeToolsUsed?.length
+            ? `Schedule updated and calendar refreshed. Actions: ${data.writeToolsUsed.join(", ")}`
+            : "Schedule updated and calendar refreshed."
+        );
+      } else {
+        setStatus(
+          data.toolsUsed?.length
+            ? `${data.mode === "AUTONOMOUS" ? "Autonomous" : "Read-only"} scheduler run used: ${data.toolsUsed.join(", ")}`
+            : "Scheduler AI request complete."
+        );
+      }
     } catch (error) {
       const messageText =
-        error instanceof Error ? error.message : "Scheduler AI could not answer.";
+        error instanceof Error
+          ? error.message
+          : "Scheduler AI could not complete the request.";
       setMessages((current) => [
         ...current,
         {
@@ -210,8 +296,20 @@ export function ScheduleAssistant() {
           </div>
 
           <div className={styles.readOnlyNotice}>
-            <strong>Read-only mode</strong>
-            <span>Analyzes scheduler data but cannot change the schedule.</span>
+            <strong>
+              {mode === "AUTONOMOUS"
+                ? "Autonomous scheduler mode"
+                : mode === "READ_ONLY"
+                  ? "Read-only scheduler mode"
+                  : "Scheduler control mode"}
+            </strong>
+            <span>
+              {mode === "AUTONOMOUS"
+                ? "Can inspect and safely execute scheduling actions with the existing scheduler rules."
+                : mode === "READ_ONLY"
+                  ? "Can inspect the scheduler but write actions are disabled."
+                  : "Linked to the live calendar. Write capability is checked when you send a request."}
+            </span>
           </div>
 
           <div className={styles.contextRow}>
@@ -257,7 +355,7 @@ export function ScheduleAssistant() {
           <div className={styles.messages} aria-live="polite">
             {messages.length === 0 ? (
               <div className={styles.emptyState}>
-                Ask about breaks, coverage, unplaced assignments, naps, speech, or schedule problems.
+                Ask the AI to inspect, generate, repair, move, place, delete, or explain schedule blocks. It stays limited to the Automatic Scheduler.
               </div>
             ) : (
               messages.map((message) => (
@@ -304,7 +402,7 @@ export function ScheduleAssistant() {
                   {correctionFor === message.id && (
                     <div className={styles.correctionBox}>
                       <label>
-                        What should the AI have said or checked?
+                        What should the AI have done, said, or checked?
                         <textarea
                           value={correction}
                           maxLength={4000}
@@ -337,7 +435,11 @@ export function ScheduleAssistant() {
                 </div>
               ))
             )}
-            {working && <div className={styles.thinking}>Checking scheduler data…</div>}
+            {working && (
+              <div className={styles.thinking}>
+                Inspecting and working on the scheduler…
+              </div>
+            )}
           </div>
 
           <form className={styles.composer} onSubmit={(event) => void askScheduler(event)}>
@@ -346,10 +448,10 @@ export function ScheduleAssistant() {
               maxLength={3000}
               disabled={working || !locationId}
               onChange={(event) => setInput(event.target.value)}
-              placeholder="Ask the Automatic Scheduler AI..."
+              placeholder="Tell the Automatic Scheduler AI what you want checked or changed..."
             />
             <button type="submit" disabled={working || !locationId || !input.trim()}>
-              {working ? "Checking…" : "Ask"}
+              {working ? "Working…" : "Run"}
             </button>
           </form>
 
