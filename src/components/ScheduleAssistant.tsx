@@ -45,11 +45,57 @@ type ScheduleAssistantProps = {
   onScheduleChanged?: () => void;
 };
 
-const SUGGESTIONS = [
-  "Check the schedule and fix anything safely fixable.",
-  "Who is missing a break?",
-  "Repair the schedule after the current call-outs.",
-  "Generate this day and verify all required coverage.",
+type SavedPromptGroup = {
+  title: string;
+  prompts: string[];
+};
+
+const SAVED_PROMPT_GROUPS: SavedPromptGroup[] = [
+  {
+    title: "Generate & repair",
+    prompts: [
+      "Check this day and fix anything safely fixable, then verify coverage and breaks.",
+      "Generate this day using the automatic scheduler and verify there are no uncovered or unplaced assignments.",
+      "Generate the work week and tell me what could not be scheduled.",
+      "Repair the current schedule after all saved call-outs and verify the result.",
+    ],
+  },
+  {
+    title: "Schedule changes",
+    prompts: [
+      "Move [client code] at [time] to [staff name] and keep coverage valid.",
+      "Delete the block for [staff name] at [time]. If client coverage is displaced, keep it in Unplaced.",
+      "Fix duplicate or missing breaks without overriding locked/manual cells.",
+      "Review the Unplaced tray and place anything that can be scheduled safely.",
+    ],
+  },
+  {
+    title: "Staff & clients",
+    prompts: [
+      "Mark [staff name] called out today and repair the schedule.",
+      "Update [staff name]'s weekly target hours to [hours].",
+      "Change [client code]'s attendance pattern to [days/times] and update the schedule if needed.",
+      "Set [client code] to prefer [staff name] and regenerate the selected day if needed.",
+    ],
+  },
+  {
+    title: "Events & attendance",
+    prompts: [
+      "Change [client code]'s nap today to [start]-[end] and update the schedule.",
+      "Add speech for [client code] at [start]-[end] today and repair the schedule.",
+      "Create a recurring nap for [client code] on [weekdays] from [start]-[end] between [start date] and [end date].",
+      "Mark [client code] called out from [start]-[end] today and repair coverage.",
+    ],
+  },
+  {
+    title: "Rules & planning",
+    prompts: [
+      "Show me the current scheduling rules and explain the break settings.",
+      "Change the break window to [start]-[end] and regenerate the selected day if needed.",
+      "Increase rotation priority to [value] and tell me what that changes.",
+      "Review this month's supervision plan and show who is still below target.",
+    ],
+  },
 ];
 
 function getTodayForDateInput(): string {
@@ -84,13 +130,14 @@ function readWorkspaceContext(): WorkspaceContext | null {
 
 export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps) {
   const [open, setOpen] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const [locations, setLocations] = useState<LocationOption[]>([]);
   const [locationId, setLocationId] = useState("");
   const [date, setDate] = useState(getTodayForDateInput);
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [working, setWorking] = useState(false);
-  const [status, setStatus] = useState("Connected to the Automatic Scheduler");
+  const [status, setStatus] = useState("Connected to the Automatic Scheduler website");
   const [mode, setMode] = useState<SchedulerAiMode | null>(null);
   const [correctionFor, setCorrectionFor] = useState<string | null>(null);
   const [correction, setCorrection] = useState("");
@@ -161,6 +208,12 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     };
   }
 
+  function chooseSavedPrompt(prompt: string) {
+    setInput(prompt);
+    setShowHelp(false);
+    setStatus("Saved prompt loaded. Edit any [bracketed] details, or replace it with your own wording.");
+  }
+
   async function askScheduler(event?: FormEvent) {
     event?.preventDefault();
     const message = input.trim();
@@ -175,8 +228,9 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
 
     setMessages((current) => [...current, userMessage]);
     setInput("");
+    setShowHelp(false);
     setWorking(true);
-    setStatus("Scheduler AI is checking the live schedule and deciding what to do...");
+    setStatus("Scheduler AI is analyzing the request, checking live data, and deciding the necessary actions...");
 
     try {
       const response = await fetch("/api/ai", {
@@ -207,8 +261,8 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
         onScheduleChanged?.();
         setStatus(
           data.writeToolsUsed?.length
-            ? `Schedule updated and calendar refreshed. Actions: ${data.writeToolsUsed.join(", ")}`
-            : "Schedule updated and calendar refreshed."
+            ? `Scheduler website updated and live calendar refreshed. Actions: ${data.writeToolsUsed.join(", ")}`
+            : "Scheduler website updated and live calendar refreshed."
         );
       } else {
         setStatus(
@@ -285,14 +339,24 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
               <span className={styles.eyebrow}>AUTOMATIC SCHEDULER AI</span>
               <h2>Schedule Assistant</h2>
             </div>
-            <button
-              type="button"
-              className={styles.closeButton}
-              aria-label="Close Schedule Assistant"
-              onClick={() => setOpen(false)}
-            >
-              ×
-            </button>
+            <div className={styles.headerActions}>
+              <button
+                type="button"
+                className={styles.helpButton}
+                aria-expanded={showHelp}
+                onClick={() => setShowHelp((current) => !current)}
+              >
+                Help
+              </button>
+              <button
+                type="button"
+                className={styles.closeButton}
+                aria-label="Close Schedule Assistant"
+                onClick={() => setOpen(false)}
+              >
+                ×
+              </button>
+            </div>
           </div>
 
           <div className={styles.readOnlyNotice}>
@@ -301,14 +365,14 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
                 ? "Autonomous scheduler mode"
                 : mode === "READ_ONLY"
                   ? "Read-only scheduler mode"
-                  : "Scheduler control mode"}
+                  : "Scheduler website control"}
             </strong>
             <span>
               {mode === "AUTONOMOUS"
-                ? "Can inspect and safely execute scheduling actions with the existing scheduler rules."
+                ? "Can analyze normal language and operate the scheduler website through its existing rules and APIs."
                 : mode === "READ_ONLY"
-                  ? "Can inspect the scheduler but write actions are disabled."
-                  : "Linked to the live calendar. Write capability is checked when you send a request."}
+                  ? "Can inspect the scheduler website but write actions are disabled."
+                  : "Type any scheduler-related request. Exact commands are not required."}
             </span>
           </div>
 
@@ -339,23 +403,47 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
             </label>
           </div>
 
-          <div className={styles.suggestions}>
-            {SUGGESTIONS.map((suggestion) => (
-              <button
-                key={suggestion}
-                type="button"
-                disabled={working || !locationId}
-                onClick={() => setInput(suggestion)}
-              >
-                {suggestion}
-              </button>
-            ))}
+          <div className={styles.promptHint}>
+            <span>Ask naturally — for example, “Ana is out until noon, fix the schedule.”</span>
+            <button
+              type="button"
+              disabled={working}
+              onClick={() => setShowHelp((current) => !current)}
+            >
+              {showHelp ? "Hide saved prompts" : "Saved prompts"}
+            </button>
           </div>
+
+          {showHelp && (
+            <div className={styles.helpPanel}>
+              <div className={styles.helpIntro}>
+                <strong>Saved prompts</strong>
+                <span>These are optional examples. Click one to load it, then edit the bracketed details before running it.</span>
+              </div>
+              {SAVED_PROMPT_GROUPS.map((group) => (
+                <div key={group.title} className={styles.promptGroup}>
+                  <span>{group.title}</span>
+                  <div>
+                    {group.prompts.map((prompt) => (
+                      <button
+                        key={prompt}
+                        type="button"
+                        disabled={working || !locationId}
+                        onClick={() => chooseSavedPrompt(prompt)}
+                      >
+                        {prompt}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
 
           <div className={styles.messages} aria-live="polite">
             {messages.length === 0 ? (
               <div className={styles.emptyState}>
-                Ask the AI to inspect, generate, repair, move, place, delete, or explain schedule blocks. It stays limited to the Automatic Scheduler.
+                Type any request related to the scheduler website. The AI can inspect and change schedules, staff/client setup, call-outs, attendance, naps, speech, teams, rules, and supervision using the existing scheduler validations.
               </div>
             ) : (
               messages.map((message) => (
@@ -437,7 +525,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
             )}
             {working && (
               <div className={styles.thinking}>
-                Inspecting and working on the scheduler…
+                Analyzing the request and working through the scheduler…
               </div>
             )}
           </div>
@@ -445,10 +533,10 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
           <form className={styles.composer} onSubmit={(event) => void askScheduler(event)}>
             <textarea
               value={input}
-              maxLength={3000}
+              maxLength={5000}
               disabled={working || !locationId}
               onChange={(event) => setInput(event.target.value)}
-              placeholder="Tell the Automatic Scheduler AI what you want checked or changed..."
+              placeholder="Ask anything related to this scheduler website in your own words..."
             />
             <button type="submit" disabled={working || !locationId || !input.trim()}>
               {working ? "Working…" : "Run"}

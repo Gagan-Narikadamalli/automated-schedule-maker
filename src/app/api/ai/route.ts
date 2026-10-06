@@ -4,6 +4,10 @@ import { NextResponse } from "next/server";
 import { buildSchedulerAiInstructions } from "@/features/ai/schedulerPrompt";
 import { createSchedulerReadOnlyTools } from "@/features/ai/schedulerTools";
 import {
+  createSchedulerWebsiteTools,
+  SCHEDULER_WEBSITE_WRITE_TOOL_NAMES,
+} from "@/features/ai/schedulerWebsiteTools";
+import {
   createSchedulerWriteTools,
   SCHEDULER_WRITE_TOOL_NAMES,
 } from "@/features/ai/schedulerWriteTools";
@@ -19,10 +23,10 @@ import {
 import { connectToDatabase } from "@/lib/db";
 import { AITrainingExample } from "@/models/AITrainingExample";
 
-export const maxDuration = 180;
+export const maxDuration = 300;
 
 const DEFAULT_SCHEDULER_AI_MODEL = "openai/gpt-5-nano";
-const MAX_MESSAGE_LENGTH = 3000;
+const MAX_MESSAGE_LENGTH = 5000;
 
 function cleanLocationName(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -85,9 +89,17 @@ export async function POST(request: Request) {
     };
 
     const readTools = createSchedulerReadOnlyTools(context);
+    const websiteTools = createSchedulerWebsiteTools(context);
     const tools = autonomousWrites
-      ? { ...readTools, ...createSchedulerWriteTools(context) }
-      : readTools;
+      ? {
+          ...readTools,
+          ...websiteTools,
+          ...createSchedulerWriteTools(context),
+        }
+      : {
+          ...readTools,
+          get_scheduler_configuration: websiteTools.get_scheduler_configuration,
+        };
 
     const agent = new ToolLoopAgent({
       model,
@@ -96,15 +108,15 @@ export async function POST(request: Request) {
       }),
       tools,
       toolChoice: "auto",
-      stopWhen: stepCountIs(14),
-      maxOutputTokens: 1800,
+      stopWhen: stepCountIs(20),
+      maxOutputTokens: 2400,
     });
 
     const result = await agent.generate({
       prompt: message,
       timeout: {
-        totalMs: 160_000,
-        stepMs: 55_000,
+        totalMs: 260_000,
+        stepMs: 65_000,
       },
     });
 
@@ -118,8 +130,10 @@ export async function POST(request: Request) {
         )
       ),
     ];
-    const writeToolsUsed = toolsUsed.filter((toolName) =>
-      SCHEDULER_WRITE_TOOL_NAMES.has(toolName)
+    const writeToolsUsed = toolsUsed.filter(
+      (toolName) =>
+        SCHEDULER_WRITE_TOOL_NAMES.has(toolName) ||
+        SCHEDULER_WEBSITE_WRITE_TOOL_NAMES.has(toolName)
     );
     const changed = autonomousWrites && writeToolsUsed.length > 0;
     const mode = autonomousWrites ? "AUTONOMOUS" : "READ_ONLY";
@@ -168,7 +182,7 @@ export async function POST(request: Request) {
         error: configurationProblem
           ? "Scheduler AI is not connected to a usable AI Gateway model yet. Enable Vercel AI Gateway/OIDC for the project or set AI_GATEWAY_API_KEY for local development."
           : timeoutProblem
-            ? "Scheduler AI reached its execution limit before finishing. Try a more focused scheduler request."
+            ? "Scheduler AI reached its execution limit before finishing. Try splitting a very large scheduler request into two prompts."
             : "Scheduler AI could not complete this request.",
       },
       { status: configurationProblem ? 503 : timeoutProblem ? 504 : 500 }
