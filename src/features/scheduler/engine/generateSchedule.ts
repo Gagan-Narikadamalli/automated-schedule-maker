@@ -513,7 +513,10 @@ function attemptSingleSwapRepair(
  * requests such as "fix the uncovered blocks" where preserving the current day
  * is more important than globally re-optimizing it.
  */
-export function repairCoverageMinimally(input: SchedulerInput): SchedulerResult {
+export function repairCoverageMinimally(
+  input: SchedulerInput,
+  priorityRequirements: Array<{ clientId: string; startTime: string }> = []
+): SchedulerResult {
   const callOutStaffIds = new Set(input.callOutStaffIds);
   const assignments: SchedulerAssignment[] = input.existingAssignments.map(
     (assignment) => ({ ...assignment })
@@ -532,12 +535,26 @@ export function repairCoverageMinimally(input: SchedulerInput): SchedulerResult 
   const requirementsToFill = allRequirements.filter(
     (requirement) => !requirementIsAlreadyCovered(requirement, assignments)
   );
+  const priorityKeys = new Set(
+    priorityRequirements.map(
+      (requirement) => `${requirement.clientId}|${requirement.startTime}`
+    )
+  );
   const sortedRequirements = sortRequirementsForClinicFlow(
     requirementsToFill,
     input,
     assignments,
     callOutStaffIds
-  );
+  ).sort((left, right) => {
+    const leftPriority = priorityKeys.has(
+      `${left.client.id}|${left.startTime}`
+    );
+    const rightPriority = priorityKeys.has(
+      `${right.client.id}|${right.startTime}`
+    );
+    if (leftPriority === rightPriority) return 0;
+    return leftPriority ? -1 : 1;
+  });
   const uncoveredRequirements: UncoveredRequirement[] = [];
 
   for (const requirement of sortedRequirements) {
