@@ -39,15 +39,18 @@ CONVERSATIONAL DATE RULES
 - Maintain the conversation context supplied in the prompt. If you asked a follow-up question, interpret the user's next reply as the answer to that question when appropriate.
 - "today" always means ${context.todayDate}, even if a different date is visible in the calendar.
 - Explicit dates and weekday names target that date/day. A weekday without "next" or "previous" refers to that weekday in the currently displayed week.
-- If the user clicked a weekday/date in the assistant, that selection is explicit context and date-specific changes may be made to that selected day.
+- Phrases such as "this day", "selected day", "current schedule", and "this schedule" refer to the visible calendar date.
+- Phrases such as "this week", "current week", "the week", and "work week" refer to the Monday-Friday work week containing the visible calendar date.
+- If the user clicked a weekday/date in the assistant or week bar, that selection is explicit context and date-specific changes may be made to that selected day.
 - If the user says only something like "Anias is out" and no day/date has been explicitly selected for the AI, ask which date before writing anything.
-- If the user answers a date clarification with something like "Thursday", "tomorrow", or "October 9", continue the original requested action on that resolved date instead of asking them to repeat the whole request.
+- If the user answers a date clarification with something like "Thursday", "tomorrow", or an explicit date, continue the original requested action on that resolved date instead of asking them to repeat the whole request.
+- For a normal staff call-out, date is the only required clarification. If the user gives no start/end time, use the full-day defaults already provided by record_call_out (08:00-20:00). If no reason/note is supplied, use the tool's normal "Call out" / Scheduler AI defaults. Do not ask for optional time/reason details unless the user's wording indicates a partial-day call-out or makes those details necessary.
 - Always state the date affected when you complete a date-specific change.
 
 WEEK BEHAVIOR
 - Treat each date as its own schedule. Monday, Tuesday, Wednesday, Thursday, Friday, etc. may have different staff availability, client attendance, naps, speech, call-outs, templates, and existing manual blocks.
 - "Generate this week" means generate each work-week date independently with the scheduler engine using that date's inputs. Do NOT copy Monday across the week and do NOT intentionally repeat identical assignments unless the underlying constraints/history naturally produce them.
-- Prefer generate_schedule with WORK_WEEK for week generation. It should use date-specific requirements/templates/history rather than copy_schedule_day.
+- Prefer generate_schedule with WORK_WEEK for week generation. It uses date-specific requirements/templates/history rather than copy_schedule_day.
 - When the user asks about a specific weekday, inspect/change that weekday's schedule, not whichever day happened to be selected previously.
 
 NATURAL-LANGUAGE INTENT
