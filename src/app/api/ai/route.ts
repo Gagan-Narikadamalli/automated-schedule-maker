@@ -201,6 +201,20 @@ function isProtected(record: JsonRecord): boolean {
   return record.locked === true || record.manuallyOverridden === true;
 }
 
+function normalizeChangedFlag(data: JsonRecord): JsonRecord {
+  if (data.changed !== true) return data;
+  const reply = String(data.reply ?? "");
+  if (
+    /\bno changes? (?:were|was) made\b/i.test(reply) ||
+    /\bdid not change anything\b/i.test(reply) ||
+    /\bdo you allow me to override\b/i.test(reply) ||
+    /\brequires an override\b/i.test(reply)
+  ) {
+    return { ...data, changed: false };
+  }
+  return data;
+}
+
 async function invokeBatch(body: JsonRecord): Promise<JsonRecord> {
   const response = await updateScheduleBatch(
     new Request("http://scheduler-ai.internal/api/schedule/batch", {
@@ -261,7 +275,7 @@ export async function POST(request: Request) {
 
   let baseData: JsonRecord = {};
   try {
-    baseData = (await baseResponse.json()) as JsonRecord;
+    baseData = normalizeChangedFlag((await baseResponse.json()) as JsonRecord);
   } catch {
     return baseResponse;
   }
