@@ -36,8 +36,8 @@
 }
 
 .panel {
-  width: min(430px, calc(100vw - 30px));
-  max-height: min(720px, calc(100vh - 105px));
+  width: min(460px, calc(100vw - 30px));
+  max-height: min(780px, calc(100vh - 105px));
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -67,6 +67,24 @@
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.12em;
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.helpButton {
+  border: 1px solid #cbd7e2;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #274867;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
 }
 
 .closeButton {
@@ -120,6 +138,105 @@
   padding: 8px 9px;
   font: inherit;
   box-sizing: border-box;
+}
+
+.promptHint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 18px 10px;
+  color: #607386;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.promptHint span {
+  min-width: 0;
+}
+
+.promptHint button {
+  flex: 0 0 auto;
+  border: 1px solid #cbd7e2;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #274867;
+  padding: 6px 9px;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.promptHint button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.helpPanel {
+  max-height: 280px;
+  overflow-y: auto;
+  display: grid;
+  gap: 12px;
+  padding: 12px 18px 14px;
+  background: #fbfdff;
+  border-top: 1px solid #edf2f6;
+  border-bottom: 1px solid #e3eaf1;
+}
+
+.helpIntro {
+  display: grid;
+  gap: 3px;
+  color: #52697f;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.helpIntro strong {
+  color: #18324d;
+  font-size: 12px;
+}
+
+.promptGroup {
+  display: grid;
+  gap: 6px;
+}
+
+.promptGroup > span {
+  color: #4b647b;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.promptGroup > div {
+  display: grid;
+  gap: 6px;
+}
+
+.promptGroup button {
+  width: 100%;
+  border: 1px solid #d6e0ea;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #274867;
+  padding: 8px 10px;
+  text-align: left;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.35;
+  cursor: pointer;
+}
+
+.promptGroup button:hover:not(:disabled) {
+  border-color: #9fb4c7;
+  background: #f4f8fc;
+}
+
+.promptGroup button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .suggestions {
@@ -257,8 +374,8 @@
 }
 
 .composer textarea {
-  min-height: 68px;
-  max-height: 130px;
+  min-height: 76px;
+  max-height: 150px;
   resize: vertical;
 }
 
@@ -302,7 +419,17 @@
     grid-template-columns: 1fr;
   }
 
+  .readOnlyNotice,
+  .promptHint {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .helpPanel {
+    max-height: 34vh;
+  }
+
   .messages {
-    max-height: 38vh;
+    max-height: 34vh;
   }
 }
