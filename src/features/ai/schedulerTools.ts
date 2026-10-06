@@ -189,7 +189,7 @@ export function createSchedulerReadOnlyTools(context: SchedulerAiContext) {
   return {
     lookup_schedule: tool({
       description:
-        "Answer detailed conversational questions about the selected day's schedule by staff name, client code, and/or time range. Prefer this for questions such as: who is Anias with from 8 to 2, what clients does Areyana have, who is covering CaMe at 10, when is Danna on break, what is JeMa's coverage, or who is free between 12 and 1. It returns merged human-friendly schedule segments and can calculate free staff.",
+        "Answer detailed conversational questions about the selected day's generated schedule by staff name, client code, and/or time range. Prefer this for questions such as: who is Anias with from 8 to 2, what clients does Areyana have, who is covering CaMe at 10, when is Danna on break, what is JeMa's coverage, or who is free between 12 and 1. It explicitly reports whether a schedule exists for that date, returns merged human-friendly schedule segments, and only calculates free staff when a generated schedule is available.",
       inputSchema: scheduleLookupSchema,
       execute: async (input) => {
         const [dayData, assignments] = await Promise.all([
@@ -199,6 +199,10 @@ export function createSchedulerReadOnlyTools(context: SchedulerAiContext) {
         const staffNames = new Map(dayData.staff.map((member) => [member.id, member.name]));
         const clientCodes = new Map(dayData.clients.map((client) => [client.id, client.displayCode]));
         const enriched = enrichAssignments(assignments, staffNames, clientCodes);
+        const requiredClientSlots = dayData.clients.reduce(
+          (total, client) => total + client.requiredSlots.length,
+          0
+        );
 
         let resolvedStaffId: string | null = null;
         let resolvedStaffName: string | null = null;
@@ -240,6 +244,9 @@ export function createSchedulerReadOnlyTools(context: SchedulerAiContext) {
           return {
             locationId,
             date,
+            scheduleAvailable: assignments.length > 0,
+            assignmentCount: assignments.length,
+            requiredClientSlots,
             needsClarification: true,
             staffQuery: input.staffName ?? null,
             staffMatches,
@@ -255,6 +262,28 @@ export function createSchedulerReadOnlyTools(context: SchedulerAiContext) {
           };
         }
 
+        if (assignments.length === 0) {
+          return {
+            locationId,
+            date,
+            scheduleAvailable: false,
+            assignmentCount: 0,
+            requiredClientSlots,
+            needsClarification: false,
+            resolvedStaffName,
+            resolvedClientCode,
+            requestedRange: {
+              startTime: input.startTime ?? null,
+              endTime: input.endTime ?? null,
+            },
+            count: 0,
+            segments: [],
+            assignments: [],
+            freeStaff: [],
+            message: `The schedule has not been generated for ${date}.`,
+          };
+        }
+
         const includeBreaks = input.includeBreaks !== false;
         const filtered = enriched.filter((assignment) => {
           if (resolvedStaffId && assignment.staffId !== resolvedStaffId) return false;
@@ -267,6 +296,9 @@ export function createSchedulerReadOnlyTools(context: SchedulerAiContext) {
         const result: Record<string, unknown> = {
           locationId,
           date,
+          scheduleAvailable: true,
+          assignmentCount: assignments.length,
+          requiredClientSlots,
           needsClarification: false,
           resolvedStaffName,
           resolvedClientCode,
@@ -319,7 +351,7 @@ export function createSchedulerReadOnlyTools(context: SchedulerAiContext) {
 
     get_day_schedule: tool({
       description:
-        "Read all saved assignments for the currently selected scheduler location and date. Use this for broad day questions, comparisons, locked/manual blocks, naps, speech, or when lookup_schedule is too narrow.",
+        "Read all saved assignments for the currently selected scheduler location and date and report whether a generated schedule is available. Use this for broad day questions, comparisons, locked/manual blocks, naps, speech, or when lookup_schedule is too narrow.",
       inputSchema: noInputSchema,
       execute: async () => {
         const [dayData, assignments] = await Promise.all([
@@ -336,6 +368,7 @@ export function createSchedulerReadOnlyTools(context: SchedulerAiContext) {
         return {
           locationId,
           date,
+          scheduleAvailable: assignments.length > 0,
           requiredClientSlots: dayData.clients.reduce(
             (total, client) => total + client.requiredSlots.length,
             0
@@ -349,7 +382,7 @@ export function createSchedulerReadOnlyTools(context: SchedulerAiContext) {
 
     get_staff: tool({
       description:
-        "Read active scheduler staff, their availability, current scheduled client workload, and required-break status for the selected day. Use this for questions such as who is available, who is called out, workload, or who is missing a break.",
+        "Read active scheduler staff, their availability, current scheduled client workload, and required-break status for the selected day. Use this for questions such as who is available, who is called out, workload, or who is missing a break. For time-slot availability on the generated calendar, prefer lookup_schedule with includeFreeStaff=true.",
       inputSchema: noInputSchema,
       execute: async () => {
         const [dayData, assignments] = await Promise.all([
@@ -369,6 +402,8 @@ export function createSchedulerReadOnlyTools(context: SchedulerAiContext) {
         return {
           locationId,
           date,
+          scheduleAvailable: assignments.length > 0,
+          assignmentCount: assignments.length,
           breakEligibilityHours: dayData.extendedRules.breakEligibilityHours,
           staff: dayData.staff.map((member) => {
             const scheduled = assignmentsByStaff.get(member.id) ?? [];
@@ -567,6 +602,8 @@ export function createSchedulerReadOnlyTools(context: SchedulerAiContext) {
         return {
           locationId,
           date,
+          scheduleAvailable: assignments.length > 0,
+          assignmentCount: assignments.length,
           readiness,
           requiredClientSlots: requiredKeys.size,
           coveredClientSlots: requiredKeys.size - uncoveredRequirements.length,
