@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { PUT as updateScheduleBatch } from "@/app/api/schedule/batch/route";
+import { POST as repairScheduleDay } from "@/app/api/schedule/repair/route";
 import { connectToDatabase } from "@/lib/db";
 import { analyzeNaturalTimeRange } from "@/features/ai/naturalTime";
 import { ScheduleAssignment } from "@/models/ScheduleAssignment";
@@ -46,6 +47,32 @@ function isAffirmative(value: string): boolean {
     .replace(/\s+/g, " ")
     .trim();
   return /^(yes|yeah|yep|sure|ok|okay|yes please|please do|go ahead|proceed|do it|allow it|override it|yes override|yes override it|yes proceed|yes go ahead)$/.test(text);
+}
+
+function isMinimalRepairIntent(value: string): boolean {
+  const text = value.toLowerCase();
+  return (
+    /\b(?:fix|repair)\b[\s\S]*\b(?:schedule|coverage|uncovered|unplaced|clients?|gaps?)\b/.test(text) ||
+    /\b(?:cover|fill)\b[\s\S]*\b(?:uncovered|unplaced|all\s+clients?|coverage\s+gaps?)\b/.test(text) ||
+    /\bmake\s+sure\b[\s\S]*\ball\s+clients?\b[\s\S]*\bcovered\b/.test(text)
+  );
+}
+
+async function invokeRepair(body: JsonRecord): Promise<JsonRecord> {
+  const response = await repairScheduleDay(
+    new Request("http://scheduler-ai.internal/api/schedule/repair", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+  );
+  let data: JsonRecord = {};
+  try {
+    data = (await response.json()) as JsonRecord;
+  } catch {
+    data = {};
+  }
+  return { ok: response.ok, status: response.status, ...data };
 }
 
 function breakAction(value: string): BreakAction | null {
