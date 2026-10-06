@@ -1,3 +1,5 @@
+import { buildDateRecommendations } from "./schedulerDateRecommendations";
+
 type JsonRecord = Record<string, any>;
 
 type DateContextFallbackOptions = {
@@ -194,6 +196,11 @@ export function buildSchedulerDateContextFallback({
   const wantsBreak = /\bbreaks?\b/i.test(request);
   const wantsCoverageIssue = /\b(uncovered|coverage issue|coverage problem|needs coverage|unplaced|missing coverage)\b/i.test(request);
   const wantsWho = /\b(who|taking care|covering|covers|with whom|scheduled with)\b/i.test(request);
+  const wantsSuggestion = /\b(recommend|recommendation|recommendations|suggest|suggestion|suggestions|what should|best way|improve|improvement)\b/i.test(request) || /cover\s+(?:any\s+)?gaps?/i.test(request);
+
+  if (wantsSuggestion) {
+    return buildDateRecommendations(dateContext, date, range);
+  }
 
   if (wantsFree) {
     const fullyFree = staff
