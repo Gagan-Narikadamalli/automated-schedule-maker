@@ -329,9 +329,14 @@ export function createSchedulerWriteTools(context: SchedulerAiContext) {
 
     repair_schedule: tool({
       description:
-        "Run the existing targeted schedule repair for the selected date after call-outs or when the user explicitly asks to repair the schedule. It preserves manual overrides and uses the scheduler engine.",
+        "Minimally repair uncovered client coverage on the selected date. Use for requests such as 'fix the schedule', 'cover the uncovered blocks', or 'make sure all clients are covered'. The repair preserves every working assignment when possible, fills gaps into free eligible staff first, and only then allows a one-step move of an unlocked AUTO 1:1 assignment when that is necessary to cover a gap. Manual/locked cells and reserved breaks/events remain protected. Staff call-out recording uses its own targeted repair path.",
       inputSchema: noInputSchema,
-      execute: async () => invokeJson(repairScheduleDay, "POST", { locationId, date }),
+      execute: async () =>
+        invokeJson(repairScheduleDay, "POST", {
+          locationId,
+          date,
+          mode: "COVERAGE",
+        }),
     }),
 
     copy_schedule_day: tool({
