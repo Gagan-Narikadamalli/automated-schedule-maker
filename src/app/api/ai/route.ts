@@ -25,6 +25,14 @@ type AiRequestBody = {
   history?: HistoryMessage[];
 };
 
+type BreakAction = "ADD" | "REMOVE";
+
+type PendingBreakRequest = {
+  intentMessage: string;
+  overrideConfirmed: boolean;
+  action: BreakAction;
+};
+
 function normalize(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
@@ -39,16 +47,28 @@ function isAffirmative(value: string): boolean {
   return /^(yes|yeah|yep|sure|ok|okay|yes please|please do|go ahead|proceed|do it|allow it|override it|yes override|yes override it|yes proceed|yes go ahead)$/.test(text);
 }
 
-function isExplicitBreakWrite(value: string): boolean {
-  return /\b(add|give|set|put|schedule|insert)\b[\s\S]*\bbreak\b/i.test(value);
+function breakAction(value: string): BreakAction | null {
+  if (!/\bbreak\b/i.test(value)) return null;
+  if (/\b(remove|delete|clear|cancel)\b[\s\S]*\bbreak\b/i.test(value)) {
+    return "REMOVE";
+  }
+  if (/\b(add|give|set|put|schedule|insert)\b[\s\S]*\bbreak\b/i.test(value)) {
+    return "ADD";
+  }
+  return null;
 }
 
 function pendingBreakRequest(
   message: string,
   history: HistoryMessage[]
-): { intentMessage: string; overrideConfirmed: boolean } | null {
-  if (isExplicitBreakWrite(message)) {
-    return { intentMessage: message, overrideConfirmed: false };
+): PendingBreakRequest | null {
+  const directAction = breakAction(message);
+  if (directAction) {
+    return {
+      intentMessage: message,
+      overrideConfirmed: false,
+      action: directAction,
+    };
   }
 
   if (!isAffirmative(message)) return null;
@@ -67,8 +87,14 @@ function pendingBreakRequest(
 
   for (let index = latestAssistantIndex - 1; index >= 0; index -= 1) {
     const entry = recent[index];
-    if (entry.role === "user" && isExplicitBreakWrite(entry.text ?? "")) {
-      return { intentMessage: entry.text ?? "", overrideConfirmed: true };
+    if (entry.role !== "user") continue;
+    const action = breakAction(entry.text ?? "");
+    if (action) {
+      return {
+        intentMessage: entry.text ?? "",
+        overrideConfirmed: true,
+        action,
+      };
     }
   }
   return null;
@@ -101,7 +127,11 @@ function parseTimeToken(
 
 function parseBreakRange(message: string): { startTime: string; endTime: string } | null {
   const withoutDates = message.replace(/\b20\d{2}-\d{2}-\d{2}\b/g, " ");
-  const range = withoutDates.match(
+  const normalizedSpacing = withoutDates.replace(
+    /\b(\d{1,2})\s+(\d{2})\s*(am|pm)\b/gi,
+    "$1:$2 $3"
+  );
+  const range = normalizedSpacing.match(
     /\b(?:from\s+|at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:-|–|to|until|through)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i
   );
   if (range) {
@@ -123,7 +153,7 @@ function parseBreakRange(message: string): { startTime: string; endTime: string 
     if (startTime && endTime && endTime > startTime) return { startTime, endTime };
   }
 
-  const single = withoutDates.match(
+  const single = normalizedSpacing.match(
     /\b(?:at|from)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i
   );
   if (!single) return null;
@@ -161,6 +191,31 @@ function displayTime(time: string): string {
   const hour = Number(hourText);
   const suffix = hour >= 12 ? "PM" : "AM";
   return `${hour % 12 || 12}:${minute} ${suffix}`;
+}
+
+function isBreakType(value: unknown): boolean {
+  return ["BREAK", "BREAK_NAP", "BREAK_SPEECH"].includes(String(value ?? ""));
+}
+
+function isProtected(record: JsonRecord): boolean {
+  return record.locked === true || record.manuallyOverridden === true;
+}
+
+function normalizeChangedFlag(data: JsonRecord): JsonRecord {
+  if (data.changed !== true) return data;
+  const reply = String(data.reply ?? "");
+  if (
+    /\bno changes? (?:were|was) made\b/i.test(reply) ||
+    /\bdid not change anything\b/i.test(reply) ||
+    /\bdo you allow me to override\b/i.test(reply) ||
+    /\brequires an override\b/i.test(reply) ||
+    /\bblocked by locked\/manual cells\b/i.test(reply) ||
+    (/\bexplicit override permission\b/i.test(reply) &&
+      /\b(?:confirm|proceed)\b/i.test(reply))
+  ) {
+    return { ...data, changed: false };
+  }
+  return data;
 }
 
 async function invokeBatch(body: JsonRecord): Promise<JsonRecord> {
@@ -223,7 +278,7 @@ export async function POST(request: Request) {
 
   let baseData: JsonRecord = {};
   try {
-    baseData = (await baseResponse.json()) as JsonRecord;
+    baseData = normalizeChangedFlag((await baseResponse.json()) as JsonRecord);
   } catch {
     return baseResponse;
   }
@@ -293,6 +348,100 @@ export async function POST(request: Request) {
     .sort({ startTime: 1 })
     .lean()) as unknown as JsonRecord[];
 
+  if (pendingBreak.action === "REMOVE") {
+    const breakAssignments = existing.filter((assignment) =>
+      isBreakType(assignment.assignmentType)
+    );
+
+    if (breakAssignments.length === 0) {
+      return NextResponse.json({
+        ...baseData,
+        reply: `${staffName} has no saved break from ${displayTime(range.startTime)} to ${displayTime(range.endTime)} on ${date}.\n\nIs there anything else you'd like help with?`,
+        changed: false,
+        writeToolsUsed: [],
+        effectiveDate: date,
+      });
+    }
+
+    const protectedBreaks = breakAssignments.filter(isProtected);
+    if (protectedBreaks.length > 0 && !pendingBreak.overrideConfirmed) {
+      const protectedTimes = protectedBreaks
+        .map((assignment) => displayTime(String(assignment.startTime)))
+        .join(", ");
+      return NextResponse.json({
+        ...baseData,
+        reply: `I found ${staffName}'s break on ${date} at ${protectedTimes}, but the break cell is locked/manual. Removing it requires an override. Do you allow me to override this and proceed?`,
+        changed: false,
+        writeToolsUsed: [],
+        effectiveDate: date,
+      });
+    }
+
+    const removal = await invokeBatch({
+      locationId,
+      date,
+      force: pendingBreak.overrideConfirmed,
+      changes: breakAssignments.map((assignment) => ({
+        staffId,
+        startTime: String(assignment.startTime),
+        assignmentType: "EMPTY",
+        text: "Removed break by Scheduler AI",
+      })),
+    });
+
+    if (!removal.ok) {
+      if (removal.status === 409 || removal.requiresConfirmation === true) {
+        return NextResponse.json({
+          ...baseData,
+          reply: `I checked the break removal for ${staffName} on ${date}. The scheduler would normally block it because ${conflictText(removal.conflicts)}. Do you allow me to override this and proceed?`,
+          changed: false,
+          writeToolsUsed: [],
+          effectiveDate: date,
+        });
+      }
+      return NextResponse.json({
+        ...baseData,
+        reply: `I could not remove the break for ${staffName} on ${date}: ${String(removal.error ?? "the scheduler rejected the change")}. No schedule changes were made.`,
+        changed: false,
+        writeToolsUsed: [],
+        effectiveDate: date,
+      });
+    }
+
+    const remainingBreaks = await ScheduleAssignment.countDocuments({
+      locationId,
+      date,
+      staffId,
+      startTime: { $in: breakAssignments.map((assignment) => String(assignment.startTime)) },
+      assignmentType: { $in: ["BREAK", "BREAK_NAP", "BREAK_SPEECH"] },
+    });
+
+    if (remainingBreaks > 0) {
+      return NextResponse.json({
+        ...baseData,
+        reply: `The break removal returned successfully, but I could not verify that every requested break cell was removed for ${staffName} on ${date}. Please refresh the schedule before making another change.`,
+        changed: true,
+        toolsUsed: ["edit_schedule_cells"],
+        writeToolsUsed: ["edit_schedule_cells"],
+        effectiveDate: date,
+      });
+    }
+
+    return NextResponse.json({
+      ...baseData,
+      reply: `Done. I removed ${staffName}'s break from ${displayTime(range.startTime)} to ${displayTime(range.endTime)} on ${date} and verified the schedule.\n\nIs there anything else you'd like help with?`,
+      toolsUsed: [
+        ...new Set([
+          ...(Array.isArray(baseData.toolsUsed) ? baseData.toolsUsed : []),
+          "edit_schedule_cells",
+        ]),
+      ],
+      writeToolsUsed: ["edit_schedule_cells"],
+      changed: true,
+      effectiveDate: date,
+    });
+  }
+
   if (existing.length > 0) {
     const alreadyBreak = existing.every((assignment) => assignment.assignmentType === "BREAK");
     if (alreadyBreak && existing.length === slots.length) {
@@ -301,6 +450,7 @@ export async function POST(request: Request) {
         reply: `${staffName} already has a break from ${displayTime(range.startTime)} to ${displayTime(range.endTime)} on ${date}.\n\nIs there anything else you'd like help with?`,
         changed: false,
         writeToolsUsed: [],
+        effectiveDate: date,
       });
     }
 
@@ -312,6 +462,7 @@ export async function POST(request: Request) {
       reply: `I did not add the break because ${staffName} already has scheduled work in that period on ${date}: ${details}. Replacing an occupied block could affect client coverage. I can analyze a safe handoff or replacement first if you want.`,
       changed: false,
       writeToolsUsed: [],
+      effectiveDate: date,
     });
   }
 
@@ -335,6 +486,7 @@ export async function POST(request: Request) {
         reply: `I checked the requested break for ${staffName} on ${date}. The scheduler would normally block it because ${conflictText(batchResult.conflicts)}. Do you allow me to override this and proceed?`,
         changed: false,
         writeToolsUsed: [],
+        effectiveDate: date,
       });
     }
     return NextResponse.json({
@@ -342,6 +494,7 @@ export async function POST(request: Request) {
       reply: `I could not add the break for ${staffName} on ${date}: ${String(batchResult.error ?? "the scheduler rejected the change")}. No schedule changes were made.`,
       changed: false,
       writeToolsUsed: [],
+      effectiveDate: date,
     });
   }
 
@@ -360,6 +513,7 @@ export async function POST(request: Request) {
       changed: true,
       toolsUsed: ["edit_schedule_cells"],
       writeToolsUsed: ["edit_schedule_cells"],
+      effectiveDate: date,
     });
   }
 

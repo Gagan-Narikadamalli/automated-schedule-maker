@@ -66,6 +66,8 @@ const SAVED_PROMPT_GROUPS: SavedPromptGroup[] = [
     title: "Schedule changes",
     prompts: [
       "Move [client code] at [time] to [staff name] and keep coverage valid.",
+      "Replace all blocks for [staff name] with [staff name] on this day and keep any displaced client work in Unplaced.",
+      "Replace all [client code] blocks with [client code] on this day and report anything left in Unplaced.",
       "Delete the block for [staff name] at [time]. If client coverage is displaced, keep it in Unplaced.",
       "Fix duplicate or missing breaks without overriding locked/manual cells.",
       "Review the Unplaced tray and place anything that can be scheduled safely.",
@@ -619,7 +621,18 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
               maxLength={5000}
               disabled={working || !locationId}
               onChange={(event) => setInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (
+                  event.key === "Enter" &&
+                  !event.shiftKey &&
+                  !event.nativeEvent.isComposing
+                ) {
+                  event.preventDefault();
+                  void askScheduler();
+                }
+              }}
               placeholder="Ask anything related to this scheduler website in your own words..."
+              aria-keyshortcuts="Enter"
             />
             <button type="submit" disabled={working || !locationId || !input.trim()}>
               {working ? "Working…" : "Run"}
