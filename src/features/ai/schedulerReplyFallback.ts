@@ -37,6 +37,13 @@ function evidenceOutput(toolEvidence: ToolEvidence[], toolName: string): JsonRec
   return asRecord(match?.output);
 }
 
+function missingSchedule(toolEvidence: ToolEvidence[]): boolean {
+  return toolEvidence.some((entry) => {
+    const output = asRecord(entry.output);
+    return output?.scheduleAvailable === false;
+  });
+}
+
 function humanIssue(issue: string): string {
   if (issue === "MISSING_BREAK") return "missing a required break";
   if (issue === "MULTIPLE_BREAKS") return "has multiple breaks";
@@ -82,6 +89,10 @@ function formatLookupSegment(record: JsonRecord): string {
 function lookupAnswer(toolEvidence: ToolEvidence[], date: string): string | null {
   const lookup = evidenceOutput(toolEvidence, "lookup_schedule");
   if (!lookup) return null;
+
+  if (lookup.scheduleAvailable === false) {
+    return `The schedule for ${date} has not been generated yet. Would you like me to generate the schedule for ${date}?`;
+  }
 
   if (lookup.needsClarification === true) {
     return (
@@ -179,6 +190,10 @@ export function buildSchedulerReplyFallback({
   toolEvidence,
   writeToolsUsed,
 }: FallbackOptions): string {
+  if (writeToolsUsed.length === 0 && missingSchedule(toolEvidence)) {
+    return `The schedule for ${date} has not been generated yet. Would you like me to generate the schedule for ${date}?`;
+  }
+
   const directLookupAnswer = lookupAnswer(toolEvidence, date);
   if (directLookupAnswer && writeToolsUsed.length === 0) {
     return directLookupAnswer;
