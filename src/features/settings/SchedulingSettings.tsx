@@ -1086,10 +1086,13 @@ export function SchedulingSettings() {
               }
             />
             <span>
-              Allow a same-day staff/client repeat only as a last-resort
-              coverage exception when every non-repeat option would leave the
-              client uncovered. The continuous 3-4 hour maximum still applies,
-              and the scheduler reports the exception as a warning.
+              Allow a same-day staff/client repeat only after the scheduler has
+              completed its normal pass using different eligible pairings and
+              non-repeat swaps. If a client is still uncovered and the practical
+              remaining staff option is someone who already had that client,
+              the scheduler may reuse the pair as a last-resort exception. The
+              continuous 3-4 hour maximum still applies and the exception is
+              reported as a warning.
             </span>
           </label>
 
