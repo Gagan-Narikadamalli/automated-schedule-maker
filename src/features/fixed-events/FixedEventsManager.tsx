@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import cardStyles from "@/components/ManagementCards.module.css";
+import { useActionConfirmDialog } from "@/components/ActionConfirmDialog";
 import { ManagementModal } from "@/components/ManagementModal";
 
 type EventType = "SPEECH" | "NAP";
@@ -79,6 +80,7 @@ export function FixedEventsManager() {
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
   const [message, setMessage] = useState("Loading Speech and Nap events...");
+  const { requestActionDialog, actionDialog } = useActionConfirmDialog();
 
   const visibleEvents = useMemo(() => {
     return events
@@ -229,10 +231,44 @@ export function FixedEventsManager() {
   }
 
   async function removeEvent(event: ClientEvent) {
-    const removeSeries = Boolean(
-      event.recurringSeriesId &&
-      window.confirm(`Remove the entire recurring series (${seriesCounts.get(event.recurringSeriesId) ?? 1} event(s) shown)? Choose Cancel to remove only this occurrence.`)
-    );
+    const recurringCount = event.recurringSeriesId
+      ? seriesCounts.get(event.recurringSeriesId) ?? 1
+      : 0;
+    const choice = await requestActionDialog({
+      eyebrow: `DELETE ${formatEventType(event.eventType).toUpperCase()} EVENT`,
+      title: event.recurringSeriesId
+        ? "Remove this occurrence or the recurring series?"
+        : "Remove this event?",
+      description: event.recurringSeriesId
+        ? `This event belongs to a recurring series with ${recurringCount} event(s) currently shown.`
+        : "This removes the selected event from the client's schedule.",
+      actions: event.recurringSeriesId
+        ? [
+            {
+              id: "occurrence",
+              label: "Remove this occurrence",
+              tone: "primary",
+            },
+            {
+              id: "series",
+              label: "Remove entire series",
+              tone: "danger",
+            },
+          ]
+        : [
+            {
+              id: "occurrence",
+              label: "Remove event",
+              tone: "danger",
+            },
+          ],
+    });
+
+    if (!choice) {
+      return;
+    }
+
+    const removeSeries = choice === "series";
     try {
       setWorking(true);
       const endpoint = event.eventType === "NAP" ? "/api/nap-sessions" : "/api/speech-sessions";
@@ -256,6 +292,7 @@ export function FixedEventsManager() {
 
   return (
     <div className="management-layout">
+      {actionDialog}
       <section className="section-card">
         <div className={cardStyles.toolbar}>
           <div className={cardStyles.toolbarLeft}>
