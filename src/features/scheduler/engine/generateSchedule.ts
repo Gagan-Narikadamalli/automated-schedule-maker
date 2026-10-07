@@ -59,6 +59,220 @@ function buildRequirements(clients: SchedulerClient[]): ClientRequirement[] {
   );
 }
 
+function timeToMinutes(time: string): number | null {
+  const [hoursText, minutesText] = time.split(":");
+  const hours = Number(hoursText);
+  const minutes = Number(minutesText);
+
+  if (
+    Number.isNaN(hours) ||
+    Number.isNaN(minutes) ||
+    hours < 0 ||
+    hours > 23 ||
+    minutes < 0 ||
+    minutes > 59
+  ) {
+    return null;
+  }
+
+  return hours * 60 + minutes;
+}
+
+function minutesToTime(totalMinutes: number): string {
+  const normalized = ((totalMinutes % (24 * 60)) + 24 * 60) % (24 * 60);
+  const hours = Math.floor(normalized / 60);
+  const minutes = normalized % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+function samePairAtSlot(
+  staffId: string,
+  clientId: string,
+  startTime: string,
+  assignments: SchedulerAssignment[]
+): boolean {
+  return assignments.some(
+    (assignment) =>
+      assignment.staffId === staffId &&
+      assignment.clientId === clientId &&
+      assignment.startTime === startTime &&
+      assignment.assignmentType === "CLIENT_1_TO_1"
+  );
+}
+
+function priorContiguousPairBlocks(
+  staffId: string,
+  clientId: string,
+  startTime: string,
+  assignments: SchedulerAssignment[],
+  slotLengthMinutes: number
+): number {
+  const targetMinutes = timeToMinutes(startTime);
+  if (targetMinutes === null) return 0;
+
+  let count = 0;
+  for (
+    let minute = targetMinutes - slotLengthMinutes;
+    minute >= 0 &&
+    samePairAtSlot(
+      staffId,
+      clientId,
+      minutesToTime(minute),
+      assignments
+    );
+    minute -= slotLengthMinutes
+  ) {
+    count += 1;
+  }
+
+  return count;
+}
+
+function buildMinimumPairingPlan(
+  requirement: ClientRequirement,
+  staffMember: SchedulerStaff,
+  input: SchedulerInput,
+  assignments: SchedulerAssignment[],
+  callOutStaffIds: Set<string>,
+  allowSameDayPairRepeat = false
+): SchedulerAssignment[] | null {
+  const minimumBlocks = Math.max(
+    Math.ceil(
+      input.rules.minimumClientStaffAssignmentMinutes /
+        input.rules.slotLengthMinutes
+    ),
+    1
+  );
+
+  const priorBlocks = priorContiguousPairBlocks(
+    staffMember.id,
+    requirement.client.id,
+    requirement.startTime,
+    assignments,
+    input.rules.slotLengthMinutes
+  );
+  const blocksNeededFromCurrent = Math.max(
+    minimumBlocks - priorBlocks,
+    1
+  );
+  const startMinutes = timeToMinutes(requirement.startTime);
+
+  if (startMinutes === null) {
+    return null;
+  }
+
+  const simulated = assignments.map((assignment) => ({ ...assignment }));
+  const planned: SchedulerAssignment[] = [];
+
+  for (let index = 0; index < blocksNeededFromCurrent; index += 1) {
+    const slot = minutesToTime(
+      startMinutes + index * input.rules.slotLengthMinutes
+    );
+
+    if (!requirement.client.requiredSlots.includes(slot)) {
+      return null;
+    }
+
+    if (
+      samePairAtSlot(
+        staffMember.id,
+        requirement.client.id,
+        slot,
+        simulated
+      )
+    ) {
+      continue;
+    }
+
+    if (
+      requirementIsAlreadyCovered(
+        { client: requirement.client, startTime: slot },
+        simulated
+      )
+    ) {
+      return null;
+    }
+
+    const check = canAssignStaffToClient({
+      staffMember,
+      client: requirement.client,
+      startTime: slot,
+      assignments: simulated,
+      callOutStaffIds,
+      rules: input.rules,
+      allowSameDayPairRepeat,
+    });
+
+    if (!check.allowed) {
+      return null;
+    }
+
+    const assignment = createAutoClientAssignment(
+      staffMember,
+      requirement.client,
+      slot
+    );
+    planned.push(assignment);
+    simulated.push(assignment);
+  }
+
+  return planned;
+}
+
+function pairingWouldMeetMinimumWithoutReservation(
+  staffMember: SchedulerStaff,
+  client: SchedulerClient,
+  startTime: string,
+  input: SchedulerInput,
+  assignments: SchedulerAssignment[]
+): boolean {
+  const minimumBlocks = Math.max(
+    Math.ceil(
+      input.rules.minimumClientStaffAssignmentMinutes /
+        input.rules.slotLengthMinutes
+    ),
+    1
+  );
+
+  if (minimumBlocks <= 1) return true;
+
+  const targetMinutes = timeToMinutes(startTime);
+  if (targetMinutes === null) return false;
+
+  const occupied = new Set(
+    assignments
+      .filter(
+        (assignment) =>
+          assignment.staffId === staffMember.id &&
+          assignment.clientId === client.id &&
+          assignment.assignmentType === "CLIENT_1_TO_1"
+      )
+      .map((assignment) => timeToMinutes(assignment.startTime))
+      .filter((value): value is number => value !== null)
+  );
+  occupied.add(targetMinutes);
+
+  let consecutive = 1;
+
+  for (
+    let minute = targetMinutes - input.rules.slotLengthMinutes;
+    occupied.has(minute);
+    minute -= input.rules.slotLengthMinutes
+  ) {
+    consecutive += 1;
+  }
+
+  for (
+    let minute = targetMinutes + input.rules.slotLengthMinutes;
+    occupied.has(minute);
+    minute += input.rules.slotLengthMinutes
+  ) {
+    consecutive += 1;
+  }
+
+  return consecutive >= minimumBlocks;
+}
+
 function countEligibleStaff(
   requirement: ClientRequirement,
   staff: SchedulerStaff[],
@@ -183,7 +397,8 @@ function findBestStaffMember(
   requirement: ClientRequirement,
   input: SchedulerInput,
   assignments: SchedulerAssignment[],
-  callOutStaffIds: Set<string>
+  callOutStaffIds: Set<string>,
+  allowSameDayPairRepeat = false
 ): SchedulerStaff | null {
   const candidates = input.staff
     .map((staffMember) => {
@@ -194,9 +409,23 @@ function findBestStaffMember(
         assignments,
         callOutStaffIds,
         rules: input.rules,
+        allowSameDayPairRepeat,
       });
 
       if (!constraintCheck.allowed) {
+        return null;
+      }
+
+      const minimumPlan = buildMinimumPairingPlan(
+        requirement,
+        staffMember,
+        input,
+        assignments,
+        callOutStaffIds,
+        allowSameDayPairRepeat
+      );
+
+      if (!minimumPlan) {
         return null;
       }
 
@@ -347,7 +576,8 @@ function findBestSwap(
   input: SchedulerInput,
   assignments: SchedulerAssignment[],
   callOutStaffIds: Set<string>,
-  allowProtectedAssignments = false
+  allowProtectedAssignments = false,
+  allowSameDayPairRepeat = false
 ): SwapCandidate | null {
   const candidates: SwapCandidate[] = [];
 
@@ -384,6 +614,7 @@ function findBestSwap(
       assignments: assignmentsWithoutCurrent,
       callOutStaffIds,
       rules: input.rules,
+      allowSameDayPairRepeat,
     });
 
     if (!uncoveredCheck.allowed) {
@@ -400,6 +631,7 @@ function findBestSwap(
           assignments: assignmentsWithoutCurrent,
           callOutStaffIds,
           rules: input.rules,
+          allowSameDayPairRepeat,
         });
 
         if (!check.allowed) {
@@ -435,6 +667,25 @@ function findBestSwap(
       return;
     }
 
+    if (
+      !pairingWouldMeetMinimumWithoutReservation(
+        bestReplacement.staffMember,
+        displacedClient,
+        requirement.startTime,
+        input,
+        assignmentsWithoutCurrent
+      ) ||
+      !pairingWouldMeetMinimumWithoutReservation(
+        occupiedStaff,
+        requirement.client,
+        requirement.startTime,
+        input,
+        assignmentsWithoutCurrent
+      )
+    ) {
+      return;
+    }
+
     const uncoveredScore = scoreCandidate({
       staffMember: occupiedStaff,
       client: requirement.client,
@@ -463,14 +714,16 @@ function attemptSingleSwapRepair(
   input: SchedulerInput,
   assignments: SchedulerAssignment[],
   callOutStaffIds: Set<string>,
-  allowProtectedAssignments = false
+  allowProtectedAssignments = false,
+  allowSameDayPairRepeat = false
 ): boolean {
   const swap = findBestSwap(
     requirement,
     input,
     assignments,
     callOutStaffIds,
-    allowProtectedAssignments
+    allowProtectedAssignments,
+    allowSameDayPairRepeat
   );
 
   if (!swap || !swap.displacedAssignment.clientId) {
@@ -504,7 +757,8 @@ function attemptBreakReleaseRepair(
   requirement: ClientRequirement,
   input: SchedulerInput,
   assignments: SchedulerAssignment[],
-  callOutStaffIds: Set<string>
+  callOutStaffIds: Set<string>,
+  allowSameDayPairRepeat = false
 ): boolean {
   const breakTypes = new Set(["BREAK", "BREAK_NAP", "BREAK_SPEECH"]);
 
@@ -540,14 +794,28 @@ function attemptBreakReleaseRepair(
       assignments: assignmentsWithoutBreak,
       callOutStaffIds,
       rules: input.rules,
+      allowSameDayPairRepeat,
     });
 
     if (!check.allowed) {
       continue;
     }
 
+    const minimumPlan = buildMinimumPairingPlan(
+      requirement,
+      staffMember,
+      input,
+      assignmentsWithoutBreak,
+      callOutStaffIds,
+      allowSameDayPairRepeat
+    );
+
+    if (!minimumPlan) {
+      continue;
+    }
+
     assignments.splice(assignmentIndex, 1);
-    assignments.push(createAutoAssignment(staffMember, requirement));
+    assignments.push(...minimumPlan);
     return true;
   }
 
@@ -616,9 +884,16 @@ export function repairCoverageMinimally(
     if (leftPriority === rightPriority) return 0;
     return leftPriority ? -1 : 1;
   });
+  const repeatFallbackRequirements: ClientRequirement[] = [];
   const uncoveredRequirements: UncoveredRequirement[] = [];
 
+  // Stage 1: exhaust normal non-repeat coverage options across the day first.
+  // A same-day staff/client repeat is deliberately NOT considered in this pass.
   for (const requirement of sortedRequirements) {
+    if (requirementIsAlreadyCovered(requirement, assignments)) {
+      continue;
+    }
+
     const bestStaffMember = findBestStaffMember(
       requirement,
       input,
@@ -627,8 +902,18 @@ export function repairCoverageMinimally(
     );
 
     if (bestStaffMember) {
-      assignments.push(createAutoAssignment(bestStaffMember, requirement));
-      continue;
+      const minimumPlan = buildMinimumPairingPlan(
+        requirement,
+        bestStaffMember,
+        input,
+        assignments,
+        callOutStaffIds
+      );
+
+      if (minimumPlan) {
+        assignments.push(...minimumPlan);
+        continue;
+      }
     }
 
     const repairedBySwap = attemptSingleSwapRepair(
@@ -641,7 +926,7 @@ export function repairCoverageMinimally(
     if (repairedBySwap) {
       warnings.push({
         code: "REPAIRED_BY_SWAP",
-        message: `${requirement.client.displayCode} at ${requirement.startTime} was covered by one minimal staff swap.`,
+        message: `${requirement.client.displayCode} at ${requirement.startTime} was covered by one minimal non-repeat staff swap.`,
       });
       continue;
     }
@@ -652,7 +937,8 @@ export function repairCoverageMinimally(
         input,
         assignments,
         callOutStaffIds,
-        true
+        true,
+        false
       );
 
       if (repairedByProtectedSwap) {
@@ -662,7 +948,7 @@ export function repairCoverageMinimally(
             requirement.client.displayCode +
             " at " +
             requirement.startTime +
-            " was covered by automatically relocating a protected/manual client block.",
+            " was covered by automatically relocating a protected/manual client block without using a same-day pair repeat.",
         });
         continue;
       }
@@ -671,7 +957,8 @@ export function repairCoverageMinimally(
         requirement,
         input,
         assignments,
-        callOutStaffIds
+        callOutStaffIds,
+        false
       );
 
       if (repairedByBreakRelease) {
@@ -687,13 +974,119 @@ export function repairCoverageMinimally(
       }
     }
 
+    repeatFallbackRequirements.push(requirement);
+  }
+
+  // Stage 2: only after the whole normal pass is complete may a prior
+  // staff/client pair be reused. This is a coverage exception, not a preference.
+  for (const requirement of repeatFallbackRequirements) {
+    if (requirementIsAlreadyCovered(requirement, assignments)) {
+      continue;
+    }
+
+    let coveredByRepeatException = false;
+
+    if (input.rules.allowSameStaffClientRepeatForCoverageException) {
+      const exceptionStaff = findBestStaffMember(
+        requirement,
+        input,
+        assignments,
+        callOutStaffIds,
+        true
+      );
+
+      if (exceptionStaff) {
+        const exceptionPlan = buildMinimumPairingPlan(
+          requirement,
+          exceptionStaff,
+          input,
+          assignments,
+          callOutStaffIds,
+          true
+        );
+
+        if (exceptionPlan) {
+          assignments.push(...exceptionPlan);
+          warnings.push({
+            code: "PAIR_REUSE_EXCEPTION",
+            message:
+              `${requirement.client.displayCode} at ${requirement.startTime} reused a staff/client pair only after all normal non-repeat coverage options were exhausted.`,
+          });
+          coveredByRepeatException = true;
+        }
+      }
+
+      if (!coveredByRepeatException) {
+        const repairedByRepeatSwap = attemptSingleSwapRepair(
+          requirement,
+          input,
+          assignments,
+          callOutStaffIds,
+          false,
+          true
+        );
+
+        if (repairedByRepeatSwap) {
+          warnings.push({
+            code: "PAIR_REUSE_EXCEPTION",
+            message:
+              `${requirement.client.displayCode} at ${requirement.startTime} used a last-resort swap with a same-day pair reuse after non-repeat options were exhausted.`,
+          });
+          coveredByRepeatException = true;
+        }
+      }
+
+      if (!coveredByRepeatException && allowAutomaticOverrides) {
+        const repairedByProtectedRepeatSwap = attemptSingleSwapRepair(
+          requirement,
+          input,
+          assignments,
+          callOutStaffIds,
+          true,
+          true
+        );
+
+        if (repairedByProtectedRepeatSwap) {
+          warnings.push({
+            code: "PAIR_REUSE_EXCEPTION",
+            message:
+              `${requirement.client.displayCode} at ${requirement.startTime} required a protected-block relocation plus a same-day pair reuse as the final coverage option.`,
+          });
+          coveredByRepeatException = true;
+        }
+      }
+
+      if (!coveredByRepeatException && allowAutomaticOverrides) {
+        const repairedByRepeatBreakRelease = attemptBreakReleaseRepair(
+          requirement,
+          input,
+          assignments,
+          callOutStaffIds,
+          true
+        );
+
+        if (repairedByRepeatBreakRelease) {
+          warnings.push({
+            code: "PAIR_REUSE_EXCEPTION",
+            message:
+              `${requirement.client.displayCode} at ${requirement.startTime} required a same-day pair reuse after a break was temporarily released as the final coverage option.`,
+          });
+          coveredByRepeatException = true;
+        }
+      }
+    }
+
+    if (coveredByRepeatException) {
+      continue;
+    }
+
     uncoveredRequirements.push({
       clientId: requirement.client.id,
       clientCode: requirement.client.displayCode,
       startTime: requirement.startTime,
-      reason: allowAutomaticOverrides
-        ? "No eligible free staff member, one-step reassignment, protected-client relocation, or movable break can cover this requirement."
-        : "No eligible free staff member or one-step AUTO assignment swap can cover this requirement without changing protected/manual schedule cells.",
+      reason: input.rules.allowSameStaffClientRepeatForCoverageException
+        ? "All normal non-repeat placements and repairs were exhausted, and no valid last-resort same-day pair reuse could cover this requirement."
+        : "All normal non-repeat placements and repairs were exhausted, and same-day pair reuse exceptions are disabled.",
     });
     warnings.push({
       code: "NO_ELIGIBLE_STAFF",
@@ -757,6 +1150,10 @@ export function generateSchedule(input: SchedulerInput): SchedulerResult {
   );
 
   for (const requirement of sortedRequirements) {
+    if (requirementIsAlreadyCovered(requirement, assignments)) {
+      continue;
+    }
+
     const bestStaffMember = findBestStaffMember(
       requirement,
       input,
@@ -769,17 +1166,53 @@ export function generateSchedule(input: SchedulerInput): SchedulerResult {
       continue;
     }
 
-    assignments.push(
-      createAutoAssignment(
-        bestStaffMember,
-        requirement
-      )
+    const minimumPlan = buildMinimumPairingPlan(
+      requirement,
+      bestStaffMember,
+      input,
+      assignments,
+      callOutStaffIds
     );
+
+    if (!minimumPlan) {
+      initiallyUncovered.push(requirement);
+      continue;
+    }
+
+    assignments.push(...minimumPlan);
   }
 
+  const repeatFallbackRequirements: ClientRequirement[] = [];
   const uncoveredRequirements: UncoveredRequirement[] = [];
 
+  // Stage 1 repair: finish every possible non-repeat placement/swap first.
   for (const requirement of initiallyUncovered) {
+    if (requirementIsAlreadyCovered(requirement, assignments)) {
+      continue;
+    }
+
+    const retryStaff = findBestStaffMember(
+      requirement,
+      input,
+      assignments,
+      callOutStaffIds
+    );
+
+    if (retryStaff) {
+      const retryPlan = buildMinimumPairingPlan(
+        requirement,
+        retryStaff,
+        input,
+        assignments,
+        callOutStaffIds
+      );
+
+      if (retryPlan) {
+        assignments.push(...retryPlan);
+        continue;
+      }
+    }
+
     const repaired = attemptSingleSwapRepair(
       requirement,
       input,
@@ -790,8 +1223,75 @@ export function generateSchedule(input: SchedulerInput): SchedulerResult {
     if (repaired) {
       warnings.push({
         code: "REPAIRED_BY_SWAP",
-        message: `${requirement.client.displayCode} at ${requirement.startTime} was covered by a one-step staff swap.`,
+        message: `${requirement.client.displayCode} at ${requirement.startTime} was covered by a one-step non-repeat staff swap.`,
       });
+      continue;
+    }
+
+    repeatFallbackRequirements.push(requirement);
+  }
+
+  // Stage 2 fallback: only the requirements still uncovered after the complete
+  // non-repeat pass may consider reusing a staff/client pair from earlier today.
+  for (const requirement of repeatFallbackRequirements) {
+    if (requirementIsAlreadyCovered(requirement, assignments)) {
+      continue;
+    }
+
+    let coveredByRepeatException = false;
+
+    if (input.rules.allowSameStaffClientRepeatForCoverageException) {
+      const exceptionStaff = findBestStaffMember(
+        requirement,
+        input,
+        assignments,
+        callOutStaffIds,
+        true
+      );
+
+      if (exceptionStaff) {
+        const exceptionPlan = buildMinimumPairingPlan(
+          requirement,
+          exceptionStaff,
+          input,
+          assignments,
+          callOutStaffIds,
+          true
+        );
+
+        if (exceptionPlan) {
+          assignments.push(...exceptionPlan);
+          warnings.push({
+            code: "PAIR_REUSE_EXCEPTION",
+            message:
+              `${requirement.client.displayCode} at ${requirement.startTime} reused a staff/client pair only after the entire normal non-repeat scheduling pass was exhausted.`,
+          });
+          coveredByRepeatException = true;
+        }
+      }
+
+      if (!coveredByRepeatException) {
+        const repairedByRepeatSwap = attemptSingleSwapRepair(
+          requirement,
+          input,
+          assignments,
+          callOutStaffIds,
+          false,
+          true
+        );
+
+        if (repairedByRepeatSwap) {
+          warnings.push({
+            code: "PAIR_REUSE_EXCEPTION",
+            message:
+              `${requirement.client.displayCode} at ${requirement.startTime} used a same-day pair reuse during last-resort swap repair after all non-repeat options were exhausted.`,
+          });
+          coveredByRepeatException = true;
+        }
+      }
+    }
+
+    if (coveredByRepeatException) {
       continue;
     }
 
@@ -799,8 +1299,9 @@ export function generateSchedule(input: SchedulerInput): SchedulerResult {
       clientId: requirement.client.id,
       clientCode: requirement.client.displayCode,
       startTime: requirement.startTime,
-      reason:
-        "No eligible staff member satisfies availability, call-out, hard relationship, client rotation, and hour constraints, including a one-step swap repair.",
+      reason: input.rules.allowSameStaffClientRepeatForCoverageException
+        ? "No normal non-repeat assignment or swap could cover this requirement, and no valid last-resort same-day pair reuse remained."
+        : "No normal non-repeat assignment or swap could cover this requirement, and same-day pair reuse exceptions are disabled.",
     });
 
     warnings.push({

@@ -12,6 +12,10 @@ const SLOT = "11:30";
 const SCHEDULER_RULES: SchedulerRules = {
   maximumClientsPerTechPerDay: 6,
   maximumTechsPerClientPerDay: 4,
+  minimumClientStaffAssignmentMinutes: 30,
+  maximumClientStaffConsecutiveHours: 4,
+  preventSameStaffClientRepeatSameDay: true,
+  allowSameStaffClientRepeatForCoverageException: true,
   preferSameTeam: true,
   preferStaffContinuity: true,
   slotLengthMinutes: 30,

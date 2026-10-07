@@ -84,6 +84,10 @@ export type HistoricalPatternScores = {
 export type SchedulerRules = {
   maximumClientsPerTechPerDay: number;
   maximumTechsPerClientPerDay: number;
+  minimumClientStaffAssignmentMinutes: number;
+  maximumClientStaffConsecutiveHours: number;
+  preventSameStaffClientRepeatSameDay: boolean;
+  allowSameStaffClientRepeatForCoverageException: boolean;
   preferSameTeam: boolean;
   preferStaffContinuity: boolean;
   slotLengthMinutes: number;
@@ -132,7 +136,8 @@ export type SchedulerWarning = {
     | "CLIENT_TECH_LIMIT"
     | "STAFF_HOUR_LIMIT"
     | "CAPACITY_SHORTAGE"
-    | "REPAIRED_BY_SWAP";
+    | "REPAIRED_BY_SWAP"
+    | "PAIR_REUSE_EXCEPTION";
   message: string;
 };
 

@@ -157,6 +157,10 @@ function getDefaultRules(): ExtendedSchedulerRules {
   return {
     maximumClientsPerTechPerDay: 6,
     maximumTechsPerClientPerDay: 4,
+    minimumClientStaffAssignmentMinutes: 30,
+    maximumClientStaffConsecutiveHours: 4,
+    preventSameStaffClientRepeatSameDay: true,
+    allowSameStaffClientRepeatForCoverageException: true,
     preferSameTeam: true,
     preferStaffContinuity: true,
     slotLengthMinutes: 30,
@@ -203,6 +207,22 @@ function mapRules(document: DatabaseRecord | null): ExtendedSchedulerRules {
     maximumTechsPerClientPerDay: Number(
       document.maximumTechsPerClientPerDay ??
         defaults.maximumTechsPerClientPerDay
+    ),
+    minimumClientStaffAssignmentMinutes: Number(
+      document.minimumClientStaffAssignmentMinutes ??
+        defaults.minimumClientStaffAssignmentMinutes
+    ),
+    maximumClientStaffConsecutiveHours: Number(
+      document.maximumClientStaffConsecutiveHours ??
+        defaults.maximumClientStaffConsecutiveHours
+    ),
+    preventSameStaffClientRepeatSameDay: Boolean(
+      document.preventSameStaffClientRepeatSameDay ??
+        defaults.preventSameStaffClientRepeatSameDay
+    ),
+    allowSameStaffClientRepeatForCoverageException: Boolean(
+      document.allowSameStaffClientRepeatForCoverageException ??
+        defaults.allowSameStaffClientRepeatForCoverageException
     ),
     preferSameTeam: Boolean(
       document.preferSameTeam ?? defaults.preferSameTeam
@@ -832,6 +852,14 @@ export async function buildDaySchedulerInput(
         extendedRules.maximumClientsPerTechPerDay,
       maximumTechsPerClientPerDay:
         extendedRules.maximumTechsPerClientPerDay,
+      minimumClientStaffAssignmentMinutes:
+        extendedRules.minimumClientStaffAssignmentMinutes,
+      maximumClientStaffConsecutiveHours:
+        extendedRules.maximumClientStaffConsecutiveHours,
+      preventSameStaffClientRepeatSameDay:
+        extendedRules.preventSameStaffClientRepeatSameDay,
+      allowSameStaffClientRepeatForCoverageException:
+        extendedRules.allowSameStaffClientRepeatForCoverageException,
       preferSameTeam:
         extendedRules.preferSameTeam,
       preferStaffContinuity:

@@ -271,6 +271,26 @@ const rulesSchema = jsonSchema<JsonRecord>({
     partTimeMaximumWeeklyHours: { type: "number" },
     maximumClientsPerTechPerDay: { type: "number" },
     maximumTechsPerClientPerDay: { type: "number" },
+    minimumClientStaffAssignmentMinutes: {
+      type: "number",
+      description:
+        "Minimum continuous client/staff assignment in minutes. Must be a 30-minute multiple and at least 30.",
+    },
+    maximumClientStaffConsecutiveHours: {
+      type: "number",
+      description:
+        "Maximum continuous time the same client may remain with the same staff member. Supported values: 3, 3.5, or 4 hours.",
+    },
+    preventSameStaffClientRepeatSameDay: {
+      type: "boolean",
+      description:
+        "When true, Auto Generate will not normally reuse the same client/staff pair later in the same day after their continuous block ends.",
+    },
+    allowSameStaffClientRepeatForCoverageException: {
+      type: "boolean",
+      description:
+        "When true, the scheduler may reuse a same-day staff/client pair only as a last-resort coverage exception after non-repeat options fail. The continuous maximum still applies.",
+    },
     defaultBreakMinutes: { type: "number" },
     breakEligibilityHours: { type: "number" },
     breakWindowStart: { type: "string" },
@@ -745,7 +765,7 @@ export function createSchedulerWebsiteTools(context: SchedulerAiContext) {
 
     update_scheduler_rules: tool({
       description:
-        "Update clinic-wide automatic scheduler rules and priorities such as break window/eligibility, weekly hour ranges, rotation/continuity priorities, schedule hours, role coverage priorities, historical/template preferences, and supervision target. Only send fields the user actually wants changed.",
+        "Update clinic-wide automatic scheduler rules and priorities such as break window/eligibility, weekly hour ranges, client/staff minimum and maximum continuous pairing duration, same-day pair reuse, rotation/continuity priorities, schedule hours, role coverage priorities, historical/template preferences, and supervision target. Only send fields the user actually wants changed.",
       inputSchema: rulesSchema,
       execute: async (changes) => invokeJson(updateSchedulingRules, "PUT", { locationId, ...changes }),
     }),
