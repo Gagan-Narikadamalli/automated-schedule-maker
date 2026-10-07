@@ -15,6 +15,9 @@ import type {
 const RULES: SchedulerRules = {
   maximumClientsPerTechPerDay: 6,
   maximumTechsPerClientPerDay: 4,
+  minimumClientStaffAssignmentMinutes: 30,
+  maximumClientStaffConsecutiveHours: 4,
+  preventSameStaffClientRepeatSameDay: true,
   preferSameTeam: true,
   preferStaffContinuity: true,
   slotLengthMinutes: 30,
