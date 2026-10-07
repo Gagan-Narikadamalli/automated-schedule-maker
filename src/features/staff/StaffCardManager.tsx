@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import cardStyles from "@/components/ManagementCards.module.css";
+import { useActionConfirmDialog } from "@/components/ActionConfirmDialog";
 import { ManagementModal } from "@/components/ManagementModal";
 import {
   createWeeklySchedule,
@@ -194,6 +195,7 @@ export function StaffCardManager() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("Loading staff...");
+  const { requestActionDialog, actionDialog } = useActionConfirmDialog();
 
   const teamNameById = useMemo(
     () => new Map(teams.map((team) => [team.id, team.name])),
@@ -475,11 +477,21 @@ export function StaffCardManager() {
   }
 
   async function deleteStaff(staffMember: StaffMember) {
-    const confirmed = window.confirm(
-      `Permanently delete ${staffMember.fullName}? This removes the staff profile and its linked live schedule, call-out, template, and supervision references. Imported historical-learning text is preserved.`
-    );
+    const choice = await requestActionDialog({
+      eyebrow: "DELETE STAFF",
+      title: `Permanently delete ${staffMember.fullName}?`,
+      description:
+        "This removes the staff profile and its linked live schedule, call-out, template, and supervision references. Imported historical-learning text is preserved.",
+      actions: [
+        {
+          id: "delete",
+          label: "Delete staff",
+          tone: "danger",
+        },
+      ],
+    });
 
-    if (!confirmed) {
+    if (choice !== "delete") {
       return;
     }
 
@@ -507,6 +519,7 @@ export function StaffCardManager() {
 
   return (
     <div className="management-layout">
+      {actionDialog}
       <section className="section-card">
         <div className={cardStyles.toolbar}>
           <div className={cardStyles.toolbarLeft}>
