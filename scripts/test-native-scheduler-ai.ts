@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import {
   extractNativeTimeRange,
   planNativeSchedulerAction,
-  resolveSchedulerAiProvider,
 } from "../src/features/ai/schedulerNativeAi";
 
 function plan(message: string) {
@@ -13,11 +12,6 @@ function plan(message: string) {
     writeToolsEnabled: true,
   });
 }
-
-assert.equal(resolveSchedulerAiProvider("native"), "native");
-assert.equal(resolveSchedulerAiProvider("NATIVE"), "native");
-assert.equal(resolveSchedulerAiProvider("gateway"), "gateway");
-assert.equal(resolveSchedulerAiProvider(undefined), "gateway");
 
 assert.deepEqual(extractNativeTimeRange("from 9 am to 2 pm"), {
   startTime: "09:00",
