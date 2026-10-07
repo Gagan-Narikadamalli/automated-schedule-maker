@@ -921,6 +921,48 @@ function testRepeatFallbackCoversOnlyAfterNormalPassFails() {
   );
 }
 
+function testCoverageFirstSingleSlotFallback() {
+  const staff = [
+    createStaff("bt-single", "Single Slot BT", "BT", ["08:00"]),
+  ];
+  const client = createClient(
+    "client-single",
+    "SiCl",
+    ["08:00"]
+  );
+  const input = createInput(staff, [client]);
+
+  // Normal clinic preference asks for a one-hour contiguous pairing, but this
+  // client only needs one half-hour block. Coverage must win over the grouping
+  // preference so an available staff member is not left idle.
+  input.rules.minimumClientStaffAssignmentMinutes = 60;
+
+  const result = generateSchedule(input);
+  const assignment = clientAssignments(result.assignments).find(
+    (item) =>
+      item.clientId === "client-single" &&
+      item.startTime === "08:00"
+  );
+
+  assert.equal(
+    assignment?.staffId,
+    "bt-single",
+    "Final coverage fallback should place a valid single client block instead of leaving it uncovered because a preferred longer pairing cannot be formed."
+  );
+  assert.equal(
+    result.uncoveredRequirements.length,
+    0,
+    "A client block with valid staff capacity must not remain uncovered."
+  );
+  assert.ok(
+    result.warnings.some(
+      (warning) =>
+        warning.code === "COVERAGE_FIRST_SINGLE_SLOT"
+    ),
+    "Coverage-first single-slot fallback should be reported for diagnostics."
+  );
+}
+
 function runSchedulerRegressionScenarios() {
   testRoleCoverageOrder();
   testHistoricalPreferenceCannotJumpRoleTier();
@@ -942,6 +984,7 @@ function runSchedulerRegressionScenarios() {
   testConfigurableMinimumContinuousPairing();
   testNonRepeatSwapWinsBeforeRepeatFallback();
   testRepeatFallbackCoversOnlyAfterNormalPassFails();
+  testCoverageFirstSingleSlotFallback();
 
   console.log("Automatic scheduler regression scenarios passed.");
 }
