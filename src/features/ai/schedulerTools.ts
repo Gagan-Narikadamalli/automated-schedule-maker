@@ -3,6 +3,7 @@ import { jsonSchema, tool } from "./schedulerToolDefinition";
 import { calculateSchedulerReadiness } from "@/features/scheduler/engine/preflight";
 import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySchedulerInput";
 import { connectToDatabase } from "@/lib/db";
+import { Client } from "@/models/Client";
 import { ScheduleAssignment } from "@/models/ScheduleAssignment";
 import { Staff } from "@/models/Staff";
 import { UnplacedAssignment } from "@/models/UnplacedAssignment";
@@ -92,6 +93,21 @@ function idFrom(value: unknown): string | null {
     return id ? String(id) : null;
   }
   return String(value);
+}
+
+function dateText(value: unknown): string | null {
+  if (!value) return null;
+  const parsed = new Date(String(value));
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString().slice(0, 10);
+}
+
+function profileRangeText(record: DatabaseRecord): string {
+  const start = dateText(record.startDate);
+  const end = dateText(record.endDate);
+  if (start && end) return "active " + start + " through " + end;
+  if (start) return "active starting " + start;
+  return "active date range is not configured";
 }
 
 function overlapsRange(
@@ -187,16 +203,56 @@ export function createSchedulerReadOnlyTools(context: SchedulerAiContext) {
   return {
     lookup_schedule: tool({
       description:
-        "Answer detailed conversational questions about the selected day's generated schedule by staff name, client code, and/or time range. Prefer this for questions such as: who is Anias with from 8 to 2, what clients does Areyana have, who is covering CaMe at 10, when is Danna on break, what is JeMa's coverage, or who is free between 12 and 1. It explicitly reports whether a schedule exists for that date, returns merged human-friendly schedule segments, and only calculates free staff when a generated schedule is available.",
+        "Answer detailed questions about the selected day's schedule by staff name, client display code or client full name, and/or time range. Profile matching is separate from selected-day eligibility so the tool can explain when a real staff/client profile exists but is not schedulable on that date.",
       inputSchema: scheduleLookupSchema,
       execute: async (input) => {
-        const [dayData, assignments] = await Promise.all([
-          buildDaySchedulerInput(locationId, date),
-          loadAssignments(locationId, date),
-        ]);
-        const staffNames = new Map(dayData.staff.map((member) => [member.id, member.name]));
-        const clientCodes = new Map(dayData.clients.map((client) => [client.id, client.displayCode]));
-        const enriched = enrichAssignments(assignments, staffNames, clientCodes);
+        await connectToDatabase();
+
+        const [dayData, assignments, rawStaffProfiles, rawClientProfiles] =
+          await Promise.all([
+            buildDaySchedulerInput(locationId, date),
+            loadAssignments(locationId, date),
+            Staff.find({ locationId, active: true })
+              .select("_id fullName role startDate endDate shiftPatterns")
+              .sort({ fullName: 1 })
+              .lean(),
+            Client.find({ locationId, active: true })
+              .select(
+                "_id fullName displayCode startDate endDate attendancePatterns"
+              )
+              .sort({ displayCode: 1 })
+              .lean(),
+          ]);
+
+        const staffProfiles =
+          rawStaffProfiles as unknown as DatabaseRecord[];
+        const clientProfiles =
+          rawClientProfiles as unknown as DatabaseRecord[];
+
+        const staffNames = new Map(
+          staffProfiles.map((record) => [
+            String(record._id),
+            String(record.fullName ?? ""),
+          ])
+        );
+        const clientCodes = new Map(
+          clientProfiles.map((record) => [
+            String(record._id),
+            String(record.displayCode ?? ""),
+          ])
+        );
+        const enriched = enrichAssignments(
+          assignments,
+          staffNames,
+          clientCodes
+        );
+
+        const dayStaffById = new Map(
+          dayData.staff.map((member) => [member.id, member])
+        );
+        const dayClientById = new Map(
+          dayData.clients.map((client) => [client.id, client])
+        );
         const requiredClientSlots = dayData.clients.reduce(
           (total, client) => total + client.requiredSlots.length,
           0
@@ -204,123 +260,300 @@ export function createSchedulerReadOnlyTools(context: SchedulerAiContext) {
 
         let resolvedStaffId: string | null = null;
         let resolvedStaffName: string | null = null;
+        let resolvedStaffProfile: DatabaseRecord | null = null;
         let staffMatches: Array<{ id: string; name: string }> = [];
+
         if (input.staffName?.trim()) {
           const matched = matchEntityReference(
             input.staffName,
-            dayData.staff.map((member) => ({
-              record: member,
-              labels: [member.name],
+            staffProfiles.map((record) => ({
+              record,
+              labels: [String(record.fullName ?? "")],
             }))
           );
 
           if (matched.status === "MATCH") {
-            resolvedStaffId = matched.record.id;
-            resolvedStaffName = matched.record.name;
+            resolvedStaffProfile = matched.record;
+            resolvedStaffId = String(matched.record._id);
+            resolvedStaffName = String(matched.record.fullName ?? "");
             staffMatches = [
-              { id: matched.record.id, name: matched.record.name },
+              { id: resolvedStaffId, name: resolvedStaffName },
             ];
           } else if (matched.status === "AMBIGUOUS") {
-            staffMatches = matched.records.map((member) => ({
-              id: member.id,
-              name: member.name,
+            staffMatches = matched.records.map((record) => ({
+              id: String(record._id),
+              name: String(record.fullName ?? ""),
             }));
+            return {
+              locationId,
+              date,
+              scheduleAvailable: assignments.length > 0,
+              assignmentCount: assignments.length,
+              requiredClientSlots,
+              needsClarification: true,
+              staffQuery: input.staffName,
+              staffMatches,
+              message:
+                'More than one active staff profile matched "' +
+                input.staffName +
+                '".',
+            };
+          } else {
+            return {
+              locationId,
+              date,
+              scheduleAvailable: assignments.length > 0,
+              assignmentCount: assignments.length,
+              requiredClientSlots,
+              needsClarification: true,
+              staffQuery: input.staffName,
+              staffMatches: [],
+              suggestions: matched.suggestions,
+              message:
+                'No active staff profile matched "' +
+                input.staffName +
+                '"' +
+                (matched.suggestions.length
+                  ? ". Did you mean " + matched.suggestions.join(", ") + "?"
+                  : "."),
+            };
           }
         }
 
         let resolvedClientId: string | null = null;
         let resolvedClientCode: string | null = null;
-        let clientMatches: Array<{ id: string; displayCode: string }> = [];
+        let resolvedClientName: string | null = null;
+        let resolvedClientProfile: DatabaseRecord | null = null;
+        let clientMatches: Array<{
+          id: string;
+          displayCode: string;
+          fullName: string;
+        }> = [];
+
         if (input.clientCode?.trim()) {
           const matched = matchEntityReference(
             input.clientCode,
-            dayData.clients.map((client) => ({
-              record: client,
-              labels: [client.displayCode],
+            clientProfiles.map((record) => ({
+              record,
+              labels: [
+                String(record.displayCode ?? ""),
+                String(record.fullName ?? ""),
+              ],
             }))
           );
 
           if (matched.status === "MATCH") {
-            resolvedClientId = matched.record.id;
-            resolvedClientCode = matched.record.displayCode;
+            resolvedClientProfile = matched.record;
+            resolvedClientId = String(matched.record._id);
+            resolvedClientCode = String(matched.record.displayCode ?? "");
+            resolvedClientName = String(matched.record.fullName ?? "");
             clientMatches = [
               {
-                id: matched.record.id,
-                displayCode: matched.record.displayCode,
+                id: resolvedClientId,
+                displayCode: resolvedClientCode,
+                fullName: resolvedClientName,
               },
             ];
           } else if (matched.status === "AMBIGUOUS") {
-            clientMatches = matched.records.map((client) => ({
-              id: client.id,
-              displayCode: client.displayCode,
+            clientMatches = matched.records.map((record) => ({
+              id: String(record._id),
+              displayCode: String(record.displayCode ?? ""),
+              fullName: String(record.fullName ?? ""),
             }));
+            return {
+              locationId,
+              date,
+              scheduleAvailable: assignments.length > 0,
+              assignmentCount: assignments.length,
+              requiredClientSlots,
+              needsClarification: true,
+              clientQuery: input.clientCode,
+              clientMatches,
+              message:
+                'More than one active client profile matched "' +
+                input.clientCode +
+                '".',
+            };
+          } else {
+            return {
+              locationId,
+              date,
+              scheduleAvailable: assignments.length > 0,
+              assignmentCount: assignments.length,
+              requiredClientSlots,
+              needsClarification: true,
+              clientQuery: input.clientCode,
+              clientMatches: [],
+              suggestions: matched.suggestions,
+              message:
+                'No active client profile matched "' +
+                input.clientCode +
+                '"' +
+                (matched.suggestions.length
+                  ? ". Did you mean " + matched.suggestions.join(", ") + "?"
+                  : "."),
+            };
           }
         }
 
-        const ambiguousStaff = Boolean(input.staffName?.trim()) && staffMatches.length !== 1;
-        const ambiguousClient = Boolean(input.clientCode?.trim()) && clientMatches.length !== 1;
-        if (ambiguousStaff || ambiguousClient) {
+        if (
+          resolvedStaffId &&
+          resolvedStaffProfile &&
+          !dayStaffById.has(resolvedStaffId)
+        ) {
           return {
             locationId,
             date,
             scheduleAvailable: assignments.length > 0,
             assignmentCount: assignments.length,
             requiredClientSlots,
-            needsClarification: true,
-            staffQuery: input.staffName ?? null,
-            staffMatches,
-            clientQuery: input.clientCode ?? null,
-            clientMatches,
-            message: ambiguousStaff
-              ? staffMatches.length === 0
-                ? `No active staff matched ${input.staffName}.`
-                : `More than one staff member matched ${input.staffName}.`
-              : clientMatches.length === 0
-                ? `No client matched ${input.clientCode}.`
-                : `More than one client matched ${input.clientCode}.`,
+            needsClarification: false,
+            profileFound: true,
+            profileType: "STAFF",
+            resolvedStaffName,
+            profileStatus: "OUTSIDE_SELECTED_DATE",
+            message:
+              "Staff profile " +
+              resolvedStaffName +
+              " exists, but it is not active on " +
+              date +
+              " (" +
+              profileRangeText(resolvedStaffProfile) +
+              ").",
           };
         }
 
-        if (assignments.length === 0) {
+        if (
+          resolvedClientId &&
+          resolvedClientProfile &&
+          !dayClientById.has(resolvedClientId)
+        ) {
           return {
             locationId,
             date,
-            scheduleAvailable: false,
-            assignmentCount: 0,
+            scheduleAvailable: assignments.length > 0,
+            assignmentCount: assignments.length,
             requiredClientSlots,
             needsClarification: false,
-            resolvedStaffName,
+            profileFound: true,
+            profileType: "CLIENT",
             resolvedClientCode,
-            requestedRange: {
-              startTime: input.startTime ?? null,
-              endTime: input.endTime ?? null,
-            },
-            count: 0,
-            segments: [],
-            assignments: [],
-            freeStaff: [],
-            message: `The schedule has not been generated for ${date}.`,
+            resolvedClientName,
+            profileStatus: "OUTSIDE_SELECTED_DATE",
+            message:
+              "Client profile " +
+              resolvedClientCode +
+              " (" +
+              resolvedClientName +
+              ") exists, but it is not active on " +
+              date +
+              " (" +
+              profileRangeText(resolvedClientProfile) +
+              ").",
           };
         }
 
         const includeBreaks = input.includeBreaks !== false;
         const filtered = enriched.filter((assignment) => {
-          if (resolvedStaffId && assignment.staffId !== resolvedStaffId) return false;
-          if (resolvedClientId && assignment.clientId !== resolvedClientId) return false;
-          if (!overlapsRange(assignment, input.startTime, input.endTime)) return false;
-          if (!includeBreaks && NON_CLIENT_TYPES.has(assignment.assignmentType)) return false;
+          if (
+            resolvedStaffId &&
+            assignment.staffId !== resolvedStaffId
+          ) {
+            return false;
+          }
+          if (
+            resolvedClientId &&
+            assignment.clientId !== resolvedClientId
+          ) {
+            return false;
+          }
+          if (
+            !overlapsRange(
+              assignment,
+              input.startTime,
+              input.endTime
+            )
+          ) {
+            return false;
+          }
+          if (
+            !includeBreaks &&
+            NON_CLIENT_TYPES.has(assignment.assignmentType)
+          ) {
+            return false;
+          }
           return true;
         });
+
+        const selectedDayStaff = resolvedStaffId
+          ? dayStaffById.get(resolvedStaffId)
+          : null;
+        const selectedDayClient = resolvedClientId
+          ? dayClientById.get(resolvedClientId)
+          : null;
+
+        let statusMessage: string | null = null;
+        let profileStatus: string | null = null;
+
+        if (
+          selectedDayStaff &&
+          selectedDayStaff.availableSlots.length === 0 &&
+          filtered.length === 0
+        ) {
+          const calledOut =
+            dayData.input.callOutStaffIds.includes(selectedDayStaff.id);
+          profileStatus = calledOut
+            ? "CALLED_OUT"
+            : "NO_WORKING_SHIFT";
+          statusMessage = calledOut
+            ? "Staff profile " +
+              selectedDayStaff.name +
+              " exists and is active for " +
+              date +
+              ", but the staff member is called out for the full scheduler day."
+            : "Staff profile " +
+              selectedDayStaff.name +
+              " exists and is active for " +
+              date +
+              ", but no working shift/availability applies on that day.";
+        }
+
+        if (
+          selectedDayClient &&
+          selectedDayClient.requiredSlots.length === 0 &&
+          filtered.length === 0
+        ) {
+          profileStatus = "NO_ATTENDANCE_REQUIREMENT";
+          statusMessage =
+            "Client profile " +
+            selectedDayClient.displayCode +
+            (resolvedClientName
+              ? " (" + resolvedClientName + ")"
+              : "") +
+            " exists and is active for " +
+            date +
+            ", but it has no 1:1 attendance/coverage requirement on that day.";
+        }
+
+        if (assignments.length === 0 && !statusMessage) {
+          statusMessage =
+            "The schedule has not been generated for " + date + ".";
+        }
 
         const result: Record<string, unknown> = {
           locationId,
           date,
-          scheduleAvailable: true,
+          scheduleAvailable: assignments.length > 0,
           assignmentCount: assignments.length,
           requiredClientSlots,
           needsClarification: false,
+          profileFound: Boolean(
+            resolvedStaffProfile || resolvedClientProfile
+          ),
+          profileStatus,
           resolvedStaffName,
           resolvedClientCode,
+          resolvedClientName,
           requestedRange: {
             startTime: input.startTime ?? null,
             endTime: input.endTime ?? null,
@@ -328,40 +561,65 @@ export function createSchedulerReadOnlyTools(context: SchedulerAiContext) {
           count: filtered.length,
           segments: mergeSegments(filtered),
           assignments: filtered,
+          message: statusMessage,
         };
 
         if (input.includeFreeStaff) {
           const allAvailableSlots = Array.from(
-            new Set(dayData.staff.flatMap((member) => member.availableSlots))
+            new Set(
+              dayData.staff.flatMap(
+                (member) => member.availableSlots
+              )
+            )
           ).sort();
           const rangeSlots = new Set(
             allAvailableSlots.filter((slot) => {
-              if (input.startTime && slot < input.startTime) return false;
-              if (input.endTime && slot >= input.endTime) return false;
+              if (
+                input.startTime &&
+                slot < input.startTime
+              ) {
+                return false;
+              }
+              if (
+                input.endTime &&
+                slot >= input.endTime
+              ) {
+                return false;
+              }
               return true;
             })
           );
-          const freeStaff = dayData.staff.map((member) => {
+          result.freeStaff = dayData.staff.map((member) => {
             const scheduledSlots = new Set(
               enriched
-                .filter((assignment) => assignment.staffId === member.id)
-                .map((assignment) => assignment.startTime)
+                .filter(
+                  (assignment) =>
+                    assignment.staffId === member.id
+                )
+                .map(
+                  (assignment) => assignment.startTime
+                )
             );
             const freeSlots = member.availableSlots.filter(
-              (slot) => rangeSlots.has(slot) && !scheduledSlots.has(slot)
+              (slot) =>
+                rangeSlots.has(slot) &&
+                !scheduledSlots.has(slot)
             );
-            const requestedAvailableSlots = member.availableSlots.filter((slot) => rangeSlots.has(slot));
+            const requestedAvailableSlots =
+              member.availableSlots.filter((slot) =>
+                rangeSlots.has(slot)
+              );
             return {
               id: member.id,
               name: member.name,
               freeSlots,
               freeForEntireRequestedRange:
                 rangeSlots.size > 0 &&
-                requestedAvailableSlots.length === rangeSlots.size &&
+                requestedAvailableSlots.length ===
+                  rangeSlots.size &&
                 freeSlots.length === rangeSlots.size,
             };
           });
-          result.freeStaff = freeStaff;
         }
 
         return result;
