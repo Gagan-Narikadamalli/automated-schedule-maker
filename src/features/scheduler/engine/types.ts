@@ -101,6 +101,7 @@ export type SchedulerRules = {
   minimalFixAllowProtectedRelocation: boolean;
   minimalFixAllowBreakRelocation: boolean;
   preserveManualOverrides: boolean;
+  breakSchedulingEnabled?: boolean;
   scheduleStabilityPriority: number;
   weekdayTemplatePriority: number;
   weeklyHoursPriority: number;
