@@ -87,6 +87,7 @@ export type SchedulerRules = {
   minimumClientStaffAssignmentMinutes: number;
   maximumClientStaffConsecutiveHours: number;
   preventSameStaffClientRepeatSameDay: boolean;
+  allowSameStaffClientRepeatForCoverageException: boolean;
   preferSameTeam: boolean;
   preferStaffContinuity: boolean;
   slotLengthMinutes: number;
