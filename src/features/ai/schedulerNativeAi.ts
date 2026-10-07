@@ -1,3 +1,16 @@
+import { connectToDatabase } from "@/lib/db";
+import { NativeAiPendingAction } from "@/models/NativeAiPendingAction";
+
+import {
+  applyNativeOverrideApproval,
+  describeNativePendingAction,
+  isNativeCancellation,
+  isNativeConfirmation,
+  nativePlanNeedsConfirmation,
+  reviseNativePendingAction,
+  type NativePendingSnapshot,
+} from "./schedulerNativeConversation";
+import { buildNativeHistoricalKnowledge } from "./schedulerNativeKnowledge";
 import type { SchedulerAiHistoryMessage } from "./types";
 
 export type SchedulerAiProviderMode = "gateway" | "native";
@@ -16,6 +29,7 @@ export type NativeSchedulerIntent =
   | "CLIENT_LOOKUP"
   | "STAFF_SUMMARY"
   | "CLIENT_SUMMARY"
+  | "HISTORICAL"
   | "DAY_SUMMARY";
 
 export type NativeSchedulerPlan = {
@@ -379,6 +393,21 @@ export function planNativeSchedulerAction(args: {
     };
   }
 
+  if (
+    /\b(?:historically|history|historical|normally|usually|typically|past|previous|last\s+year|pattern|patterns)\b/i.test(
+      raw
+    )
+  ) {
+    return {
+      intent: "HISTORICAL",
+      toolName: "__native_history__",
+      input: {},
+      confidence: 0.92,
+      explanation:
+        "Use the scheduler's own historical assignments, templates, and manager feedback as advisory memory.",
+    };
+  }
+
   if (/\b(?:breaks?|called\s+out|call[- ]?outs?|staff|employees?|technicians?|bts?)\b/i.test(raw)) {
     return {
       intent: "STAFF_SUMMARY",
@@ -627,44 +656,130 @@ function summarizeNativeToolResult(
     : `There are no saved schedule blocks for ${date}.`;
 }
 
-export async function runNativeSchedulerAi(args: {
-  message: string;
-  history: SchedulerAiHistoryMessage[];
+function outputNeedsNativeConfirmation(outputValue: unknown): boolean {
+  const output = asRecord(outputValue);
+  return Boolean(
+    output.requiresConfirmation === true ||
+      output.requiresLockedOverride === true ||
+      output.requiresRuleOverride === true ||
+      output.requiresOccupiedReplacementConfirmation === true ||
+      output.confirmationType === "LOCKED_OR_MANUAL" ||
+      output.confirmationType === "RULE_CONFLICT" ||
+      output.confirmationType === "OCCUPIED_TARGET"
+  );
+}
+
+function pendingToPlan(pending: NativePendingSnapshot): NativeSchedulerPlan {
+  return {
+    intent: pending.intent as NativeSchedulerIntent,
+    toolName: pending.toolName,
+    input: pending.input,
+    confidence: 1,
+    explanation: "Previously confirmed Native Scheduler AI action.",
+  };
+}
+
+async function loadPendingAction(args: {
+  locationId: string;
+  userId: string;
+}): Promise<(NativePendingSnapshot & { preview: string }) | null> {
+  await connectToDatabase();
+  const found = await NativeAiPendingAction.findOne({
+    locationId: args.locationId,
+    userId: args.userId,
+  }).lean();
+
+  if (!found) return null;
+  if (new Date(found.expiresAt).getTime() <= Date.now()) {
+    await NativeAiPendingAction.deleteOne({ _id: found._id });
+    return null;
+  }
+
+  return {
+    intent: String(found.intent),
+    toolName: String(found.toolName),
+    input:
+      found.input && typeof found.input === "object"
+        ? (found.input as Record<string, unknown>)
+        : {},
+    stage:
+      found.stage === "OVERRIDE_CONFIRMATION"
+        ? "OVERRIDE_CONFIRMATION"
+        : "USER_CONFIRMATION",
+    preview: String(found.preview || ""),
+  };
+}
+
+async function savePendingAction(args: {
+  locationId: string;
+  userId: string;
+  date: string;
+  pending: NativePendingSnapshot;
+  preview: string;
+}) {
+  await connectToDatabase();
+  await NativeAiPendingAction.findOneAndUpdate(
+    { locationId: args.locationId, userId: args.userId },
+    {
+      locationId: args.locationId,
+      userId: args.userId,
+      date: args.date,
+      intent: args.pending.intent,
+      toolName: args.pending.toolName,
+      input: args.pending.input,
+      stage: args.pending.stage,
+      preview: args.preview,
+      expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+}
+
+async function clearPendingAction(args: {
+  locationId: string;
+  userId: string;
+}) {
+  await connectToDatabase();
+  await NativeAiPendingAction.deleteOne({
+    locationId: args.locationId,
+    userId: args.userId,
+  });
+}
+
+function emptyNativeResult(text: string): NativeSchedulerAgentResult {
+  return {
+    text,
+    steps: [{ toolCalls: [], toolResults: [] }],
+  };
+}
+
+async function executeNativePlan(args: {
+  plan: NativeSchedulerPlan;
   tools: Record<string, unknown>;
   date: string;
-  writeToolsEnabled: boolean;
-}): Promise<NativeSchedulerAgentResult> {
-  const plan = planNativeSchedulerAction({
-    message: args.message,
-    history: args.history,
-    writeToolsEnabled: args.writeToolsEnabled,
-  });
-
-  const rawTool = args.tools[plan.toolName] as ExecutableTool | undefined;
+}): Promise<{
+  result: NativeSchedulerAgentResult;
+  output: unknown;
+}> {
+  const rawTool = args.tools[args.plan.toolName] as ExecutableTool | undefined;
   if (!rawTool?.execute) {
-    const writeIntent = [
-      "GENERATE",
-      "REPAIR",
-      "CALL_OUT",
-      "BREAK_EDIT",
-      "BULK_REPLACE",
-      "TEMPLATE",
-    ].includes(plan.intent);
     return {
-      text:
-        writeIntent && !args.writeToolsEnabled
-          ? "The Native Scheduler AI understood the requested change, but scheduler write actions are disabled. You can still use the rest of the scheduler normally."
-          : `The Native Scheduler AI understood this as ${
-              plan.intent.toLowerCase().replace(/_/g, " ")
-            }, but the required scheduler tool (${plan.toolName}) is not available in this mode.`,
-      steps: [{ toolCalls: [], toolResults: [] }],
+      result: emptyNativeResult(
+        `The Native Scheduler AI understood this as ${args.plan.intent
+          .toLowerCase()
+          .replace(/_/g, " ")}, but the required scheduler tool (${args.plan.toolName}) is not available in this mode.`
+      ),
+      output: {
+        ok: false,
+        error: "Required scheduler tool is unavailable.",
+      },
     };
   }
 
   let output: unknown;
   try {
-    output = await rawTool.execute(plan.input, {
-      toolCallId: `native-${plan.intent.toLowerCase()}`,
+    output = await rawTool.execute(args.plan.input, {
+      toolCallId: `native-${args.plan.intent.toLowerCase()}`,
       messages: [],
     });
   } catch (error) {
@@ -678,14 +793,163 @@ export async function runNativeSchedulerAi(args: {
   }
 
   return {
-    text: summarizeNativeToolResult(plan, output, args.date),
-    steps: [
-      {
-        toolCalls: [{ toolName: plan.toolName, input: plan.input }],
-        toolResults: [
-          { toolName: plan.toolName, input: plan.input, output },
-        ],
-      },
-    ],
+    result: {
+      text: summarizeNativeToolResult(args.plan, output, args.date),
+      steps: [
+        {
+          toolCalls: [
+            { toolName: args.plan.toolName, input: args.plan.input },
+          ],
+          toolResults: [
+            {
+              toolName: args.plan.toolName,
+              input: args.plan.input,
+              output,
+            },
+          ],
+        },
+      ],
+    },
+    output,
   };
+}
+
+export async function runNativeSchedulerAi(args: {
+  message: string;
+  history: SchedulerAiHistoryMessage[];
+  tools: Record<string, unknown>;
+  date: string;
+  locationId: string;
+  userId: string;
+  writeToolsEnabled: boolean;
+}): Promise<NativeSchedulerAgentResult> {
+  const pending = await loadPendingAction({
+    locationId: args.locationId,
+    userId: args.userId,
+  });
+
+  if (pending && isNativeCancellation(args.message)) {
+    await clearPendingAction({
+      locationId: args.locationId,
+      userId: args.userId,
+    });
+    return emptyNativeResult(
+      "Cancelled. No pending Native Scheduler AI change was applied."
+    );
+  }
+
+  if (pending && isNativeConfirmation(args.message)) {
+    if (!args.writeToolsEnabled) {
+      return emptyNativeResult(
+        "The pending action is understood, but scheduler write actions are currently disabled. No database change was made."
+      );
+    }
+
+    const plan = pendingToPlan(pending);
+    const executed = await executeNativePlan({
+      plan,
+      tools: args.tools,
+      date: args.date,
+    });
+
+    if (outputNeedsNativeConfirmation(executed.output)) {
+      const revised = applyNativeOverrideApproval(
+        pending,
+        asRecord(executed.output)
+      );
+      const preview =
+        String(asRecord(executed.output).message || "").trim() ||
+        "The scheduler found a protected or conflicting destination that needs explicit override permission.";
+      await savePendingAction({
+        locationId: args.locationId,
+        userId: args.userId,
+        date: args.date,
+        pending: revised,
+        preview,
+      });
+      return {
+        ...executed.result,
+        text:
+          `${preview}\n\nNo override has been applied yet. Confirm again only if you want the Native Scheduler AI to apply the required override.`,
+      };
+    }
+
+    await clearPendingAction({
+      locationId: args.locationId,
+      userId: args.userId,
+    });
+    return executed.result;
+  }
+
+  if (pending) {
+    const revised = reviseNativePendingAction(pending, args.message);
+    if (revised) {
+      const revisedPlan = pendingToPlan(revised);
+      const preview = describeNativePendingAction(revisedPlan, args.date);
+      await savePendingAction({
+        locationId: args.locationId,
+        userId: args.userId,
+        date: args.date,
+        pending: revised,
+        preview,
+      });
+      return emptyNativeResult(
+        `Updated pending action: ${preview}\n\nNo database change has been made yet. Reply "yes" or "proceed" to confirm, or "cancel" to discard it.`
+      );
+    }
+
+    await clearPendingAction({
+      locationId: args.locationId,
+      userId: args.userId,
+    });
+  }
+
+  const plan = planNativeSchedulerAction({
+    message: args.message,
+    history: args.history,
+    writeToolsEnabled: args.writeToolsEnabled,
+  });
+
+  if (plan.intent === "HISTORICAL") {
+    const knowledge = await buildNativeHistoricalKnowledge({
+      locationId: args.locationId,
+      date: args.date,
+      query: args.message,
+    });
+    return emptyNativeResult(knowledge);
+  }
+
+  if (nativePlanNeedsConfirmation(plan)) {
+    if (!args.writeToolsEnabled) {
+      return emptyNativeResult(
+        "The Native Scheduler AI understood the requested database change, but scheduler write actions are disabled. No database change was made."
+      );
+    }
+
+    const pendingPlan: NativePendingSnapshot = {
+      intent: plan.intent,
+      toolName: plan.toolName,
+      input: plan.input,
+      stage: "USER_CONFIRMATION",
+    };
+    const preview = describeNativePendingAction(plan, args.date);
+    await savePendingAction({
+      locationId: args.locationId,
+      userId: args.userId,
+      date: args.date,
+      pending: pendingPlan,
+      preview,
+    });
+
+    return emptyNativeResult(
+      `Proposed change: ${preview}\n\nNo database change has been made yet. Reply "yes" or "proceed" to confirm this exact action, or "cancel" to discard it.`
+    );
+  }
+
+  const executed = await executeNativePlan({
+    plan,
+    tools: args.tools,
+    date: args.date,
+  });
+  return executed.result;
 }

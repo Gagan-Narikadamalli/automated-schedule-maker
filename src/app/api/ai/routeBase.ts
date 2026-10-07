@@ -713,6 +713,8 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
         history,
         tools,
         date: resolvedDate.date,
+        locationId,
+        userId: auth.session.userId,
         writeToolsEnabled,
       });
       resultText = nativeResult.text;
