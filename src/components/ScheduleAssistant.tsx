@@ -562,7 +562,9 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     );
 
     try {
-      const response = await fetch("/api/ai", {
+      const endpoint =
+        provider === "native" ? "/api/ai/native" : "/api/ai/paid";
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -571,7 +573,6 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
           locationName: requestContext.locationName,
           date: requestContext.date,
           dateSelectionExplicit: requestContext.dateSelectionExplicit,
-          provider,
           history,
           attachments: selectedAttachments.map((attachment) => ({
             name: attachment.name,
