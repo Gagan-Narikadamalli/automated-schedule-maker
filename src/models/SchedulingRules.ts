@@ -54,6 +54,10 @@ const SchedulingRulesSchema = new Schema(
       type: Boolean,
       default: true,
     },
+    allowSameStaffClientRepeatForCoverageException: {
+      type: Boolean,
+      default: true,
+    },
     defaultBreakMinutes: {
       type: Number,
       default: 30,
