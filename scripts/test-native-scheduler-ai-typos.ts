@@ -34,14 +34,14 @@ assert.equal(exact.input.allowRuleOverride, false);
 assert.equal(exact.input.allowOccupiedReplacement, false);
 
 const typo = planNativeSchedulerAction({
-  message: "replcae CaMe clinet with areyanna instaed of anais form 11 to 11 30",
+  message: "replcae CaMe clinet with areyanna instaed of anias form 11 to 11 30",
   date: "2026-10-08",
   history: [],
   writeToolsEnabled: true,
 });
 assert.equal(typo.intent, "BULK_REPLACE");
 assert.equal(typo.input.client, "CaMe");
-assert.equal(typo.input.source, "anais");
+assert.equal(typo.input.source, "anias");
 assert.equal(typo.input.replacement, "areyanna");
 assert.equal(typo.input.startTime, "11:00");
 assert.equal(typo.input.endTime, "11:30");

@@ -29,35 +29,33 @@ function editDistance(left: string, right: string): number {
   if (!left) return right.length;
   if (!right) return left.length;
 
-  const previous = Array.from(
-    { length: right.length + 1 },
-    (_, index) => index
+  const matrix = Array.from({ length: left.length + 1 }, () =>
+    Array<number>(right.length + 1).fill(0)
   );
+  for (let i = 0; i <= left.length; i += 1) matrix[i][0] = i;
+  for (let j = 0; j <= right.length; j += 1) matrix[0][j] = j;
 
-  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
-    const current = [leftIndex];
-
-    for (
-      let rightIndex = 1;
-      rightIndex <= right.length;
-      rightIndex += 1
-    ) {
-      const cost =
-        left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1;
-
-      current[rightIndex] = Math.min(
-        current[rightIndex - 1] + 1,
-        previous[rightIndex] + 1,
-        previous[rightIndex - 1] + cost
+  for (let i = 1; i <= left.length; i += 1) {
+    for (let j = 1; j <= right.length; j += 1) {
+      const cost = left[i - 1] === right[j - 1] ? 0 : 1;
+      matrix[i][j] = Math.min(
+        matrix[i - 1][j] + 1,
+        matrix[i][j - 1] + 1,
+        matrix[i - 1][j - 1] + cost
       );
-    }
 
-    for (let index = 0; index < current.length; index += 1) {
-      previous[index] = current[index];
+      if (
+        i > 1 &&
+        j > 1 &&
+        left[i - 1] === right[j - 2] &&
+        left[i - 2] === right[j - 1]
+      ) {
+        matrix[i][j] = Math.min(matrix[i][j], matrix[i - 2][j - 2] + 1);
+      }
     }
   }
 
-  return previous[right.length];
+  return matrix[left.length][right.length];
 }
 
 function fuzzyThreshold(length: number): number {
