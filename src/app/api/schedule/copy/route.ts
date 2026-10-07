@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
 import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySchedulerInput";
+import { persistScheduleReplacementSafely } from "@/features/scheduler/server/persistScheduleReplacementSafely";
 import {
   forbiddenResponse,
   requireApiSession,
@@ -160,29 +161,38 @@ export async function POST(request: Request) {
       });
     }
 
-    await ScheduleAssignment.deleteMany({
+    if (assignmentsToCopy.length === 0) {
+      return NextResponse.json(
+        {
+          error:
+            "No source assignments are valid for the target date. The existing target schedule was preserved.",
+          warnings,
+        },
+        { status: 409 }
+      );
+    }
+
+    const persistence = await persistScheduleReplacementSafely({
       locationId,
       date: targetDate,
-      source: { $in: ["AUTO", "TEMPLATE", "COPIED"] },
-      manuallyOverridden: { $ne: true },
-      locked: { $ne: true },
+      replacements: assignmentsToCopy,
+      replaceableFilter: {
+        source: { $in: ["AUTO", "TEMPLATE", "COPIED"] },
+        manuallyOverridden: { $ne: true },
+        locked: { $ne: true },
+      },
     });
 
-    if (assignmentsToCopy.length > 0) {
-      const operations = assignmentsToCopy.map((assignment) => ({
-        updateOne: {
-          filter: {
-            locationId,
-            date: targetDate,
-            staffId: assignment.staffId,
-            startTime: assignment.startTime,
-          },
-          update: { $set: assignment },
-          upsert: true,
+    if (persistence.blockedEmptyReplacement) {
+      return NextResponse.json(
+        {
+          error:
+            "The copy operation produced no replacement blocks, so the existing target schedule was preserved.",
+          warnings,
+          preservedAssignmentCount: persistence.preservedCount,
         },
-      }));
-
-      await ScheduleAssignment.bulkWrite(operations, { ordered: false });
+        { status: 409 }
+      );
     }
 
     await writeAuditLog({
