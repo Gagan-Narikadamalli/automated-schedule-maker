@@ -46,20 +46,6 @@ function freeStaffAt(staff: JsonRecord[], slot: string, excludedName?: string): 
   });
 }
 
-function assignmentAt(
-  assignments: JsonRecord[],
-  staffName: string,
-  slot: string
-): JsonRecord | null {
-  return (
-    assignments.find(
-      (assignment) =>
-        String(assignment.staffName ?? "") === staffName &&
-        String(assignment.startTime ?? "") === slot
-    ) ?? null
-  );
-}
-
 function assignmentSlotsForStaff(
   assignments: JsonRecord[],
   staffName: string,
