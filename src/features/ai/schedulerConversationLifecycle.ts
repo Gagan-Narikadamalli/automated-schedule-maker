@@ -27,6 +27,7 @@ export function schedulerAnswerNeedsFollowUp(reply: string): boolean {
   if (!normalized) return true;
   if (normalized.endsWith("?")) return true;
   return (
+    normalized.includes("i am unable to understand your request") ||
     normalized.includes("please explain or elaborate") ||
     normalized.includes("please clarify") ||
     normalized.includes("which day") ||
