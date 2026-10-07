@@ -13,6 +13,7 @@ export type CandidateCheckContext = {
   assignments: SchedulerAssignment[];
   callOutStaffIds: Set<string>;
   rules: SchedulerRules;
+  allowSameDayPairRepeat?: boolean;
 };
 
 function getStaffClientIds(
@@ -190,6 +191,7 @@ export function canAssignStaffToClient({
   assignments,
   callOutStaffIds,
   rules,
+  allowSameDayPairRepeat = false,
 }: CandidateCheckContext): { allowed: boolean; reason?: string } {
   if (callOutStaffIds.has(staffMember.id)) {
     return {
@@ -280,6 +282,7 @@ export function canAssignStaffToClient({
 
   if (
     rules.preventSameStaffClientRepeatSameDay &&
+    !allowSameDayPairRepeat &&
     !isSameDayPairContinuation(
       staffMember.id,
       client.id,
