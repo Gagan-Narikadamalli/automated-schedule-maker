@@ -9,9 +9,7 @@ export type FlexibleEventWindow = {
 
 export type FlexibleEventDurationRule = {
   enabled: boolean;
-  minimumMinutes: number;
-  preferredMinutes: number;
-  maximumMinutes: number;
+  durationMinutes: number;
   slotLengthMinutes: number;
 };
 
@@ -21,16 +19,23 @@ function clamp(value: number, minimum: number, maximum: number): number {
 
 function safeSlotCount(
   minutes: number,
-  slotLengthMinutes: number,
-  fallback: number
+  slotLengthMinutes: number
 ): number {
   if (!Number.isFinite(minutes) || minutes <= 0 || slotLengthMinutes <= 0) {
-    return fallback;
+    return 1;
   }
 
   return Math.max(Math.round(minutes / slotLengthMinutes), 1);
 }
 
+/**
+ * A configured event start/end time is a placement WINDOW, not the event
+ * duration. When enabled, exactly one contiguous event of the configured
+ * duration is selected inside that window. Overlapping windows are staggered
+ * when possible so nap/speech time can also create useful staff-break capacity.
+ *
+ * When disabled, the automatic scheduler ignores the window completely.
+ */
 export function resolveFlexibleEventWindows(
   windows: FlexibleEventWindow[],
   rule: FlexibleEventDurationRule
@@ -66,82 +71,48 @@ export function resolveFlexibleEventWindows(
       window.endTime
     );
 
-    if (availableSlots.length === 0) {
+    if (!rule.enabled || availableSlots.length === 0) {
       resolved.set(window.key, []);
       continue;
     }
 
-    if (!rule.enabled) {
-      resolved.set(window.key, availableSlots);
-      for (const slot of availableSlots) {
-        slotLoad.set(slot, (slotLoad.get(slot) ?? 0) + 1);
-      }
-      continue;
-    }
-
-    const slotLengthMinutes = Math.max(rule.slotLengthMinutes, 1);
-    const minimumSlots = clamp(
-      safeSlotCount(rule.minimumMinutes, slotLengthMinutes, 1),
+    const durationSlots = clamp(
+      safeSlotCount(rule.durationMinutes, rule.slotLengthMinutes),
       1,
       availableSlots.length
     );
-    const maximumSlots = clamp(
-      safeSlotCount(
-        rule.maximumMinutes,
-        slotLengthMinutes,
-        availableSlots.length
-      ),
-      minimumSlots,
-      availableSlots.length
-    );
-    const preferredSlots = clamp(
-      safeSlotCount(rule.preferredMinutes, slotLengthMinutes, minimumSlots),
-      minimumSlots,
-      maximumSlots
-    );
 
-    let bestSlots = availableSlots.slice(0, preferredSlots);
+    let bestSlots = availableSlots.slice(0, durationSlots);
     let bestScore = Number.POSITIVE_INFINITY;
 
     for (
-      let durationSlots = minimumSlots;
-      durationSlots <= maximumSlots;
-      durationSlots += 1
+      let startIndex = 0;
+      startIndex + durationSlots <= availableSlots.length;
+      startIndex += 1
     ) {
-      for (
-        let startIndex = 0;
-        startIndex + durationSlots <= availableSlots.length;
-        startIndex += 1
-      ) {
-        const candidate = availableSlots.slice(
-          startIndex,
-          startIndex + durationSlots
-        );
-        const totalOverlap = candidate.reduce(
-          (sum, slot) => sum + (slotLoad.get(slot) ?? 0),
-          0
-        );
-        const peakOverlap = candidate.reduce(
-          (maximum, slot) => Math.max(maximum, slotLoad.get(slot) ?? 0),
-          0
-        );
-        const durationDeviation = Math.abs(
-          durationSlots - preferredSlots
-        );
+      const candidate = availableSlots.slice(
+        startIndex,
+        startIndex + durationSlots
+      );
+      const totalOverlap = candidate.reduce(
+        (sum, slot) => sum + (slotLoad.get(slot) ?? 0),
+        0
+      );
+      const peakOverlap = candidate.reduce(
+        (maximum, slot) => Math.max(maximum, slotLoad.get(slot) ?? 0),
+        0
+      );
 
-        // Avoid stacking flexible events on the same half-hour when another
-        // valid placement exists. After that, stay as close as possible to the
-        // configured preferred duration and use the earliest valid slot.
-        const score =
-          peakOverlap * 1_000 +
-          totalOverlap * 200 +
-          durationDeviation * 25 +
-          startIndex;
+      // First avoid stacking flexible events on the same half-hour. When two
+      // placements are otherwise equally good, choose the earlier one.
+      const score =
+        peakOverlap * 1_000 +
+        totalOverlap * 200 +
+        startIndex;
 
-        if (score < bestScore) {
-          bestScore = score;
-          bestSlots = candidate;
-        }
+      if (score < bestScore) {
+        bestScore = score;
+        bestSlots = candidate;
       }
     }
 
