@@ -672,6 +672,8 @@ export function ClientCardManager() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             locationId: selectedLocationId,
+            firstName: form.firstName.trim(),
+            lastName: form.lastName.trim(),
             fullName,
             displayCode,
             startDate: form.startDate,
