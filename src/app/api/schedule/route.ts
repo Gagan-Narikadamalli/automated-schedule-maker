@@ -131,8 +131,9 @@ export async function GET(request: Request) {
       locationId,
       recentSavedScheduleDates,
       staff: plainStaffDocuments
-        .filter((staffMember) =>
-          availableSlotMap.has(String(staffMember._id))
+        .filter(
+          (staffMember) =>
+            (availableSlotMap.get(String(staffMember._id))?.length ?? 0) > 0
         )
         .map((staffMember) => ({
           id: String(staffMember._id),
