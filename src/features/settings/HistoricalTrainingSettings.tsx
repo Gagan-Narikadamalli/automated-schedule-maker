@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+import { EditableNumberInput } from "@/components/EditableNumberInput";
+
 type LocationOption = {
   id: string;
   name: string;
@@ -259,8 +261,8 @@ export function HistoricalTrainingSettings() {
       <div className="form-grid">
         <label className="form-field">
           <span>Repeated staff/client pairing priority</span>
-          <input
-            type="number"
+          <EditableNumberInput
+            
             min="0"
             max="200"
             step="5"
@@ -281,8 +283,8 @@ export function HistoricalTrainingSettings() {
 
         <label className="form-field">
           <span>Repeated exact-time priority</span>
-          <input
-            type="number"
+          <EditableNumberInput
+            
             min="0"
             max="200"
             step="5"
@@ -303,8 +305,8 @@ export function HistoricalTrainingSettings() {
 
         <label className="form-field">
           <span>Historical break-time priority</span>
-          <input
-            type="number"
+          <EditableNumberInput
+            
             min="0"
             max="200"
             step="5"
