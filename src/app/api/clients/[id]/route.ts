@@ -146,6 +146,7 @@ export async function PATCH(request: Request, context: RouteContext) {
         _id: { $ne: client._id },
         locationId,
         displayCode,
+        serviceSetting: body.serviceSetting ?? client.serviceSetting,
         active: true,
       });
 
@@ -153,7 +154,7 @@ export async function PATCH(request: Request, context: RouteContext) {
         return NextResponse.json(
           {
             error:
-              "Another active client already uses this calendar display code at this location.",
+              "Another active client of the same type already uses this calendar display code at this location.",
           },
           { status: 409 }
         );
@@ -184,6 +185,26 @@ export async function PATCH(request: Request, context: RouteContext) {
     }
 
     if (body.serviceSetting !== undefined) {
+      if (body.fullName === undefined) {
+        const duplicate = await Client.findOne({
+          _id: { $ne: client._id },
+          locationId,
+          displayCode: client.displayCode,
+          serviceSetting: body.serviceSetting,
+          active: true,
+        });
+
+        if (duplicate) {
+          return NextResponse.json(
+            {
+              error:
+                "Another active client of the same type already uses this calendar display code at this location.",
+            },
+            { status: 409 }
+          );
+        }
+      }
+
       client.serviceSetting = body.serviceSetting;
     }
 
