@@ -38,6 +38,22 @@ const SchedulingRulesSchema = new Schema(
       default: 4,
       min: 1,
     },
+    minimumClientStaffAssignmentMinutes: {
+      type: Number,
+      default: 30,
+      min: 30,
+      max: 240,
+    },
+    maximumClientStaffConsecutiveHours: {
+      type: Number,
+      default: 4,
+      min: 3,
+      max: 4,
+    },
+    preventSameStaffClientRepeatSameDay: {
+      type: Boolean,
+      default: true,
+    },
     defaultBreakMinutes: {
       type: Number,
       default: 30,
