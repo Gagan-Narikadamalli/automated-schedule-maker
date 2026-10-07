@@ -80,9 +80,7 @@ export async function applyFixedNapSessions(
     fixedNapWindows,
     {
       enabled: input.rules.napDurationRulesEnabled ?? true,
-      minimumMinutes: input.rules.napMinimumMinutes ?? 30,
-      preferredMinutes: input.rules.napPreferredMinutes ?? 30,
-      maximumMinutes: input.rules.napMaximumMinutes ?? 60,
+      durationMinutes: input.rules.napPreferredMinutes ?? 30,
       slotLengthMinutes: input.rules.slotLengthMinutes,
     }
   );
