@@ -466,7 +466,7 @@
   border-radius: 9px;
   background: linear-gradient(145deg, #26a9eb, #0b68b6);
   color: #ffffff;
-  font-size: 7px;
+  font-size: 9px;
   font-weight: 950;
 }
 
@@ -514,7 +514,7 @@
   border-radius: 9px;
   background: linear-gradient(145deg, #26a9eb, #0b68b6);
   color: #ffffff;
-  font-size: 7px;
+  font-size: 9px;
   font-weight: 950;
 }
 
@@ -551,7 +551,7 @@
   padding: 4px 6px;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 7px;
+  font-size: 9px;
   opacity: 0.85;
 }
 
