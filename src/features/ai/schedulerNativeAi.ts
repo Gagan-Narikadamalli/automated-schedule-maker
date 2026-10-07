@@ -15,9 +15,10 @@ import { expandNativeFollowUp } from "./schedulerNativeFollowUp";
 import { weekdayOnOrBefore } from "./schedulerDateResolution";
 import { normalizeNativeCommandTypos } from "./schedulerNativeText";
 import { planNativeManagementAction } from "./schedulerNativeManagement";
-import type { SchedulerAiHistoryMessage } from "./types";
-
-export type SchedulerAiProviderMode = "gateway" | "native";
+import type {
+  SchedulerAiHistoryMessage,
+  SchedulerAiProviderMode,
+} from "./types";
 
 export type NativeSchedulerIntent =
   | "GENERATE"
