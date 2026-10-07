@@ -1,12 +1,6 @@
 import { ScheduleAssignment } from "@/models/ScheduleAssignment";
 
-type ReplacementAssignment = {
-  locationId: string;
-  date: string;
-  startTime: string;
-  staffId: string;
-  [key: string]: unknown;
-};
+type ReplacementAssignment = Record<string, any>;
 
 type ReplaceableFilter = Record<string, unknown>;
 
