@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import { EditableNumberInput } from "@/components/EditableNumberInput";
+
 import cardStyles from "@/components/ManagementCards.module.css";
 import { useActionConfirmDialog } from "@/components/ActionConfirmDialog";
 import { ManagementModal } from "@/components/ManagementModal";
@@ -497,12 +499,12 @@ export function SupervisionCardDashboard() {
 
             <label className="form-field">
               <span>Service hours</span>
-              <input type="number" min="0" step="0.5" value={form.serviceHours} onChange={(event) => setForm((current) => ({ ...current, serviceHours: Number(event.target.value) }))} />
+              <EditableNumberInput  min="0" step="0.5" value={form.serviceHours} onChange={(event) => setForm((current) => ({ ...current, serviceHours: Number(event.target.value) }))} />
             </label>
 
             <label className="form-field">
               <span>Supervision hours</span>
-              <input type="number" min="0" step="0.25" value={form.supervisionHours} onChange={(event) => setForm((current) => ({ ...current, supervisionHours: Number(event.target.value) }))} />
+              <EditableNumberInput  min="0" step="0.25" value={form.supervisionHours} onChange={(event) => setForm((current) => ({ ...current, supervisionHours: Number(event.target.value) }))} />
             </label>
 
             <label className="form-field form-field-wide">
