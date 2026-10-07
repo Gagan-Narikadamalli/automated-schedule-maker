@@ -1,4 +1,4 @@
-import { jsonSchema, tool } from "ai";
+import { jsonSchema, tool } from "./schedulerToolDefinition";
 
 import { PUT as updateScheduleBatch } from "@/app/api/schedule/batch/route";
 import {
