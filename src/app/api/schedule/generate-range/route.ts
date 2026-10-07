@@ -12,6 +12,7 @@ import { applyFixedNapSessions } from "@/features/scheduler/server/applyFixedNap
 import { applyHistoricalTraining } from "@/features/scheduler/server/applyHistoricalTraining";
 import { applyLivingstonWorkbookTrial } from "@/features/scheduler/server/applyLivingstonWorkbookTrial";
 import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySchedulerInput";
+import { persistScheduleReplacementSafely } from "@/features/scheduler/server/persistScheduleReplacementSafely";
 import { syncAutoUnplacedGaps } from "@/features/scheduler/server/syncAutoUnplacedGaps";
 import {
   forbiddenResponse,
@@ -235,33 +236,42 @@ export async function POST(request: Request) {
         dayData.extendedRules.slotLengthMinutes
       );
 
-      await ScheduleAssignment.deleteMany({
-        locationId,
-        date,
-        manuallyOverridden: { $ne: true },
-        source: { $in: ["AUTO", "TEMPLATE", "COPIED"] },
-      });
-
       const autoAssignments = enrichedAssignments.filter(
         (assignment) => assignment.source === "AUTO"
       );
+      const generatedRecords = autoAssignments.map((assignment) => ({
+        locationId,
+        date,
+        startTime: assignment.startTime,
+        endTime: getEndTimeForSlot(assignment.startTime),
+        staffId: assignment.staffId,
+        clientId: assignment.clientId || null,
+        assignmentType: assignment.assignmentType,
+        source: "AUTO",
+        locked: assignment.locked,
+        manuallyOverridden: false,
+        note: assignment.note || "",
+      }));
 
-      if (autoAssignments.length > 0) {
-        await ScheduleAssignment.insertMany(
-          autoAssignments.map((assignment) => ({
-            locationId,
-            date,
-            startTime: assignment.startTime,
-            endTime: getEndTimeForSlot(assignment.startTime),
-            staffId: assignment.staffId,
-            clientId: assignment.clientId || null,
-            assignmentType: assignment.assignmentType,
-            source: "AUTO",
-            locked: assignment.locked,
-            manuallyOverridden: false,
-            note: assignment.note || "",
-          }))
-        );
+      const persistence = await persistScheduleReplacementSafely({
+        locationId,
+        date,
+        replacements: generatedRecords,
+        replaceableFilter: {
+          manuallyOverridden: { $ne: true },
+          source: { $in: ["AUTO", "TEMPLATE", "COPIED"] },
+        },
+      });
+
+      if (persistence.blockedEmptyReplacement) {
+        results.push({
+          date,
+          skipped: true,
+          reason:
+            "Generation produced no replacement blocks, so the existing saved automatic schedule was preserved.",
+          preservedAssignmentCount: persistence.preservedCount,
+        });
+        continue;
       }
 
       const managerGapCount = await syncAutoUnplacedGaps(
