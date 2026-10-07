@@ -15,10 +15,7 @@ import { expandNativeFollowUp } from "./schedulerNativeFollowUp";
 import { weekdayOnOrBefore } from "./schedulerDateResolution";
 import { normalizeNativeCommandTypos } from "./schedulerNativeText";
 import { planNativeManagementAction } from "./schedulerNativeManagement";
-import type {
-  SchedulerAiHistoryMessage,
-  SchedulerAiProviderMode,
-} from "./types";
+import type { SchedulerAiHistoryMessage } from "./types";
 
 export type NativeSchedulerIntent =
   | "GENERATE"
@@ -102,12 +99,6 @@ export const NATIVE_SCHEDULER_SUPPORTED_TOOLS = [
   "analyze_client_replacement",
   "suggest_schedule_improvements",
 ] as const;
-
-export function resolveSchedulerAiProvider(
-  raw = process.env.SCHEDULER_AI_PROVIDER
-): SchedulerAiProviderMode {
-  return raw?.trim().toLowerCase() === "native" ? "native" : "gateway";
-}
 
 function visibleMessage(value: string): string {
   return value.split(/\n\n\[SCHEDULER TIME NORMALIZATION:/i)[0].trim();
