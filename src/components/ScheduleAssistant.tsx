@@ -363,9 +363,11 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     );
   }
 
-  async function clearPendingAiState(conversationLocationId: string) {
+  async function clearPendingAiState(
+    conversationLocationId: string
+  ): Promise<boolean> {
     if (!conversationLocationId || conversationLocationId.startsWith("demo-")) {
-      return;
+      return true;
     }
 
     try {
@@ -374,17 +376,19 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ locationId: conversationLocationId }),
       });
-      if (!response.ok) {
-        const data = (await response.json().catch(() => ({}))) as {
-          error?: string;
-        };
-        console.error(
-          "Scheduler AI session reset warning:",
-          data.error || "Server reset request failed."
-        );
-      }
+      if (response.ok) return true;
+
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+      console.error(
+        "Scheduler AI session reset warning:",
+        data.error || "Server reset request failed."
+      );
+      return false;
     } catch (error) {
       console.error("Scheduler AI session reset warning:", error);
+      return false;
     }
   }
 
@@ -392,6 +396,19 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     if (working || nextProvider === provider) return;
 
     const requestContext = getRequestContext();
+    const hasConversationState =
+      messages.length > 0 || attachments.length > 0 || Boolean(correctionFor);
+
+    if (
+      hasConversationState &&
+      !(await clearPendingAiState(requestContext.locationId))
+    ) {
+      setStatus(
+        "AI mode was not changed because the previous conversation state could not be cleared safely. Try again."
+      );
+      return;
+    }
+
     setProvider(nextProvider);
     window.localStorage.setItem("scheduler-ai-provider", nextProvider);
     setMessages([]);
@@ -401,8 +418,6 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     setMode(null);
     setCorrectionFor(null);
     setCorrection("");
-
-    await clearPendingAiState(requestContext.locationId);
 
     setStatus(
       nextProvider === "native"
