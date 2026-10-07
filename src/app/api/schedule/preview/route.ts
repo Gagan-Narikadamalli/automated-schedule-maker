@@ -122,7 +122,8 @@ export async function POST(request: Request) {
       schedulerInput.clients,
       proposedAssignments,
       coverageResult.metrics,
-      dayData.extendedRules.slotLengthMinutes
+      dayData.extendedRules.slotLengthMinutes,
+      coverageResult.uncoveredRequirements
     );
     const completeCoverage =
       finalCoverage.metrics.uncoveredClientSlots === 0;
