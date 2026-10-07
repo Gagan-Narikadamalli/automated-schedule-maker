@@ -90,4 +90,60 @@ assert.equal(
   "show teams"
 );
 
+
+const staffCreateHistory: SchedulerAiHistoryMessage[] = [
+  { role: "user", text: "create a new staff member named anias" },
+  {
+    role: "assistant",
+    text:
+      "Creating a staff member requires the full name, role (BT/RBT/INTERN/BCBA/OFFICE_MANAGER/OTHER), full-time or part-time status, and start date.",
+  },
+];
+
+const staffCreateContinuation = expandNativeFollowUp(
+  "anias regias ,bt,full-0time,today",
+  staffCreateHistory
+);
+assert.match(staffCreateContinuation, /create a new staff member anias regias/i);
+assert.match(staffCreateContinuation, /bt/i);
+assert.match(staffCreateContinuation, /full-time/i);
+assert.match(staffCreateContinuation, /starting today/i);
+
+const staffCreatePlan = planNativeSchedulerAction({
+  message: staffCreateContinuation,
+  date: "2026-10-07",
+  history: staffCreateHistory,
+  writeToolsEnabled: true,
+});
+assert.equal(staffCreatePlan.intent, "STAFF_MANAGEMENT");
+assert.equal(staffCreatePlan.toolName, "manage_staff");
+assert.equal(staffCreatePlan.input.action, "CREATE");
+assert.equal(staffCreatePlan.input.fullName, "anias regias");
+assert.equal(staffCreatePlan.input.role, "BT");
+assert.equal(staffCreatePlan.input.employeeType, "FULL_TIME");
+assert.equal(staffCreatePlan.input.startDate, "2026-10-07");
+
+const clientCreateHistory: SchedulerAiHistoryMessage[] = [
+  { role: "user", text: "create a new client" },
+  {
+    role: "assistant",
+    text:
+      "Creating a client requires the full name, display code, and start date.",
+  },
+];
+const clientCreateContinuation = expandNativeFollowUp(
+  "John Smith,JoSm,today",
+  clientCreateHistory
+);
+const clientCreatePlan = planNativeSchedulerAction({
+  message: clientCreateContinuation,
+  date: "2026-10-07",
+  history: clientCreateHistory,
+  writeToolsEnabled: true,
+});
+assert.equal(clientCreatePlan.intent, "CLIENT_MANAGEMENT");
+assert.equal(clientCreatePlan.input.fullName, "John Smith");
+assert.equal(clientCreatePlan.input.displayCode, "JoSm");
+assert.equal(clientCreatePlan.input.startDate, "2026-10-07");
+
 console.log("Native Scheduler AI follow-up conversation tests passed.");
