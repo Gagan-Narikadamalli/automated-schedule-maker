@@ -25,6 +25,8 @@ type StaffRelationshipRequest = {
 
 type ClientRequest = {
   locationId?: string;
+  firstName?: string;
+  lastName?: string;
   fullName?: string;
   displayCode?: string;
   startDate?: string;
@@ -148,8 +150,16 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json()) as ClientRequest;
     const locationId = body.locationId?.trim();
-    const fullName = body.fullName?.trim();
-    const displayCode = fullName ? displayCodeFromFullName(fullName) : "";
+    const firstName = body.firstName?.trim() ?? "";
+    const lastName = body.lastName?.trim() ?? "";
+    const fullName =
+      firstName && lastName
+        ? `${firstName} ${lastName}`
+        : body.fullName?.trim() ?? "";
+    const displayCode =
+      firstName && lastName
+        ? `${calendarCodePart(firstName)}${calendarCodePart(lastName)}`
+        : displayCodeFromFullName(fullName);
 
     if (!locationId || !fullName || !body.startDate) {
       return NextResponse.json(
@@ -161,12 +171,13 @@ export async function POST(request: Request) {
       );
     }
 
-    const nameParts = fullName.split(/\s+/).filter(Boolean);
-    if (nameParts.length < 2) {
+    if (
+      (body.firstName !== undefined || body.lastName !== undefined) &&
+      (!firstName || !lastName)
+    ) {
       return NextResponse.json(
         {
-          error:
-            "Enter both the client's first name and last name.",
+          error: "Enter both the client's first name and last name.",
         },
         { status: 400 }
       );
