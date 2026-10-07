@@ -15,6 +15,9 @@ import type {
 const DEFAULT_RULES: SchedulerRules = {
   maximumClientsPerTechPerDay: 6,
   maximumTechsPerClientPerDay: 4,
+  minimumClientStaffAssignmentMinutes: 30,
+  maximumClientStaffConsecutiveHours: 4,
+  preventSameStaffClientRepeatSameDay: true,
   preferSameTeam: true,
   preferStaffContinuity: true,
   slotLengthMinutes: 30,
@@ -536,6 +539,138 @@ function testRepeatedBreakHistoryGuidesPlacement() {
   );
 }
 
+function halfHourSlots(startHour: number, count: number): string[] {
+  const slots: string[] = [];
+  let minutes = startHour * 60;
+
+  for (let index = 0; index < count; index += 1) {
+    const hour = Math.floor(minutes / 60);
+    const minute = minutes % 60;
+    slots.push(
+      `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`
+    );
+    minutes += 30;
+  }
+
+  return slots;
+}
+
+function testGlobalMaximumForcesClientStaffRotation() {
+  const slots = halfHourSlots(8, 9);
+  const staff = [
+    createStaff("bt-a", "A Staff", "BT", slots),
+    createStaff("bt-b", "B Staff", "BT", slots),
+  ];
+  const client = createClient("client-long", "LONG", slots);
+  const input = createInput(staff, [client]);
+  input.rules.maximumClientStaffConsecutiveHours = 4;
+
+  const result = generateSchedule(input);
+  const assigned = clientAssignments(result.assignments).filter(
+    (assignment) => assignment.clientId === "client-long"
+  );
+  const aAssignments = assigned.filter(
+    (assignment) => assignment.staffId === "bt-a"
+  );
+  const bAssignments = assigned.filter(
+    (assignment) => assignment.staffId === "bt-b"
+  );
+
+  assert.equal(
+    result.metrics.uncoveredClientSlots,
+    0,
+    "A second eligible staff member should take over when the first reaches the four-hour continuous maximum."
+  );
+  assert.equal(
+    aAssignments.length,
+    8,
+    "The first staff/client run must stop at eight 30-minute blocks (four hours)."
+  );
+  assert.equal(
+    bAssignments.length,
+    1,
+    "The next eligible staff member should cover the remaining block after rotation."
+  );
+}
+
+function testSamePairDoesNotReturnAfterGap() {
+  const slots = ["08:00", "08:30", "09:00"];
+  const staff = [
+    createStaff("bt-a", "A Staff", "BT", slots),
+    createStaff("bt-b", "B Staff", "BT", slots),
+  ];
+  const client = createClient("client-gap", "GAP", slots);
+  const existing: SchedulerAssignment[] = [
+    {
+      id: "manual-a-0800",
+      staffId: "bt-a",
+      clientId: "client-gap",
+      startTime: "08:00",
+      assignmentType: "CLIENT_1_TO_1",
+      source: "MANUAL",
+      locked: true,
+    },
+    {
+      id: "manual-b-0830",
+      staffId: "bt-b",
+      clientId: "client-gap",
+      startTime: "08:30",
+      assignmentType: "CLIENT_1_TO_1",
+      source: "MANUAL",
+      locked: true,
+    },
+  ];
+  const input = createInput(staff, [client], existing);
+  input.rules.preventSameStaffClientRepeatSameDay = true;
+
+  const result = generateSchedule(input);
+  const atNine = clientAssignments(result.assignments).find(
+    (assignment) =>
+      assignment.clientId === "client-gap" &&
+      assignment.startTime === "09:00"
+  );
+
+  assert.equal(
+    atNine?.staffId,
+    "bt-b",
+    "After A's client block ends and B takes over, Auto Generate must not bring A back later the same day."
+  );
+}
+
+function testConfigurableMinimumContinuousPairing() {
+  const slots = halfHourSlots(8, 10);
+  const staff = [
+    createStaff("bt-a", "A Staff", "BT", slots),
+    createStaff("bt-b", "B Staff", "BT", slots),
+  ];
+  const client = createClient("client-min", "MIN", slots);
+  const input = createInput(staff, [client]);
+  input.rules.minimumClientStaffAssignmentMinutes = 60;
+  input.rules.maximumClientStaffConsecutiveHours = 4;
+
+  const result = generateSchedule(input);
+  const assigned = clientAssignments(result.assignments).filter(
+    (assignment) => assignment.clientId === "client-min"
+  );
+  const byStaff = new Map<string, number>();
+  for (const assignment of assigned) {
+    byStaff.set(
+      assignment.staffId,
+      (byStaff.get(assignment.staffId) ?? 0) + 1
+    );
+  }
+
+  assert.equal(
+    result.metrics.uncoveredClientSlots,
+    0,
+    "Ten half-hour client blocks should remain fully covered with a 60-minute minimum and a four-hour maximum when two staff are available."
+  );
+  assert.ok(
+    [...byStaff.values()].every((count) => count >= 2),
+    "Every automatically started client/staff pairing must contain at least two consecutive 30-minute blocks when the minimum is 60 minutes."
+  );
+}
+
 function runSchedulerRegressionScenarios() {
   testRoleCoverageOrder();
   testHistoricalPreferenceCannotJumpRoleTier();
@@ -548,6 +683,9 @@ function runSchedulerRegressionScenarios() {
   testTemplateReferenceGuidesStableMatching();
   testBreakPlanningUsesReliefCapacity();
   testRepeatedBreakHistoryGuidesPlacement();
+  testGlobalMaximumForcesClientStaffRotation();
+  testSamePairDoesNotReturnAfterGap();
+  testConfigurableMinimumContinuousPairing();
 
   console.log("Automatic scheduler regression scenarios passed.");
 }
