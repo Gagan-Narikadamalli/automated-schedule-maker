@@ -25,6 +25,7 @@ type PlaceStaffBreaksInput = {
   callOutStaffIds: string[];
   rules: PostCoverageBreakRules;
   schedulerRules: SchedulerRules;
+  allowProtectedRelief?: boolean;
 };
 
 export type PlaceStaffBreaksResult = {
@@ -311,7 +312,8 @@ function findReliefSwap(
   callOutStaffIds: Set<string>,
   referenceAssignments: SchedulerAssignment[],
   rules: PostCoverageBreakRules,
-  schedulerRules: SchedulerRules
+  schedulerRules: SchedulerRules,
+  allowProtectedAssignments = false
 ): {
   assignmentIndex: number;
   replacement: SchedulerAssignment;
@@ -323,8 +325,8 @@ function findReliefSwap(
       ({ assignment }) =>
         assignment.staffId === staffMember.id &&
         assignment.assignmentType === "CLIENT_1_TO_1" &&
-        assignment.source === "AUTO" &&
-        !assignment.locked &&
+        (allowProtectedAssignments ||
+          (assignment.source === "AUTO" && !assignment.locked)) &&
         Boolean(assignment.clientId) &&
         assignment.startTime >= rules.breakWindowStart &&
         assignment.startTime < rules.breakWindowEnd
@@ -454,6 +456,7 @@ export function placeStaffBreaksAfterCoverage({
   callOutStaffIds,
   rules,
   schedulerRules,
+  allowProtectedRelief = false,
 }: PlaceStaffBreaksInput): PlaceStaffBreaksResult {
   if (
     rules.defaultBreakMinutes <= 0 ||
@@ -521,7 +524,8 @@ export function placeStaffBreaksAfterCoverage({
       callOutSet,
       referenceAssignments,
       rules,
-      schedulerRules
+      schedulerRules,
+      allowProtectedRelief
     );
 
     if (reliefSwap) {
