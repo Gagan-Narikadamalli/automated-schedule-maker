@@ -262,18 +262,74 @@ export function describeNativePendingAction(
 
   if (plan.intent === "STAFF_MANAGEMENT") {
     if (input.action === "CREATE") {
-      return `Create staff profile ${input.fullName} as ${input.role} (${input.employeeType}) starting ${input.startDate}.`;
+      const shifts = Array.isArray(input.shiftPatterns)
+        ? input.shiftPatterns
+            .map((shift: Record<string, any>) => {
+              const days = Array.isArray(shift.days)
+                ? shift.days.join("/")
+                : "days";
+              return (
+                days +
+                " " +
+                String(shift.startTime || "?") +
+                "-" +
+                String(shift.endTime || "?")
+              );
+            })
+            .join("; ")
+        : "";
+      return (
+        "Create staff profile " +
+        input.fullName +
+        " as " +
+        input.role +
+        " (" +
+        input.employeeType +
+        ") starting " +
+        input.startDate +
+        (shifts ? ", working " + shifts : "") +
+        "."
+      );
     }
-    if (input.action === "ARCHIVE") return `Archive staff profile ${input.staff}.`;
-    return `Update staff profile ${input.staff}: ${JSON.stringify(input)}.`;
+    if (input.action === "ARCHIVE") {
+      return "Archive staff profile " + input.staff + ".";
+    }
+    return "Update staff profile " + input.staff + ": " + JSON.stringify(input) + ".";
   }
 
   if (plan.intent === "CLIENT_MANAGEMENT") {
     if (input.action === "CREATE") {
-      return `Create client profile ${input.fullName} with display code ${input.displayCode}, starting ${input.startDate}.`;
+      const attendance = Array.isArray(input.attendancePatterns)
+        ? input.attendancePatterns
+            .map((pattern: Record<string, any>) => {
+              const days = Array.isArray(pattern.days)
+                ? pattern.days.join("/")
+                : "days";
+              return (
+                days +
+                " " +
+                String(pattern.startTime || "?") +
+                "-" +
+                String(pattern.endTime || "?")
+              );
+            })
+            .join("; ")
+        : "";
+      return (
+        "Create client profile " +
+        input.fullName +
+        " with display code " +
+        input.displayCode +
+        ", starting " +
+        input.startDate +
+        (attendance ? ", attending " + attendance : "") +
+        "."
+      );
     }
-    if (input.action === "ARCHIVE") return `Archive client profile ${input.client}.`;
-    return `Update client profile ${input.client}: ${JSON.stringify(input)}.`;
+    if (input.action === "ARCHIVE") {
+      return "Archive client profile " + input.client + ".";
+    }
+    return "Update client profile " + input.client + ": " + JSON.stringify(input) + ".";
   }
 
   if (plan.intent === "TEAM_MANAGEMENT") {
