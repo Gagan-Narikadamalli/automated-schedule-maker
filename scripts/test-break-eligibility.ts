@@ -15,6 +15,7 @@ const SCHEDULER_RULES: SchedulerRules = {
   minimumClientStaffAssignmentMinutes: 30,
   maximumClientStaffConsecutiveHours: 4,
   preventSameStaffClientRepeatSameDay: true,
+  allowSameStaffClientRepeatForCoverageException: true,
   preferSameTeam: true,
   preferStaffContinuity: true,
   slotLengthMinutes: 30,
