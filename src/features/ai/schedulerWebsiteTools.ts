@@ -691,8 +691,19 @@ export function createSchedulerWebsiteTools(context: SchedulerAiContext) {
       execute: async (input) => {
         const teamId = await optionalTeamId(locationId, input.team);
         if (input.action === "CREATE") {
-          if (!input.fullName || !input.startDate || !input.role || !input.employeeType) {
-            return { ok: false, error: "Creating staff requires fullName, startDate, role, and employeeType." };
+          if (
+            !input.fullName ||
+            !input.startDate ||
+            !input.role ||
+            !input.employeeType ||
+            !Array.isArray(input.shiftPatterns) ||
+            input.shiftPatterns.length === 0
+          ) {
+            return {
+              ok: false,
+              error:
+                "Creating staff requires fullName, startDate, role, employeeType, and at least one working shift pattern.",
+            };
           }
           return invokeJson(createStaff, "POST", {
             locationId,
@@ -746,8 +757,18 @@ export function createSchedulerWebsiteTools(context: SchedulerAiContext) {
             })));
 
         if (input.action === "CREATE") {
-          if (!input.fullName || !input.displayCode || !input.startDate) {
-            return { ok: false, error: "Creating a client requires fullName, displayCode, and startDate." };
+          if (
+            !input.fullName ||
+            !input.displayCode ||
+            !input.startDate ||
+            !Array.isArray(input.attendancePatterns) ||
+            input.attendancePatterns.length === 0
+          ) {
+            return {
+              ok: false,
+              error:
+                "Creating a client requires fullName, displayCode, startDate, and at least one regular attendance pattern.",
+            };
           }
           return invokeJson(createClient, "POST", {
             locationId,
