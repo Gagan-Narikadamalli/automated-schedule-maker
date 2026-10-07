@@ -77,20 +77,23 @@
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 16px;
 }
 
 .card {
   position: relative;
   display: flex;
-  min-height: 230px;
+  min-height: 300px;
   flex-direction: column;
-  padding: 18px;
+  padding: 20px;
+  overflow: hidden;
   border: 1px solid #d6e5ed;
-  border-radius: 20px;
+  border-radius: 18px;
   background: #ffffff;
-  box-shadow: 0 10px 24px rgba(30, 71, 96, 0.07);
+  box-shadow:
+    inset 0 4px 0 color-mix(in srgb, var(--accent, #2b86ad) 82%, white),
+    0 10px 24px rgba(30, 71, 96, 0.07);
   transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
 }
 
@@ -121,15 +124,15 @@
 
 .avatar {
   display: grid;
-  width: 48px;
-  height: 48px;
+  width: 56px;
+  height: 56px;
   flex: 0 0 auto;
   place-items: center;
   border: 2px solid var(--accent, #2b86ad);
-  border-radius: 15px;
+  border-radius: 16px;
   background: color-mix(in srgb, var(--accent, #2b86ad) 14%, white);
   color: #123d5b;
-  font-size: 1.05rem;
+  font-size: 1.15rem;
   font-weight: 900;
   text-transform: uppercase;
 }
@@ -142,7 +145,7 @@
   margin: 0;
   overflow: hidden;
   color: #173d58;
-  font-size: 1.04rem;
+  font-size: 1.1rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -311,4 +314,109 @@
   .grid {
     grid-template-columns: 1fr;
   }
+}
+
+
+.metricHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+  color: #294d63;
+  font-size: 0.8rem;
+}
+
+.metricHeader span {
+  color: #607786;
+  font-weight: 700;
+}
+
+.metricHeader strong {
+  color: #173d58;
+  font-size: 0.82rem;
+}
+
+.availabilityTrack {
+  height: 7px;
+  margin-top: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e7eef4;
+}
+
+.availabilityFill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent, #2b86ad);
+  transition: width 180ms ease;
+}
+
+.weekdayGrid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 5px;
+  margin-top: 12px;
+}
+
+.weekdayCell {
+  display: grid;
+  min-height: 46px;
+  place-items: center;
+  padding: 5px 2px;
+  border: 1px solid #dce7ee;
+  border-radius: 9px;
+  background: #fbfdfe;
+  color: #9aa9b2;
+  text-align: center;
+}
+
+.weekdayCellActive {
+  border-color: color-mix(in srgb, var(--accent, #2b86ad) 45%, #dce7ee);
+  background: color-mix(in srgb, var(--accent, #2b86ad) 9%, white);
+  color: #234f68;
+}
+
+.weekdayLabel {
+  display: block;
+  font-size: 0.66rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.weekdayHours {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.editButton {
+  border: 1px solid #b9d9eb !important;
+  background: #f3f9fd !important;
+  color: #155f8b !important;
+  font-weight: 800 !important;
+}
+
+.editButton:hover {
+  background: #e9f5fb !important;
+}
+
+.dangerButton {
+  border: 1px solid #f1c0c0 !important;
+  background: #fff8f8 !important;
+  color: #a63838 !important;
+  font-weight: 800 !important;
+}
+
+.dangerButton:hover {
+  border-color: #e49999 !important;
+  background: #fff0f0 !important;
+}
+
+.cardSubtle {
+  margin-top: 10px;
+  color: #81919b;
+  font-size: 0.72rem;
+  line-height: 1.4;
 }
