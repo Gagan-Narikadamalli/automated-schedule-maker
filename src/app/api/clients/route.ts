@@ -186,19 +186,6 @@ export async function POST(request: Request) {
       return forbiddenResponse("You do not have access to this location.");
     }
 
-    if (
-      !Array.isArray(body.attendancePatterns) ||
-      body.attendancePatterns.length === 0
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "At least one attendance pattern is required before creating a client.",
-        },
-        { status: 400 }
-      );
-    }
-
     const maxConsecutiveBlocksWithSameStaff = readOptionalPositiveInteger(
       body.maxConsecutiveBlocksWithSameStaff,
       20
@@ -223,9 +210,11 @@ export async function POST(request: Request) {
 
     await connectToDatabase();
 
+    const serviceSetting = body.serviceSetting || "IN_CENTER";
     const duplicate = await Client.findOne({
       locationId,
       displayCode,
+      serviceSetting,
       active: true,
     });
 
@@ -233,7 +222,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           error:
-            "An active client with this calendar display code already exists at the selected location.",
+            "An active client with this calendar display code already exists for the same client type at this location.",
         },
         { status: 409 }
       );
@@ -247,7 +236,7 @@ export async function POST(request: Request) {
       endDate: body.endDate ? new Date(body.endDate) : null,
       teamId: body.teamId || null,
       color: body.color || "#D9F4EE",
-      serviceSetting: body.serviceSetting || "IN_CENTER",
+      serviceSetting,
       supportLevel: body.supportLevel || "ONE_TO_ONE",
       maxConsecutiveBlocksWithSameStaff,
       desiredDifferentStaffPerDay,
