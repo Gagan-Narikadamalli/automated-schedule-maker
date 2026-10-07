@@ -884,8 +884,11 @@ export function repairCoverageMinimally(
     if (leftPriority === rightPriority) return 0;
     return leftPriority ? -1 : 1;
   });
+  const repeatFallbackRequirements: ClientRequirement[] = [];
   const uncoveredRequirements: UncoveredRequirement[] = [];
 
+  // Stage 1: exhaust normal non-repeat coverage options across the day first.
+  // A same-day staff/client repeat is deliberately NOT considered in this pass.
   for (const requirement of sortedRequirements) {
     if (requirementIsAlreadyCovered(requirement, assignments)) {
       continue;
@@ -913,6 +916,76 @@ export function repairCoverageMinimally(
       }
     }
 
+    const repairedBySwap = attemptSingleSwapRepair(
+      requirement,
+      input,
+      assignments,
+      callOutStaffIds
+    );
+
+    if (repairedBySwap) {
+      warnings.push({
+        code: "REPAIRED_BY_SWAP",
+        message: `${requirement.client.displayCode} at ${requirement.startTime} was covered by one minimal non-repeat staff swap.`,
+      });
+      continue;
+    }
+
+    if (allowAutomaticOverrides) {
+      const repairedByProtectedSwap = attemptSingleSwapRepair(
+        requirement,
+        input,
+        assignments,
+        callOutStaffIds,
+        true,
+        false
+      );
+
+      if (repairedByProtectedSwap) {
+        warnings.push({
+          code: "REPAIRED_BY_SWAP",
+          message:
+            requirement.client.displayCode +
+            " at " +
+            requirement.startTime +
+            " was covered by automatically relocating a protected/manual client block without using a same-day pair repeat.",
+        });
+        continue;
+      }
+
+      const repairedByBreakRelease = attemptBreakReleaseRepair(
+        requirement,
+        input,
+        assignments,
+        callOutStaffIds,
+        false
+      );
+
+      if (repairedByBreakRelease) {
+        warnings.push({
+          code: "REPAIRED_BY_SWAP",
+          message:
+            requirement.client.displayCode +
+            " at " +
+            requirement.startTime +
+            " was covered by temporarily releasing a staff break so break placement can be recalculated.",
+        });
+        continue;
+      }
+    }
+
+    repeatFallbackRequirements.push(requirement);
+  }
+
+  // Stage 2: only after the whole normal pass is complete may a prior
+  // staff/client pair be reused. This is a coverage exception, not a preference.
+  for (const requirement of repeatFallbackRequirements) {
+    if (requirementIsAlreadyCovered(requirement, assignments)) {
+      continue;
+    }
+
+    let coveredByRepeatException = false;
+
     if (input.rules.allowSameStaffClientRepeatForCoverageException) {
       const exceptionStaff = findBestStaffMember(
         requirement,
@@ -937,97 +1010,83 @@ export function repairCoverageMinimally(
           warnings.push({
             code: "PAIR_REUSE_EXCEPTION",
             message:
-              `${requirement.client.displayCode} at ${requirement.startTime} used a last-resort same-day staff/client repeat to avoid uncovered coverage.`,
+              `${requirement.client.displayCode} at ${requirement.startTime} reused a staff/client pair only after all normal non-repeat coverage options were exhausted.`,
           });
-          continue;
+          coveredByRepeatException = true;
+        }
+      }
+
+      if (!coveredByRepeatException) {
+        const repairedByRepeatSwap = attemptSingleSwapRepair(
+          requirement,
+          input,
+          assignments,
+          callOutStaffIds,
+          false,
+          true
+        );
+
+        if (repairedByRepeatSwap) {
+          warnings.push({
+            code: "PAIR_REUSE_EXCEPTION",
+            message:
+              `${requirement.client.displayCode} at ${requirement.startTime} used a last-resort swap with a same-day pair reuse after non-repeat options were exhausted.`,
+          });
+          coveredByRepeatException = true;
+        }
+      }
+
+      if (!coveredByRepeatException && allowAutomaticOverrides) {
+        const repairedByProtectedRepeatSwap = attemptSingleSwapRepair(
+          requirement,
+          input,
+          assignments,
+          callOutStaffIds,
+          true,
+          true
+        );
+
+        if (repairedByProtectedRepeatSwap) {
+          warnings.push({
+            code: "PAIR_REUSE_EXCEPTION",
+            message:
+              `${requirement.client.displayCode} at ${requirement.startTime} required a protected-block relocation plus a same-day pair reuse as the final coverage option.`,
+          });
+          coveredByRepeatException = true;
+        }
+      }
+
+      if (!coveredByRepeatException && allowAutomaticOverrides) {
+        const repairedByRepeatBreakRelease = attemptBreakReleaseRepair(
+          requirement,
+          input,
+          assignments,
+          callOutStaffIds,
+          true
+        );
+
+        if (repairedByRepeatBreakRelease) {
+          warnings.push({
+            code: "PAIR_REUSE_EXCEPTION",
+            message:
+              `${requirement.client.displayCode} at ${requirement.startTime} required a same-day pair reuse after a break was temporarily released as the final coverage option.`,
+          });
+          coveredByRepeatException = true;
         }
       }
     }
 
-    const repairedBySwap = attemptSingleSwapRepair(
-      requirement,
-      input,
-      assignments,
-      callOutStaffIds
-    );
-
-    if (repairedBySwap) {
-      warnings.push({
-        code: "REPAIRED_BY_SWAP",
-        message: `${requirement.client.displayCode} at ${requirement.startTime} was covered by one minimal staff swap.`,
-      });
+    if (coveredByRepeatException) {
       continue;
-    }
-
-    if (input.rules.allowSameStaffClientRepeatForCoverageException) {
-      const repairedByRepeatSwap = attemptSingleSwapRepair(
-        requirement,
-        input,
-        assignments,
-        callOutStaffIds,
-        false,
-        true
-      );
-
-      if (repairedByRepeatSwap) {
-        warnings.push({
-          code: "PAIR_REUSE_EXCEPTION",
-          message:
-            `${requirement.client.displayCode} at ${requirement.startTime} was covered by a last-resort swap that reused a staff/client pair later in the day.`,
-        });
-        continue;
-      }
-    }
-
-    if (allowAutomaticOverrides) {
-      const repairedByProtectedSwap = attemptSingleSwapRepair(
-        requirement,
-        input,
-        assignments,
-        callOutStaffIds,
-        true
-      );
-
-      if (repairedByProtectedSwap) {
-        warnings.push({
-          code: "REPAIRED_BY_SWAP",
-          message:
-            requirement.client.displayCode +
-            " at " +
-            requirement.startTime +
-            " was covered by automatically relocating a protected/manual client block.",
-        });
-        continue;
-      }
-
-      const repairedByBreakRelease = attemptBreakReleaseRepair(
-        requirement,
-        input,
-        assignments,
-        callOutStaffIds,
-        input.rules.allowSameStaffClientRepeatForCoverageException
-      );
-
-      if (repairedByBreakRelease) {
-        warnings.push({
-          code: "REPAIRED_BY_SWAP",
-          message:
-            requirement.client.displayCode +
-            " at " +
-            requirement.startTime +
-            " was covered by temporarily releasing a staff break so break placement can be recalculated.",
-        });
-        continue;
-      }
     }
 
     uncoveredRequirements.push({
       clientId: requirement.client.id,
       clientCode: requirement.client.displayCode,
       startTime: requirement.startTime,
-      reason: allowAutomaticOverrides
-        ? "No eligible free staff member, one-step reassignment, protected-client relocation, or movable break can cover this requirement."
-        : "No eligible free staff member or one-step AUTO assignment swap can cover this requirement without changing protected/manual schedule cells.",
+      reason: input.rules.allowSameStaffClientRepeatForCoverageException
+        ? "All normal non-repeat placements and repairs were exhausted, and no valid last-resort same-day pair reuse could cover this requirement."
+        : "All normal non-repeat placements and repairs were exhausted, and same-day pair reuse exceptions are disabled.",
     });
     warnings.push({
       code: "NO_ELIGIBLE_STAFF",
@@ -1123,8 +1182,10 @@ export function generateSchedule(input: SchedulerInput): SchedulerResult {
     assignments.push(...minimumPlan);
   }
 
+  const repeatFallbackRequirements: ClientRequirement[] = [];
   const uncoveredRequirements: UncoveredRequirement[] = [];
 
+  // Stage 1 repair: finish every possible non-repeat placement/swap first.
   for (const requirement of initiallyUncovered) {
     if (requirementIsAlreadyCovered(requirement, assignments)) {
       continue;
@@ -1152,6 +1213,33 @@ export function generateSchedule(input: SchedulerInput): SchedulerResult {
       }
     }
 
+    const repaired = attemptSingleSwapRepair(
+      requirement,
+      input,
+      assignments,
+      callOutStaffIds
+    );
+
+    if (repaired) {
+      warnings.push({
+        code: "REPAIRED_BY_SWAP",
+        message: `${requirement.client.displayCode} at ${requirement.startTime} was covered by a one-step non-repeat staff swap.`,
+      });
+      continue;
+    }
+
+    repeatFallbackRequirements.push(requirement);
+  }
+
+  // Stage 2 fallback: only the requirements still uncovered after the complete
+  // non-repeat pass may consider reusing a staff/client pair from earlier today.
+  for (const requirement of repeatFallbackRequirements) {
+    if (requirementIsAlreadyCovered(requirement, assignments)) {
+      continue;
+    }
+
+    let coveredByRepeatException = false;
+
     if (input.rules.allowSameStaffClientRepeatForCoverageException) {
       const exceptionStaff = findBestStaffMember(
         requirement,
@@ -1176,54 +1264,44 @@ export function generateSchedule(input: SchedulerInput): SchedulerResult {
           warnings.push({
             code: "PAIR_REUSE_EXCEPTION",
             message:
-              `${requirement.client.displayCode} at ${requirement.startTime} reused a staff/client pair later in the day as a last-resort coverage exception.`,
+              `${requirement.client.displayCode} at ${requirement.startTime} reused a staff/client pair only after the entire normal non-repeat scheduling pass was exhausted.`,
           });
-          continue;
+          coveredByRepeatException = true;
+        }
+      }
+
+      if (!coveredByRepeatException) {
+        const repairedByRepeatSwap = attemptSingleSwapRepair(
+          requirement,
+          input,
+          assignments,
+          callOutStaffIds,
+          false,
+          true
+        );
+
+        if (repairedByRepeatSwap) {
+          warnings.push({
+            code: "PAIR_REUSE_EXCEPTION",
+            message:
+              `${requirement.client.displayCode} at ${requirement.startTime} used a same-day pair reuse during last-resort swap repair after all non-repeat options were exhausted.`,
+          });
+          coveredByRepeatException = true;
         }
       }
     }
 
-    const repaired = attemptSingleSwapRepair(
-      requirement,
-      input,
-      assignments,
-      callOutStaffIds
-    );
-
-    if (repaired) {
-      warnings.push({
-        code: "REPAIRED_BY_SWAP",
-        message: `${requirement.client.displayCode} at ${requirement.startTime} was covered by a one-step staff swap.`,
-      });
+    if (coveredByRepeatException) {
       continue;
-    }
-
-    if (input.rules.allowSameStaffClientRepeatForCoverageException) {
-      const repairedByRepeatSwap = attemptSingleSwapRepair(
-        requirement,
-        input,
-        assignments,
-        callOutStaffIds,
-        false,
-        true
-      );
-
-      if (repairedByRepeatSwap) {
-        warnings.push({
-          code: "PAIR_REUSE_EXCEPTION",
-          message:
-            `${requirement.client.displayCode} at ${requirement.startTime} used a last-resort same-day pair reuse during swap repair.`,
-        });
-        continue;
-      }
     }
 
     uncoveredRequirements.push({
       clientId: requirement.client.id,
       clientCode: requirement.client.displayCode,
       startTime: requirement.startTime,
-      reason:
-        "No eligible staff member satisfies availability, call-out, hard relationship, minimum/maximum pairing duration, same-day repeat, client rotation, and hour constraints, including a one-step swap repair.",
+      reason: input.rules.allowSameStaffClientRepeatForCoverageException
+        ? "No normal non-repeat assignment or swap could cover this requirement, and no valid last-resort same-day pair reuse remained."
+        : "No normal non-repeat assignment or swap could cover this requirement, and same-day pair reuse exceptions are disabled.",
     });
 
     warnings.push({
