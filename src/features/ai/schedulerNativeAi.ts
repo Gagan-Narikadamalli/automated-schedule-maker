@@ -11,6 +11,7 @@ import {
   type NativePendingSnapshot,
 } from "./schedulerNativeConversation";
 import { buildNativeHistoricalKnowledge } from "./schedulerNativeKnowledge";
+import { planNativeManagementAction } from "./schedulerNativeManagement";
 import type { SchedulerAiHistoryMessage } from "./types";
 
 export type SchedulerAiProviderMode = "gateway" | "native";
@@ -30,6 +31,16 @@ export type NativeSchedulerIntent =
   | "STAFF_SUMMARY"
   | "CLIENT_SUMMARY"
   | "HISTORICAL"
+  | "CONFIGURATION"
+  | "STAFF_MANAGEMENT"
+  | "CLIENT_MANAGEMENT"
+  | "TEAM_MANAGEMENT"
+  | "EVENT_MANAGEMENT"
+  | "ATTENDANCE"
+  | "RULES"
+  | "SUPERVISION"
+  | "UNPLACED_PLACE"
+  | "CLARIFICATION"
   | "DAY_SUMMARY";
 
 export type NativeSchedulerPlan = {
@@ -207,9 +218,17 @@ export function planNativeSchedulerAction(args: {
   message: string;
   history?: SchedulerAiHistoryMessage[];
   writeToolsEnabled?: boolean;
+  date?: string;
 }): NativeSchedulerPlan {
   const raw = visibleMessage(args.message);
   const times = extractNativeTimeRange(args.message);
+
+  const managementPlan = planNativeManagementAction({
+    message: args.message,
+    date: args.date,
+    times,
+  });
+  if (managementPlan) return managementPlan;
 
   if (/\b(?:list|show|what)\b[\s\S]*\btemplates?\b/i.test(raw)) {
     return {
@@ -493,9 +512,22 @@ function summarizeNativeToolResult(
   }
 
   if (
-    ["GENERATE", "REPAIR", "CALL_OUT", "BREAK_EDIT", "BULK_REPLACE", "TEMPLATE"].includes(
-      plan.intent
-    )
+    [
+      "GENERATE",
+      "REPAIR",
+      "CALL_OUT",
+      "BREAK_EDIT",
+      "BULK_REPLACE",
+      "TEMPLATE",
+      "STAFF_MANAGEMENT",
+      "CLIENT_MANAGEMENT",
+      "TEAM_MANAGEMENT",
+      "EVENT_MANAGEMENT",
+      "ATTENDANCE",
+      "RULES",
+      "SUPERVISION",
+      "UNPLACED_PLACE",
+    ].includes(plan.intent)
   ) {
     if (typeof output.message === "string" && output.message.trim()) {
       return output.message.trim();
@@ -614,6 +646,45 @@ function summarizeNativeToolResult(
           rows.map((row) => `- ${row}`).join("\n")
         }`
       : `I found no matching scheduled blocks for ${date}.`;
+  }
+
+  if (plan.intent === "CONFIGURATION") {
+    const area = String(plan.input.area || "");
+    if (area === "TEAMS") {
+      const teams = Array.isArray(output.teams) ? output.teams : [];
+      return teams.length
+        ? `Active teams (${teams.length}): ${teams
+            .slice(0, 30)
+            .map((value: unknown) => asRecord(value).name)
+            .filter(Boolean)
+            .join(", ")}.`
+        : "No active teams were found.";
+    }
+    if (area === "PEOPLE") {
+      const staff = Array.isArray(output.staff) ? output.staff : [];
+      const clients = Array.isArray(output.clients) ? output.clients : [];
+      const staffNames = staff
+        .slice(0, 25)
+        .map((value: unknown) => asRecord(value).fullName)
+        .filter(Boolean);
+      const clientCodes = clients
+        .slice(0, 30)
+        .map((value: unknown) => asRecord(value).displayCode)
+        .filter(Boolean);
+      return [
+        `Active staff: ${staff.length}${staffNames.length ? ` — ${staffNames.join(", ")}` : ""}`,
+        `Active clients: ${clients.length}${clientCodes.length ? ` — ${clientCodes.join(", ")}` : ""}`,
+      ].join("\n");
+    }
+    if (area === "EVENTS") {
+      const naps = Array.isArray(output.napSessions) ? output.napSessions : [];
+      const speech = Array.isArray(output.speechSessions) ? output.speechSessions : [];
+      return `Selected-day scheduler events: ${naps.length} nap session(s), ${speech.length} speech session(s).`;
+    }
+    const safe = { ...output };
+    delete safe.ok;
+    delete safe.status;
+    return `${area || "Scheduler"} configuration:\n${JSON.stringify(safe, null, 2).slice(0, 5000)}`;
   }
 
   if (plan.intent === "STAFF_SUMMARY") {
@@ -929,7 +1000,12 @@ export async function runNativeSchedulerAi(args: {
     message: args.message,
     history: args.history,
     writeToolsEnabled: args.writeToolsEnabled,
+    date: args.date,
   });
+
+  if (plan.intent === "CLARIFICATION") {
+    return emptyNativeResult(String(plan.input.message || plan.explanation));
+  }
 
   if (plan.intent === "HISTORICAL") {
     const knowledge = await buildNativeHistoricalKnowledge({

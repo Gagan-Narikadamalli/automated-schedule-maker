@@ -80,6 +80,14 @@ export function nativePlanNeedsConfirmation(plan: NativeSchedulerPlan): boolean 
     "CALL_OUT",
     "BREAK_EDIT",
     "BULK_REPLACE",
+    "STAFF_MANAGEMENT",
+    "CLIENT_MANAGEMENT",
+    "TEAM_MANAGEMENT",
+    "EVENT_MANAGEMENT",
+    "ATTENDANCE",
+    "RULES",
+    "SUPERVISION",
+    "UNPLACED_PLACE",
   ].includes(plan.intent);
 }
 
@@ -126,7 +134,61 @@ export function describeNativePendingAction(
   }
 
   if (plan.intent === "TEMPLATE") {
+    if (input.action === "CREATE") {
+      return `Create schedule template ${input.name} from ${input.sourceDate || date}.`;
+    }
+    if (input.action === "ARCHIVE") {
+      return `Archive schedule template ${input.template}.`;
+    }
     return `Apply schedule template ${input.template} to ${date}.`;
+  }
+
+  if (plan.intent === "STAFF_MANAGEMENT") {
+    if (input.action === "CREATE") {
+      return `Create staff profile ${input.fullName} as ${input.role} (${input.employeeType}) starting ${input.startDate}.`;
+    }
+    if (input.action === "ARCHIVE") return `Archive staff profile ${input.staff}.`;
+    return `Update staff profile ${input.staff}: ${JSON.stringify(input)}.`;
+  }
+
+  if (plan.intent === "CLIENT_MANAGEMENT") {
+    if (input.action === "CREATE") {
+      return `Create client profile ${input.fullName} with display code ${input.displayCode}, starting ${input.startDate}.`;
+    }
+    if (input.action === "ARCHIVE") return `Archive client profile ${input.client}.`;
+    return `Update client profile ${input.client}: ${JSON.stringify(input)}.`;
+  }
+
+  if (plan.intent === "TEAM_MANAGEMENT") {
+    if (input.action === "CREATE") return `Create team ${input.name}.`;
+    if (input.action === "ARCHIVE") return `Archive team ${input.team}.`;
+    return `Update team ${input.team}: ${JSON.stringify(input)}.`;
+  }
+
+  if (plan.intent === "EVENT_MANAGEMENT") {
+    return `${input.action === "ADD" ? "Add" : "Remove"} ${String(
+      input.eventType || "scheduler"
+    ).toLowerCase()} event for ${input.client} on ${input.date || date}${
+      input.startTime ? ` from ${input.startTime}` : ""
+    }${input.endTime ? ` to ${input.endTime}` : ""}.`;
+  }
+
+  if (plan.intent === "ATTENDANCE") {
+    return `${input.action === "REMOVE" ? "Remove" : "Record"} client attendance change for ${input.client} on ${date}${
+      input.changeType ? ` (${input.changeType})` : ""
+    }.`;
+  }
+
+  if (plan.intent === "RULES") {
+    return `Update scheduler rules: ${JSON.stringify(input)}.`;
+  }
+
+  if (plan.intent === "SUPERVISION") {
+    return `Save supervision for ${input.staff}: ${input.serviceHours} service hours and ${input.supervisionHours} supervision hours for ${input.month || date.slice(0, 7)}.`;
+  }
+
+  if (plan.intent === "UNPLACED_PLACE") {
+    return `Place unplaced client ${input.client} with ${input.staff} at ${input.startTime} on ${date}.`;
   }
 
   return plan.explanation;
