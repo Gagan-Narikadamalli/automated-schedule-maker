@@ -12,7 +12,15 @@ function plan(message: string, date = "2026-10-08") {
   });
 }
 
-const createStaff = plan("create staff Jane Smith as RBT full time starting 2026-10-15");
+const incompleteStaffNoShift = plan(
+  "create staff Jane Smith as RBT full time starting 2026-10-15"
+);
+assert.equal(incompleteStaffNoShift.intent, "CLARIFICATION");
+assert.equal(nativePlanNeedsConfirmation(incompleteStaffNoShift), false);
+
+const createStaff = plan(
+  "create staff Jane Smith as RBT full time starting 2026-10-15 weekdays from 8 am to 4 pm"
+);
 assert.equal(createStaff.intent, "STAFF_MANAGEMENT");
 assert.equal(createStaff.toolName, "manage_staff");
 assert.deepEqual(createStaff.input, {
@@ -21,6 +29,14 @@ assert.deepEqual(createStaff.input, {
   role: "RBT",
   employeeType: "FULL_TIME",
   startDate: "2026-10-15",
+  shiftPatterns: [
+    {
+      name: "Regular schedule",
+      days: ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"],
+      startTime: "08:00",
+      endTime: "16:00",
+    },
+  ],
 });
 assert.equal(nativePlanNeedsConfirmation(createStaff), true);
 
@@ -38,11 +54,56 @@ assert.equal(role.input.role, "BCBA");
 const hours = plan("set Jane Smith's target weekly hours to 35");
 assert.equal(hours.input.targetWeeklyHours, 35);
 
-const createClient = plan("create client Liam Jones code LiJo starting 2026-10-20");
+const availability = plan(
+  "Jane Smith works Monday to Friday from 8 am to 5 pm"
+);
+assert.equal(availability.intent, "STAFF_MANAGEMENT");
+assert.equal(availability.input.action, "UPDATE");
+assert.equal(availability.input.staff, "Jane Smith");
+assert.deepEqual(availability.input.shiftPatterns, [
+  {
+    name: "Regular schedule",
+    days: ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"],
+    startTime: "08:00",
+    endTime: "17:00",
+  },
+]);
+
+const incompleteClientNoAttendance = plan(
+  "create client Liam Jones code LiJo starting 2026-10-20"
+);
+assert.equal(incompleteClientNoAttendance.intent, "CLARIFICATION");
+
+const createClient = plan(
+  "create client Liam Jones code LiJo starting 2026-10-20 weekdays from 9 am to 3 pm"
+);
 assert.equal(createClient.intent, "CLIENT_MANAGEMENT");
 assert.equal(createClient.input.fullName, "Liam Jones");
 assert.equal(createClient.input.displayCode, "LiJo");
 assert.equal(createClient.input.startDate, "2026-10-20");
+assert.deepEqual(createClient.input.attendancePatterns, [
+  {
+    name: "Regular attendance",
+    days: ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"],
+    startTime: "09:00",
+    endTime: "15:00",
+  },
+]);
+
+const clientAttendance = plan(
+  "CaMe attends Monday to Friday from 9 am to 3 pm"
+);
+assert.equal(clientAttendance.intent, "CLIENT_MANAGEMENT");
+assert.equal(clientAttendance.input.action, "UPDATE");
+assert.equal(clientAttendance.input.client, "CaMe");
+assert.deepEqual(clientAttendance.input.attendancePatterns, [
+  {
+    name: "Regular attendance",
+    days: ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"],
+    startTime: "09:00",
+    endTime: "15:00",
+  },
+]);
 
 const archiveClient = plan("archive client CaMe");
 assert.equal(archiveClient.input.action, "ARCHIVE");
@@ -130,5 +191,9 @@ assert.equal(attendance.input.area, "ATTENDANCE");
 const supervisionRead = plan("show supervision for 2026-10");
 assert.equal(supervisionRead.input.area, "SUPERVISION");
 assert.equal(supervisionRead.input.month, "2026-10");
+
+const unknown = plan("please do a banana thing with staff");
+assert.equal(unknown.intent, "CLARIFICATION");
+assert.equal(unknown.input.message, "I am unable to understand your request.");
 
 console.log("Native Scheduler AI management tests passed.");
