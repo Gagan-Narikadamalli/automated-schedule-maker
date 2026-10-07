@@ -85,17 +85,19 @@ export async function GET(request: Request) {
   try {
     await connectToDatabase();
 
-    const [dayData, staffDocuments, assignments] = await Promise.all([
-      buildDaySchedulerInput(locationId, date),
-      Staff.find({ locationId, active: true })
-        .select("fullName role color teamId")
-        .sort({ fullName: 1 })
-        .lean(),
-      ScheduleAssignment.find({ locationId, date })
-        .populate("clientId", "displayCode fullName color supportLevel teamId")
-        .sort({ startTime: 1 })
-        .lean(),
-    ]);
+    const [dayData, staffDocuments, assignments, savedDates] =
+      await Promise.all([
+        buildDaySchedulerInput(locationId, date),
+        Staff.find({ locationId, active: true })
+          .select("fullName role color teamId")
+          .sort({ fullName: 1 })
+          .lean(),
+        ScheduleAssignment.find({ locationId, date })
+          .populate("clientId", "displayCode fullName color supportLevel teamId")
+          .sort({ startTime: 1 })
+          .lean(),
+        ScheduleAssignment.distinct("date", { locationId }),
+      ]);
 
     const availableSlotMap = new Map(
       dayData.staff.map((staffMember) => [
@@ -107,9 +109,15 @@ export async function GET(request: Request) {
     const plainStaffDocuments = staffDocuments as unknown as PlainDatabaseRecord[];
     const plainAssignments = assignments as unknown as PlainDatabaseRecord[];
 
+    const recentSavedScheduleDates = (savedDates as string[])
+      .filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value))
+      .sort((left, right) => right.localeCompare(left))
+      .slice(0, 8);
+
     return NextResponse.json({
       date,
       locationId,
+      recentSavedScheduleDates,
       staff: plainStaffDocuments.map((staffMember) => ({
         id: String(staffMember._id),
         name: String(staffMember.fullName ?? ""),
