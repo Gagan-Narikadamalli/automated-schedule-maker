@@ -67,10 +67,6 @@ const suggestionSchema = jsonSchema<SuggestionInput>({
   additionalProperties: false,
 });
 
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 function idFrom(value: unknown): string | null {
   if (!value) return null;
   if (typeof value === "object" && "_id" in (value as Record<string, unknown>)) {
@@ -240,7 +236,6 @@ export function createSchedulerAdvisoryTools(context: SchedulerAiContext) {
           };
         }
 
-        const staffNames = staffNameMap(dayData);
         const sourceAssignments = assignments.filter(
           (assignment) =>
             assignment.assignmentType === "CLIENT_1_TO_1" &&
