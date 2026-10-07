@@ -30,11 +30,15 @@ type RulesForm = {
   preserveManualOverrides: boolean;
   autoUseWeekdayTemplate: boolean;
   autoUsePreviousWeekdaySchedule: boolean;
+  autoUseHistoricalPatterns: boolean;
   preferredStaffPriority: number;
   sameTeamPriority: number;
   continuityPriority: number;
   rotationPriority: number;
   workloadBalancePriority: number;
+  historicalPairingPriority: number;
+  historicalSlotPriority: number;
+  historicalBreakPriority: number;
   clientHandoffPenaltyPriority: number;
   staffScheduleCompactnessPriority: number;
   minimalFixAllowProtectedRelocation: boolean;
@@ -67,6 +71,9 @@ type NumericRuleField =
   | "continuityPriority"
   | "rotationPriority"
   | "workloadBalancePriority"
+  | "historicalPairingPriority"
+  | "historicalSlotPriority"
+  | "historicalBreakPriority"
   | "clientHandoffPenaltyPriority"
   | "staffScheduleCompactnessPriority"
   | "scheduleStabilityPriority"
@@ -112,11 +119,15 @@ const DEFAULT_RULES: RulesForm = {
   preserveManualOverrides: true,
   autoUseWeekdayTemplate: true,
   autoUsePreviousWeekdaySchedule: true,
+  autoUseHistoricalPatterns: true,
   preferredStaffPriority: 100,
   sameTeamPriority: 40,
   continuityPriority: 35,
   rotationPriority: 60,
   workloadBalancePriority: 10,
+  historicalPairingPriority: 70,
+  historicalSlotPriority: 90,
+  historicalBreakPriority: 80,
   clientHandoffPenaltyPriority: 25,
   staffScheduleCompactnessPriority: 8,
   minimalFixAllowProtectedRelocation: true,
@@ -279,7 +290,8 @@ export function SchedulingSettings() {
       | "preventSameStaffClientRepeatSameDay"
       | "allowSameStaffClientRepeatForCoverageException"
       | "autoUseWeekdayTemplate"
-      | "autoUsePreviousWeekdaySchedule",
+      | "autoUsePreviousWeekdaySchedule"
+      | "autoUseHistoricalPatterns",
     value: boolean
   ) {
     setRules((currentRules) => ({
@@ -808,6 +820,23 @@ export function SchedulingSettings() {
               reference pattern.
             </span>
           </label>
+
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={rules.autoUseHistoricalPatterns}
+              onChange={(event) =>
+                updateBooleanField(
+                  "autoUseHistoricalPatterns",
+                  event.target.checked
+                )
+              }
+            />
+            <span>
+              Learn from imported historical schedule patterns when matching
+              staff/client pairings, exact time slots, and break timing.
+            </span>
+          </label>
         </div>
 
         <div className="form-grid">
@@ -848,6 +877,69 @@ export function SchedulingSettings() {
             />
             <small>
               {softPriorityLabel(rules.scheduleStabilityPriority)}
+            </small>
+          </label>
+
+          <label className="form-field">
+            <span>Historical pairing priority</span>
+            <input
+              type="number"
+              min="0"
+              max="200"
+              step="5"
+              value={rules.historicalPairingPriority}
+              onChange={(event) =>
+                updateNumberField(
+                  "historicalPairingPriority",
+                  event.target.value
+                )
+              }
+            />
+            <small>
+              {softPriorityLabel(rules.historicalPairingPriority)}. Rewards
+              staff/client pairings that repeatedly worked in imported history.
+            </small>
+          </label>
+
+          <label className="form-field">
+            <span>Historical exact-slot priority</span>
+            <input
+              type="number"
+              min="0"
+              max="200"
+              step="5"
+              value={rules.historicalSlotPriority}
+              onChange={(event) =>
+                updateNumberField(
+                  "historicalSlotPriority",
+                  event.target.value
+                )
+              }
+            />
+            <small>
+              {softPriorityLabel(rules.historicalSlotPriority)}. Rewards a
+              pairing when it historically appeared at the same time of day.
+            </small>
+          </label>
+
+          <label className="form-field">
+            <span>Historical break priority</span>
+            <input
+              type="number"
+              min="0"
+              max="200"
+              step="5"
+              value={rules.historicalBreakPriority}
+              onChange={(event) =>
+                updateNumberField(
+                  "historicalBreakPriority",
+                  event.target.value
+                )
+              }
+            />
+            <small>
+              {softPriorityLabel(rules.historicalBreakPriority)}. Guides break
+              timing toward repeated safe historical break slots.
             </small>
           </label>
         </div>
