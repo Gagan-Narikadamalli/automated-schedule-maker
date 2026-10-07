@@ -524,6 +524,20 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
       return;
     }
 
+    if (provider === "native" && messages.length === 0) {
+      setWorking(true);
+      setStatus("Free AI is starting a clean conversation...");
+      const cleared = await clearPendingAiState(requestContext.locationId);
+      if (!cleared) {
+        setWorking(false);
+        setStatus(
+          "Free AI did not start because an older confirmation state could not be cleared safely. Try again."
+        );
+        return;
+      }
+      setWorking(false);
+    }
+
     const history = messages.slice(-12).map((entry) => ({
       role: entry.role,
       text: entry.text,
