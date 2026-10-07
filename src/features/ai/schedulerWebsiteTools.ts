@@ -1,4 +1,4 @@
-import { jsonSchema, tool } from "ai";
+import { jsonSchema, tool } from "./schedulerToolDefinition";
 
 import { POST as saveClientAttendance, DELETE as deleteClientAttendance, GET as getClientAttendance } from "@/app/api/client-attendance/route";
 import { POST as repairScheduleDay } from "@/app/api/schedule/repair/route";
