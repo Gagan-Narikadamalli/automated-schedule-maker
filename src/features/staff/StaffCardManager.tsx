@@ -141,13 +141,41 @@ function prettyEnum(value: string): string {
     .join(" ");
 }
 
+function timeToMinutes(value: string): number {
+  const [hours, minutes] = value.split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
+function shiftHours(pattern: ShiftPattern): number {
+  return Math.max(
+    (timeToMinutes(pattern.endTime) - timeToMinutes(pattern.startTime)) / 60,
+    0
+  );
+}
+
+function hoursForDay(staffMember: StaffMember, day: string): number {
+  return (staffMember.shiftPatterns ?? [])
+    .filter((pattern) => pattern.days.includes(day))
+    .reduce((total, pattern) => total + shiftHours(pattern), 0);
+}
+
+function weeklyAvailabilityHours(staffMember: StaffMember): number {
+  return WEEKDAYS.reduce(
+    (total, [day]) => total + hoursForDay(staffMember, day),
+    0
+  );
+}
+
+function formatHours(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
 export function StaffCardManager() {
   const [locations, setLocations] = useState<LocationOption[]>([]);
   const [selectedLocationId, setSelectedLocationId] = useState("");
   const [teams, setTeams] = useState<TeamOption[]>([]);
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [query, setQuery] = useState("");
-  const [showArchived, setShowArchived] = useState(false);
   const [form, setForm] = useState<StaffForm>(emptyForm);
   const [shiftDraft, setShiftDraft] = useState<ShiftPattern>(emptyShift);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -165,10 +193,6 @@ export function StaffCardManager() {
     const normalizedQuery = query.trim().toLowerCase();
 
     return staff.filter((staffMember) => {
-      if (!showArchived && !staffMember.active) {
-        return false;
-      }
-
       if (!normalizedQuery) {
         return true;
       }
@@ -184,7 +208,7 @@ export function StaffCardManager() {
         teamName,
       ].some((value) => value.toLowerCase().includes(normalizedQuery));
     });
-  }, [query, showArchived, staff, teamNameById]);
+  }, [query, staff, teamNameById]);
 
   useEffect(() => {
     void loadLocations();
@@ -222,7 +246,7 @@ export function StaffCardManager() {
 
       const [staffResponse, teamsResponse] = await Promise.all([
         fetch(
-          `/api/staff?locationId=${encodeURIComponent(locationId)}&includeArchived=true`,
+          `/api/staff?locationId=${encodeURIComponent(locationId)}`,
           { cache: "no-store" }
         ),
         fetch(`/api/teams?locationId=${encodeURIComponent(locationId)}`, {
@@ -388,28 +412,32 @@ export function StaffCardManager() {
     }
   }
 
-  async function toggleActive(staffMember: StaffMember) {
+  async function deleteStaff(staffMember: StaffMember) {
+    const confirmed = window.confirm(
+      `Permanently delete ${staffMember.fullName}? This removes the staff profile and its linked live schedule, call-out, template, and supervision references. Imported historical-learning text is preserved.`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
     try {
       setSaving(true);
       const response = await fetch(`/api/staff/${staffMember.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ active: !staffMember.active }),
+        method: "DELETE",
       });
       const data = (await response.json()) as StaffResponse;
 
       if (!response.ok) {
-        throw new Error(data.error || "Staff status could not be changed.");
+        throw new Error(data.error || "Staff member could not be deleted.");
       }
 
       await loadLocationData(selectedLocationId);
-      setMessage(
-        staffMember.active
-          ? `${staffMember.fullName} was archived.`
-          : `${staffMember.fullName} was restored.`
-      );
+      setMessage(`${staffMember.fullName} was permanently deleted.`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Staff status could not be changed.");
+      setMessage(
+        error instanceof Error ? error.message : "Staff member could not be deleted."
+      );
     } finally {
       setSaving(false);
     }
@@ -444,14 +472,6 @@ export function StaffCardManager() {
               />
             </label>
 
-            <label className="checkbox-card">
-              <input
-                type="checkbox"
-                checked={showArchived}
-                onChange={(event) => setShowArchived(event.target.checked)}
-              />
-              <span>Show archived</span>
-            </label>
           </div>
 
           <div className={cardStyles.toolbarRight}>
@@ -508,9 +528,7 @@ export function StaffCardManager() {
               return (
                 <article
                   key={staffMember.id}
-                  className={`${cardStyles.card} ${
-                    staffMember.active ? "" : cardStyles.cardArchived
-                  }`}
+                  className={cardStyles.card}
                   style={{ "--accent": staffMember.color } as React.CSSProperties}
                 >
                   <div className={cardStyles.cardTop}>
@@ -523,12 +541,8 @@ export function StaffCardManager() {
                         </p>
                       </div>
                     </div>
-                    <span
-                      className={`${cardStyles.pill} ${
-                        staffMember.active ? "" : cardStyles.pillMuted
-                      }`}
-                    >
-                      {staffMember.active ? prettyEnum(staffMember.role) : "Archived"}
+                    <span className={cardStyles.pill}>
+                      {prettyEnum(staffMember.role)}
                     </span>
                   </div>
 
@@ -549,6 +563,45 @@ export function StaffCardManager() {
                     </div>
                   </div>
 
+                  <div className={cardStyles.metricHeader}>
+                    <span>Weekly availability</span>
+                    <strong>
+                      {formatHours(weeklyAvailabilityHours(staffMember))} / {staffMember.targetWeeklyHours} h
+                      {staffMember.minimumWeeklyHours > 0 ? ` · min ${staffMember.minimumWeeklyHours}` : ""}
+                    </strong>
+                  </div>
+                  <div className={cardStyles.availabilityTrack}>
+                    <div
+                      className={cardStyles.availabilityFill}
+                      style={{
+                        width: `${Math.min(
+                          (weeklyAvailabilityHours(staffMember) /
+                            Math.max(staffMember.targetWeeklyHours, 1)) *
+                            100,
+                          100
+                        )}%`,
+                      }}
+                    />
+                  </div>
+                  <div className={cardStyles.weekdayGrid}>
+                    {WEEKDAYS.map(([day, label]) => {
+                      const hours = hoursForDay(staffMember, day);
+                      return (
+                        <div
+                          key={day}
+                          className={`${cardStyles.weekdayCell} ${
+                            hours > 0 ? cardStyles.weekdayCellActive : ""
+                          }`}
+                        >
+                          <span className={cardStyles.weekdayLabel}>{label}</span>
+                          <span className={cardStyles.weekdayHours}>
+                            {hours > 0 ? `${formatHours(hours)}h` : "—"}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+
                   <div className={cardStyles.chips}>
                     {(staffMember.shiftPatterns ?? []).length === 0 && staffMember.active ? (
                       <span className={cardStyles.chip}>
@@ -565,7 +618,7 @@ export function StaffCardManager() {
                   <div className={cardStyles.cardActions}>
                     <button
                       type="button"
-                      className="button button-secondary button-small"
+                      className={`button button-small ${cardStyles.editButton}`}
                       disabled={saving}
                       onClick={() => openEditStaff(staffMember)}
                     >
@@ -573,11 +626,11 @@ export function StaffCardManager() {
                     </button>
                     <button
                       type="button"
-                      className="button button-secondary button-small"
+                      className={`button button-small ${cardStyles.dangerButton}`}
                       disabled={saving}
-                      onClick={() => void toggleActive(staffMember)}
+                      onClick={() => void deleteStaff(staffMember)}
                     >
-                      {staffMember.active ? "Archive" : "Restore"}
+                      Delete
                     </button>
                   </div>
                 </article>
