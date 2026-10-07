@@ -17,7 +17,7 @@ import { ensureSchedulerConversationClosing } from "@/features/ai/schedulerConve
 import { createSchedulerReadOnlyTools } from "@/features/ai/schedulerTools";
 import {
   createSchedulerWebsiteTools,
-  SCHEDULER_WEBSITE_WRITE_TOOL_NAMES,
+  isSchedulerWebsiteWriteInvocation,
 } from "@/features/ai/schedulerWebsiteTools";
 import {
   createSchedulerWriteTools,
@@ -539,12 +539,23 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
         )
       ),
     ];
-    const writeToolsUsed = toolsUsed.filter(
-      (toolName) =>
-        SCHEDULER_WRITE_TOOL_NAMES.has(toolName) ||
-        SCHEDULER_WEBSITE_WRITE_TOOL_NAMES.has(toolName) ||
-        SCHEDULER_BULK_WRITE_TOOL_NAMES.has(toolName)
-    );
+    const writeToolsUsed = [
+      ...new Set(
+        resultSteps.flatMap((step) =>
+          step.toolCalls
+            .filter(
+              (toolCall) =>
+                SCHEDULER_WRITE_TOOL_NAMES.has(toolCall.toolName) ||
+                isSchedulerWebsiteWriteInvocation(
+                  toolCall.toolName,
+                  toolCall.input
+                ) ||
+                SCHEDULER_BULK_WRITE_TOOL_NAMES.has(toolCall.toolName)
+            )
+            .map((toolCall) => toolCall.toolName)
+        )
+      ),
+    ];
     const mode = autonomousWrites ? "AUTONOMOUS" : "READ_ONLY";
     const toolEvidence = [
       ...(dateContext
