@@ -152,6 +152,19 @@ export async function POST(request: Request) {
       return forbiddenResponse("You do not have access to this location.");
     }
 
+    if (
+      !Array.isArray(body.attendancePatterns) ||
+      body.attendancePatterns.length === 0
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "At least one attendance pattern is required before creating a client.",
+        },
+        { status: 400 }
+      );
+    }
+
     const maxConsecutiveBlocksWithSameStaff = readOptionalPositiveInteger(
       body.maxConsecutiveBlocksWithSameStaff,
       20
