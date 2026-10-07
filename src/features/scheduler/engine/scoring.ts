@@ -98,6 +98,32 @@ function countClientAssignments(
   ).length;
 }
 
+function staffHasWorkingAssignmentAt(
+  staffId: string,
+  startTime: string,
+  assignments: SchedulerAssignment[]
+): boolean {
+  return assignments.some(
+    (assignment) =>
+      assignment.staffId === staffId &&
+      assignment.startTime === startTime &&
+      assignment.assignmentType !== "UNAVAILABLE"
+  );
+}
+
+function staffHasEarlierWorkingAssignment(
+  staffId: string,
+  startTime: string,
+  assignments: SchedulerAssignment[]
+): boolean {
+  return assignments.some(
+    (assignment) =>
+      assignment.staffId === staffId &&
+      assignment.startTime < startTime &&
+      assignment.assignmentType !== "UNAVAILABLE"
+  );
+}
+
 function countStaffClientSlots(
   staffId: string,
   assignments: SchedulerAssignment[]
@@ -416,6 +442,39 @@ export function scoreCandidate({
     score +=
       Math.min(adjacentStaffAssignments, 2) *
       (rules.staffScheduleCompactnessPriority / 2);
+  }
+
+  // Coverage comes first, but when several eligible staff can cover the same
+  // client block, prefer the person who is already working in the immediately
+  // previous slot. This keeps real clinic schedules compact instead of
+  // scattering one-off assignments across every available staff column.
+  //
+  // Once a staff member has an avoidable idle gap, discourage restarting them
+  // later unless the other eligibility/coverage rules require it. Extra staff
+  // capacity therefore stays at the edge of a person's work block rather than
+  // appearing as random holes in the middle of the day.
+  const previousStaffSlotIsOccupied =
+    previousStartTime !== null &&
+    staffHasWorkingAssignmentAt(
+      staffMember.id,
+      previousStartTime,
+      assignments
+    );
+  const compactnessWeight = Math.max(
+    rules.staffScheduleCompactnessPriority,
+    1
+  );
+
+  if (previousStaffSlotIsOccupied) {
+    score += compactnessWeight * 40;
+  } else if (
+    staffHasEarlierWorkingAssignment(
+      staffMember.id,
+      startTime,
+      assignments
+    )
+  ) {
+    score -= compactnessWeight * 20;
   }
 
   score += getWeeklyHoursScore(
