@@ -32,6 +32,8 @@ type StaffRelationshipRequest = {
 };
 
 type ClientUpdateRequest = {
+  firstName?: string;
+  lastName?: string;
   fullName?: string;
   displayCode?: string;
   startDate?: string;
@@ -119,18 +121,32 @@ export async function PATCH(request: Request, context: RouteContext) {
 
     const before = client.toObject();
 
-    if (body.fullName !== undefined) {
-      const fullName = body.fullName.trim();
-      const nameParts = fullName.split(/\s+/).filter(Boolean);
+    if (
+      body.firstName !== undefined ||
+      body.lastName !== undefined ||
+      body.fullName !== undefined
+    ) {
+      const firstName = body.firstName?.trim() ?? "";
+      const lastName = body.lastName?.trim() ?? "";
+      const fullName =
+        firstName && lastName
+          ? `${firstName} ${lastName}`
+          : body.fullName?.trim() ?? "";
 
-      if (nameParts.length < 2) {
+      if (
+        (body.firstName !== undefined || body.lastName !== undefined) &&
+        (!firstName || !lastName)
+      ) {
         return NextResponse.json(
           { error: "Enter both the client's first name and last name." },
           { status: 400 }
         );
       }
 
-      const displayCode = displayCodeFromFullName(fullName);
+      const displayCode =
+        firstName && lastName
+          ? `${calendarCodePart(firstName)}${calendarCodePart(lastName)}`
+          : displayCodeFromFullName(fullName);
 
       if (displayCode.length < 4) {
         return NextResponse.json(
