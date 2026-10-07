@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import cardStyles from "@/components/ManagementCards.module.css";
+import { useActionConfirmDialog } from "@/components/ActionConfirmDialog";
 import { ManagementModal } from "@/components/ManagementModal";
 import {
   createWeeklySchedule,
@@ -232,6 +233,7 @@ export function ClientCardManager() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("Loading clients...");
+  const { requestActionDialog, actionDialog } = useActionConfirmDialog();
 
   const teamNameById = useMemo(
     () => new Map(teams.map((team) => [team.id, team.name])),
@@ -661,11 +663,21 @@ export function ClientCardManager() {
   }
 
   async function deleteClient(client: ClientRecord) {
-    const confirmed = window.confirm(
-      `Permanently delete ${client.displayCode} (${client.fullName})? This removes the client profile and its linked live schedule, nap, speech, attendance, unplaced, and template references. Imported historical-learning text is preserved.`
-    );
+    const choice = await requestActionDialog({
+      eyebrow: "DELETE CLIENT",
+      title: `Permanently delete ${client.displayCode}?`,
+      description:
+        `This removes ${client.fullName}'s client profile and its linked live schedule, nap, speech, attendance, unplaced, and template references. Imported historical-learning text is preserved.`,
+      actions: [
+        {
+          id: "delete",
+          label: "Delete client",
+          tone: "danger",
+        },
+      ],
+    });
 
-    if (!confirmed) {
+    if (choice !== "delete") {
       return;
     }
 
@@ -693,6 +705,7 @@ export function ClientCardManager() {
 
   return (
     <div className="management-layout">
+      {actionDialog}
       <section className="section-card">
         <div className={cardStyles.toolbar}>
           <div className={cardStyles.toolbarLeft}>
