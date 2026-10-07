@@ -42,6 +42,10 @@ type Conflict = {
 
 type PlainDatabaseRecord = Record<string, any>;
 
+function firstNameOnly(value: unknown): string {
+  return String(value ?? "").trim().split(/\s+/)[0] ?? "";
+}
+
 function serializeAssignment(assignment: PlainDatabaseRecord) {
   const client =
     assignment.clientId && typeof assignment.clientId === "object"
@@ -132,7 +136,7 @@ export async function GET(request: Request) {
         )
         .map((staffMember) => ({
           id: String(staffMember._id),
-          name: String(staffMember.fullName ?? ""),
+          name: firstNameOnly(staffMember.fullName),
           role: String(staffMember.role ?? ""),
           color: String(staffMember.color ?? "#DCE9F8"),
           teamId: staffMember.teamId ? String(staffMember.teamId) : null,
