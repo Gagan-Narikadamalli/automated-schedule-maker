@@ -361,6 +361,20 @@ export function planNativeSchedulerAction(args: {
     };
   }
 
+  if (
+    /\b(?:today|tomorrow|yesterday|this\s+day|selected\s+day)(?:'s)?\s+schedule\b/i.test(
+      raw
+    )
+  ) {
+    return {
+      intent: "DAY_SUMMARY",
+      toolName: "get_day_schedule",
+      input: {},
+      confidence: 0.98,
+      explanation: "Read the selected/resolved day's saved schedule.",
+    };
+  }
+
   if (/\b(?:who\s+is\s+free|who(?:'s|\s+is)\s+available|free\s+staff|available\s+staff)\b/i.test(raw)) {
     return {
       intent: "FREE_STAFF",
