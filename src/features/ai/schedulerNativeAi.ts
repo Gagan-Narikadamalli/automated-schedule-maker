@@ -12,6 +12,7 @@ import {
 } from "./schedulerNativeConversation";
 import { buildNativeHistoricalKnowledge } from "./schedulerNativeKnowledge";
 import { expandNativeFollowUp } from "./schedulerNativeFollowUp";
+import { weekdayOnOrBefore } from "./schedulerDateResolution";
 import { normalizeNativeCommandTypos } from "./schedulerNativeText";
 import { planNativeManagementAction } from "./schedulerNativeManagement";
 import type { SchedulerAiHistoryMessage } from "./types";
@@ -284,8 +285,34 @@ function extractCopySourceDate(message: string, targetDate?: string): string | n
   )?.[1];
   if (explicit) return explicit;
 
-  if (targetDate && /\b(?:copy|use)\s+yesterday(?:'s)?\s+schedule\b/i.test(raw)) {
+  if (
+    targetDate &&
+    /\b(?:copy|use)\s+(?:yesterday(?:'s)?|the\s+previous\s+day(?:'s)?)\s+schedule\b/i.test(
+      raw
+    )
+  ) {
     return shiftIsoDate(targetDate, -1);
+  }
+
+  if (targetDate) {
+    const weekdays: Array<[RegExp, number]> = [
+      [/\b(?:from\s+)?sunday(?:'s)?\b/i, 0],
+      [/\b(?:from\s+)?monday(?:'s)?\b/i, 1],
+      [/\b(?:from\s+)?tuesday(?:'s)?\b/i, 2],
+      [/\b(?:from\s+)?wednesday(?:'s)?\b/i, 3],
+      [/\b(?:from\s+)?thursday(?:'s)?\b/i, 4],
+      [/\b(?:from\s+)?friday(?:'s)?\b/i, 5],
+      [/\b(?:from\s+)?saturday(?:'s)?\b/i, 6],
+    ];
+
+    for (const [pattern, weekday] of weekdays) {
+      if (
+        pattern.test(raw) &&
+        /\b(?:copy|use)\b[\s\S]*\bschedule\b/i.test(raw)
+      ) {
+        return weekdayOnOrBefore(targetDate, weekday);
+      }
+    }
   }
 
   return null;
@@ -1243,7 +1270,11 @@ export async function runNativeSchedulerAi(args: {
   }
 
   if (pending) {
-    const revised = reviseNativePendingAction(pending, args.message);
+    const revised = reviseNativePendingAction(
+      pending,
+      args.message,
+      args.date
+    );
     if (revised) {
       const revisedPlan = pendingToPlan(revised);
       const preview = describeNativePendingAction(revisedPlan, args.date);
