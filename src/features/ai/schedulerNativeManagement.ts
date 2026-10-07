@@ -141,10 +141,13 @@ function eventClient(message: string, kind: "nap" | "speech"): string | null {
 }
 
 function weekdays(message: string): string[] {
-  if (/\bevery\s+weekday\b/i.test(message)) {
+  if (
+    /\b(?:every\s+)?weekdays?\b/i.test(message) ||
+    /\bmonday\s*(?:-|to|through|thru)\s*friday\b/i.test(message)
+  ) {
     return ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"];
   }
-  if (/\bevery\s+day\b/i.test(message)) {
+  if (/\b(?:every\s+)?day\b/i.test(message)) {
     return [
       "MONDAY",
       "TUESDAY",
@@ -155,7 +158,7 @@ function weekdays(message: string): string[] {
       "SUNDAY",
     ];
   }
-  if (/\bevery\s+weekend\b/i.test(message)) {
+  if (/\b(?:every\s+)?weekends?\b/i.test(message)) {
     return ["SATURDAY", "SUNDAY"];
   }
 
@@ -171,6 +174,36 @@ function weekdays(message: string): string[] {
   return values
     .filter(([pattern]) => pattern.test(message))
     .map(([, day]) => day);
+}
+
+function regularTimePattern(
+  message: string,
+  times: TimeRange,
+  name: string
+): Array<{
+  name: string;
+  days: string[];
+  startTime: string;
+  endTime: string;
+}> {
+  const days = weekdays(message);
+  if (!days.length || !times.startTime || !times.endTime) return [];
+  return [
+    {
+      name,
+      days,
+      startTime: times.startTime,
+      endTime: times.endTime,
+    },
+  ];
+}
+
+function staffShiftPatterns(message: string, times: TimeRange) {
+  return regularTimePattern(message, times, "Regular schedule");
+}
+
+function clientAttendancePatterns(message: string, times: TimeRange) {
+  return regularTimePattern(message, times, "Regular attendance");
 }
 
 export function planNativeManagementAction(args: {
@@ -201,23 +234,45 @@ export function planNativeManagementAction(args: {
   }
 
   if (/\b(?:create|add)\s+(?:a\s+)?(?:new\s+)?staff(?:\s+member)?\b/i.test(raw)) {
-    const nameMatch = raw.match(/\b(?:create|add)\s+(?:a\s+)?(?:new\s+)?staff(?:\s+member)?\s+(.+?)(?=\s+(?:as\s+)?(?:rbt|bt|intern|bcba|office\s+manager|other)\b|\s+(?:full[- ]?time|part[- ]?time)\b|\s+(?:starting|start\s+date|from)\b|[,.!?]|$)/i);
+    const nameMatch = raw.match(
+      /\b(?:create|add)\s+(?:a\s+)?(?:new\s+)?staff(?:\s+member)?(?:\s+named)?\s+(.+?)(?=\s+(?:as\s+)?(?:rbt|bt|intern|bcba|office\s+manager|other)\b|\s+(?:full[- ]?time|part[- ]?time)\b|\s+(?:starting|start\s+date|from)\b|[,.!?]|$)/i
+    );
     const fullName = nameMatch?.[1] ? clean(nameMatch[1]) : "";
     const role = roleFrom(raw);
     const employeeType = employeeTypeFrom(raw);
     const startDate = creationDate(raw, args.date);
-    if (!fullName || !role || !employeeType || !startDate) {
-      return clarification("Creating a staff member requires the full name, role (BT/RBT/INTERN/BCBA/OFFICE_MANAGER/OTHER), full-time or part-time status, and start date.");
+    const shiftPatterns = staffShiftPatterns(raw, args.times);
+
+    if (
+      !fullName ||
+      !role ||
+      !employeeType ||
+      !startDate ||
+      shiftPatterns.length === 0
+    ) {
+      return clarification(
+        "Creating a staff member requires the full name, role (BT/RBT/INTERN/BCBA/OFFICE_MANAGER/OTHER), full-time or part-time status, start date, and regular working days/hours (for example Monday-Friday from 8 AM to 4 PM)."
+      );
     }
+
     return {
-      intent: "STAFF_MANAGEMENT", toolName: "manage_staff",
+      intent: "STAFF_MANAGEMENT",
+      toolName: "manage_staff",
       input: {
-        action: "CREATE", fullName, role, employeeType, startDate,
+        action: "CREATE",
+        fullName,
+        role,
+        employeeType,
+        startDate,
+        shiftPatterns,
         ...(teamReference(raw) ? { team: teamReference(raw) } : {}),
         ...(hexColor(raw) ? { color: hexColor(raw) } : {}),
-        ...(serviceSettingFrom(raw) ? { serviceSetting: serviceSettingFrom(raw) } : {}),
+        ...(serviceSettingFrom(raw)
+          ? { serviceSetting: serviceSettingFrom(raw) }
+          : {}),
       },
-      confidence: 0.97, explanation: "Create a scheduler staff profile.",
+      confidence: 0.97,
+      explanation: "Create a scheduler staff profile with working availability.",
     };
   }
 
@@ -248,9 +303,35 @@ export function planNativeManagementAction(args: {
     confidence: 0.97, explanation: "Update staff target weekly hours.",
   };
 
+  const staffAvailability =
+    raw.match(
+      /\b(?:set|change|update)\s+(?:staff\s+)?(.+?)(?:'s)?\s+(?:availability|working\s+hours?|work\s+hours?|shift)\b/i
+    ) ||
+    raw.match(/^\s*(.+?)\s+works\b/i);
+
+  if (staffAvailability?.[1]) {
+    const shiftPatterns = staffShiftPatterns(raw, args.times);
+    if (shiftPatterns.length === 0) {
+      return clarification(
+        "Updating staff availability requires the working days and a start/end time, for example Monday-Friday from 8 AM to 4 PM."
+      );
+    }
+    return {
+      intent: "STAFF_MANAGEMENT",
+      toolName: "manage_staff",
+      input: {
+        action: "UPDATE",
+        staff: clean(staffAvailability[1]),
+        shiftPatterns,
+      },
+      confidence: 0.98,
+      explanation: "Update staff working availability.",
+    };
+  }
+
   if (/\b(?:create|add)\s+(?:a\s+)?(?:new\s+)?client\b/i.test(raw)) {
     const nameMatch = raw.match(
-      /\b(?:create|add)\s+(?:a\s+)?(?:new\s+)?client(?:\s+named)?\s+(.+?)(?=\s+(?:with\s+)?(?:code|display\s+code)\b|\s+(?:starting|start\s+date|from)\b|\s+(?:today|tomorrow|yesterday|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b|[,.!?]|$)/i
+      /\b(?:create|add)\s+(?:a\s+)?(?:new\s+)?client(?:\s+named)?\s+(.+?)(?=\s+(?:with\s+)?(?:code|display\s+code)\b|\s+(?:starting|start\s+date|from)\b|\s+(?:today|tomorrow|yesterday|monday|tuesday|wednesday|thursday|friday|saturday|sunday|weekdays?|weekends?)\b|[,.!?]|$)/i
     );
     const fullName = nameMatch?.[1] ? clean(nameMatch[1]) : "";
     const explicitCode = raw.match(
@@ -262,21 +343,39 @@ export function planNativeManagementAction(args: {
         ? suggestClientDisplayCode(fullName)
         : "";
     const startDate = creationDate(raw, args.date);
-    if (!fullName || !displayCode || !startDate) {
+    const attendancePatterns = clientAttendancePatterns(raw, args.times);
+
+    if (
+      !fullName ||
+      !displayCode ||
+      !startDate ||
+      attendancePatterns.length === 0
+    ) {
       return clarification(
-        "Creating a client requires the full name, display code (the short label shown in schedule blocks, for example CaCr), and start date. You can also say \"choose the display code\" and I will derive one from the client's name."
+        "Creating a client requires the full name, display code, start date, and regular attendance days/hours (for example Monday-Friday from 9 AM to 3 PM). You can also say \"choose the display code\" and I will derive one from the client's name."
       );
     }
+
     return {
-      intent: "CLIENT_MANAGEMENT", toolName: "manage_client",
+      intent: "CLIENT_MANAGEMENT",
+      toolName: "manage_client",
       input: {
-        action: "CREATE", fullName, displayCode, startDate,
+        action: "CREATE",
+        fullName,
+        displayCode,
+        startDate,
+        attendancePatterns,
         ...(teamReference(raw) ? { team: teamReference(raw) } : {}),
-        ...(supportLevelFrom(raw) ? { supportLevel: supportLevelFrom(raw) } : {}),
-        ...(serviceSettingFrom(raw) ? { serviceSetting: serviceSettingFrom(raw) } : {}),
+        ...(supportLevelFrom(raw)
+          ? { supportLevel: supportLevelFrom(raw) }
+          : {}),
+        ...(serviceSettingFrom(raw)
+          ? { serviceSetting: serviceSettingFrom(raw) }
+          : {}),
         ...(hexColor(raw) ? { color: hexColor(raw) } : {}),
       },
-      confidence: 0.97, explanation: "Create a scheduler client profile.",
+      confidence: 0.97,
+      explanation: "Create a scheduler client profile with regular attendance.",
     };
   }
 
@@ -303,6 +402,32 @@ export function planNativeManagementAction(args: {
     input: { action: "UPDATE", client: clean(clientTeam[1]), team: clean(clientTeam[2]) },
     confidence: 0.97, explanation: "Move a client to a scheduler team.",
   };
+
+  const clientAvailability =
+    raw.match(
+      /\b(?:set|change|update)\s+client\s+(.+?)(?:'s)?\s+(?:attendance|hours?|schedule)\b/i
+    ) ||
+    raw.match(/^\s*(.+?)\s+(?:attends?|is\s+here)\b/i);
+
+  if (clientAvailability?.[1]) {
+    const attendancePatterns = clientAttendancePatterns(raw, args.times);
+    if (attendancePatterns.length === 0) {
+      return clarification(
+        "Updating client attendance requires the attendance days and a start/end time, for example Monday-Friday from 9 AM to 3 PM."
+      );
+    }
+    return {
+      intent: "CLIENT_MANAGEMENT",
+      toolName: "manage_client",
+      input: {
+        action: "UPDATE",
+        client: clean(clientAvailability[1]),
+        attendancePatterns,
+      },
+      confidence: 0.98,
+      explanation: "Update client regular attendance.",
+    };
+  }
 
   const createTeam = raw.match(/\b(?:create|add)\s+(?:a\s+)?(?:new\s+)?team\s+(.+?)(?=\s+color\s+#[0-9a-f]{6}\b|[?.!,]|$)/i);
   if (createTeam?.[1]) return {
