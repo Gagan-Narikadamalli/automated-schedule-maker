@@ -63,6 +63,16 @@ const SAVED_PROMPT_GROUPS: SavedPromptGroup[] = [
     ],
   },
   {
+    title: "Analyze & what-if",
+    prompts: [
+      "Audit [day/date] for coverage gaps, excessive client handoffs, fragmented staff schedules, break problems, repeated pair exceptions, and rule conflicts. Suggest the smallest improvements without changing anything.",
+      "If [staff name] becomes unavailable from [start time] to [end time] on [day/date], who would be the best replacements and why? Do not make changes.",
+      "Which staff/client pairings on [day/date] are closest to the maximum continuous-time rule, and where should rotation happen next?",
+      "Find avoidable idle gaps for staff on [day/date] and suggest schedule moves that keep every client covered.",
+      "Explain why [client code] is assigned to [staff name] at [time] on [day/date] using availability, relationships, rotation, team, workload, and scheduler rules.",
+    ],
+  },
+  {
     title: "Generate, copy & minimal fix",
     prompts: [
       "Minimal Fix [day/date]. Resolve Unplaced first, cover every client, fix required breaks, and make only the minimum necessary changes.",
@@ -128,6 +138,9 @@ const SAVED_PROMPT_GROUPS: SavedPromptGroup[] = [
       "Show me the current scheduling rules and explain which settings affect coverage, breaks, continuity, and rotation.",
       "Change the break window to [start time]-[end time] and break eligibility to [hours] hours, then tell me what the change means.",
       "Change the scheduler's rotation or continuity priority to [value] and explain how that will affect future automatic schedules.",
+      "Set the handoff reduction priority to [value] and compact staff schedule priority to [value], then explain the tradeoff.",
+      "Keep Minimal Fix allowed to move breaks but do not let it move protected manual assignments.",
+      "Show me which scheduling rules are hard constraints, which are soft preferences, and which can be used only as last-resort exceptions.",
     ],
   },
   {
@@ -536,7 +549,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
 
           <div className={styles.promptHint}>
             <span>
-              Ask naturally — schedule checks, generation, Minimal Fix, moves/replacements, Unplaced work, staff/client profiles, call-outs, attendance, naps/speech, teams, templates, rules, supervision, or planning. Use Saved prompts for realistic examples.
+              Ask naturally — capitalization does not matter. Schedule checks, analysis, what-if questions, generation, Minimal Fix, moves/replacements, Unplaced work, staff/client profiles, call-outs, attendance, naps/speech, teams, templates, rules, supervision, or planning are all supported. Use Saved prompts for realistic examples.
             </span>
             <button
               type="button"

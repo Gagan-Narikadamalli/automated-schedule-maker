@@ -6,6 +6,7 @@ import { connectToDatabase } from "@/lib/db";
 import { ScheduleAssignment } from "@/models/ScheduleAssignment";
 import { UnplacedAssignment } from "@/models/UnplacedAssignment";
 
+import { matchEntityReference } from "./entityReference";
 import type { SchedulerAiContext } from "./types";
 
 type DatabaseRecord = Record<string, any>;
@@ -90,10 +91,6 @@ function idFrom(value: unknown): string | null {
     return id ? String(id) : null;
   }
   return String(value);
-}
-
-function normalize(value: string): string {
-  return value.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
 function overlapsRange(
@@ -208,16 +205,25 @@ export function createSchedulerReadOnlyTools(context: SchedulerAiContext) {
         let resolvedStaffName: string | null = null;
         let staffMatches: Array<{ id: string; name: string }> = [];
         if (input.staffName?.trim()) {
-          const target = normalize(input.staffName);
-          staffMatches = dayData.staff
-            .filter((member) => {
-              const candidate = normalize(member.name);
-              return candidate === target || candidate.includes(target) || target.includes(candidate);
-            })
-            .map((member) => ({ id: member.id, name: member.name }));
-          if (staffMatches.length === 1) {
-            resolvedStaffId = staffMatches[0].id;
-            resolvedStaffName = staffMatches[0].name;
+          const matched = matchEntityReference(
+            input.staffName,
+            dayData.staff.map((member) => ({
+              record: member,
+              labels: [member.name],
+            }))
+          );
+
+          if (matched.status === "MATCH") {
+            resolvedStaffId = matched.record.id;
+            resolvedStaffName = matched.record.name;
+            staffMatches = [
+              { id: matched.record.id, name: matched.record.name },
+            ];
+          } else if (matched.status === "AMBIGUOUS") {
+            staffMatches = matched.records.map((member) => ({
+              id: member.id,
+              name: member.name,
+            }));
           }
         }
 
@@ -225,16 +231,28 @@ export function createSchedulerReadOnlyTools(context: SchedulerAiContext) {
         let resolvedClientCode: string | null = null;
         let clientMatches: Array<{ id: string; displayCode: string }> = [];
         if (input.clientCode?.trim()) {
-          const target = normalize(input.clientCode);
-          clientMatches = dayData.clients
-            .filter((client) => {
-              const candidate = normalize(client.displayCode);
-              return candidate === target || candidate.includes(target) || target.includes(candidate);
-            })
-            .map((client) => ({ id: client.id, displayCode: client.displayCode }));
-          if (clientMatches.length === 1) {
-            resolvedClientId = clientMatches[0].id;
-            resolvedClientCode = clientMatches[0].displayCode;
+          const matched = matchEntityReference(
+            input.clientCode,
+            dayData.clients.map((client) => ({
+              record: client,
+              labels: [client.displayCode],
+            }))
+          );
+
+          if (matched.status === "MATCH") {
+            resolvedClientId = matched.record.id;
+            resolvedClientCode = matched.record.displayCode;
+            clientMatches = [
+              {
+                id: matched.record.id,
+                displayCode: matched.record.displayCode,
+              },
+            ];
+          } else if (matched.status === "AMBIGUOUS") {
+            clientMatches = matched.records.map((client) => ({
+              id: client.id,
+              displayCode: client.displayCode,
+            }));
           }
         }
 

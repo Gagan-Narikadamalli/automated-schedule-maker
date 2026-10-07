@@ -20,6 +20,36 @@ export type CandidateScoreContext = {
   rules: SchedulerRules;
 };
 
+function shiftSlot(
+  startTime: string,
+  slotLengthMinutes: number,
+  direction: -1 | 1
+): string | null {
+  const [hoursText, minutesText] = startTime.split(":");
+  const hours = Number(hoursText);
+  const minutes = Number(minutesText);
+
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) {
+    return null;
+  }
+
+  const totalMinutes =
+    hours * 60 + minutes + direction * slotLengthMinutes;
+
+  if (totalMinutes < 0 || totalMinutes >= 24 * 60) {
+    return null;
+  }
+
+  const shiftedHours = Math.floor(totalMinutes / 60)
+    .toString()
+    .padStart(2, "0");
+  const shiftedMinutes = (totalMinutes % 60)
+    .toString()
+    .padStart(2, "0");
+
+  return `${shiftedHours}:${shiftedMinutes}`;
+}
+
 function getPreviousSlot(
   startTime: string,
   slotLengthMinutes: number
@@ -46,6 +76,13 @@ function getPreviousSlot(
     .padStart(2, "0");
 
   return `${previousHours}:${previousMinutes}`;
+}
+
+function getNextSlot(
+  startTime: string,
+  slotLengthMinutes: number
+): string | null {
+  return shiftSlot(startTime, slotLengthMinutes, 1);
 }
 
 function countClientAssignments(
@@ -263,6 +300,15 @@ export function scoreCandidate({
     startTime,
     rules.slotLengthMinutes
   );
+  const nextStartTime = getNextSlot(
+    startTime,
+    rules.slotLengthMinutes
+  );
+  const adjacentTimes = new Set(
+    [previousStartTime, nextStartTime].filter(
+      (time): time is string => Boolean(time)
+    )
+  );
   const isRotationClient =
     client.supportLevel === "ROTATION" ||
     client.supportLevel === "HIGH_SUPPORT";
@@ -342,6 +388,34 @@ export function scoreCandidate({
         rules.rotationPriority
       );
     }
+  }
+
+  const adjacentClientAssignments = assignments.filter(
+    (assignment) =>
+      assignment.clientId === client.id &&
+      assignment.assignmentType === "CLIENT_1_TO_1" &&
+      adjacentTimes.has(assignment.startTime)
+  );
+
+  if (
+    adjacentClientAssignments.some(
+      (assignment) => assignment.staffId !== staffMember.id
+    )
+  ) {
+    score -= rules.clientHandoffPenaltyPriority;
+  }
+
+  const adjacentStaffAssignments = assignments.filter(
+    (assignment) =>
+      assignment.staffId === staffMember.id &&
+      adjacentTimes.has(assignment.startTime) &&
+      assignment.assignmentType !== "UNAVAILABLE"
+  ).length;
+
+  if (adjacentStaffAssignments > 0) {
+    score +=
+      Math.min(adjacentStaffAssignments, 2) *
+      (rules.staffScheduleCompactnessPriority / 2);
   }
 
   score += getWeeklyHoursScore(

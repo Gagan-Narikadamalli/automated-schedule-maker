@@ -11,6 +11,7 @@ import { ScheduleAssignment } from "@/models/ScheduleAssignment";
 import { Staff } from "@/models/Staff";
 import { UnplacedAssignment } from "@/models/UnplacedAssignment";
 
+import { matchEntityReference } from "./entityReference";
 import type { SchedulerAiContext } from "./types";
 
 type JsonRecord = Record<string, any>;
@@ -198,29 +199,30 @@ async function resolveStaff(locationId: string, reference: string): Promise<Json
     if (byId) return byId as unknown as JsonRecord;
   }
 
-  const exact = await Staff.find({
-    locationId,
-    active: true,
-    fullName: { $regex: `^${escapeRegex(value)}$`, $options: "i" },
-  })
+  const candidates = (await Staff.find({ locationId, active: true })
     .select("_id fullName role")
-    .limit(2)
-    .lean();
-  if (exact.length === 1) return exact[0] as unknown as JsonRecord;
+    .limit(250)
+    .lean()) as unknown as JsonRecord[];
+  const matched = matchEntityReference(
+    value,
+    candidates.map((record) => ({
+      record,
+      labels: [String(record.fullName ?? "")],
+    }))
+  );
 
-  const partial = await Staff.find({
-    locationId,
-    active: true,
-    fullName: { $regex: escapeRegex(value), $options: "i" },
-  })
-    .select("_id fullName role")
-    .limit(3)
-    .lean();
-  if (partial.length === 1) return partial[0] as unknown as JsonRecord;
-  if (partial.length > 1 || exact.length > 1) {
-    throw new Error(`Staff reference "${value}" is ambiguous. Use the full staff name.`);
+  if (matched.status === "MATCH") return matched.record;
+  if (matched.status === "AMBIGUOUS") {
+    throw new Error(
+      `Staff reference "${value}" is ambiguous. Did you mean ${matched.suggestions.join(", ")}?`
+    );
   }
-  throw new Error(`No active staff member matched "${value}" at this clinic.`);
+
+  throw new Error(
+    matched.suggestions.length > 0
+      ? `No active staff member matched "${value}". Did you mean ${matched.suggestions.join(", ")}?`
+      : `No active staff member matched "${value}" at this clinic.`
+  );
 }
 
 async function resolveClient(locationId: string, reference: string): Promise<JsonRecord> {
@@ -235,42 +237,33 @@ async function resolveClient(locationId: string, reference: string): Promise<Jso
     if (byId) return byId as unknown as JsonRecord;
   }
 
-  const byCode = await Client.find({
-    locationId,
-    active: true,
-    displayCode: { $regex: `^${escapeRegex(value)}$`, $options: "i" },
-  })
+  const candidates = (await Client.find({ locationId, active: true })
     .select("_id displayCode fullName")
-    .limit(2)
-    .lean();
-  if (byCode.length === 1) return byCode[0] as unknown as JsonRecord;
+    .limit(500)
+    .lean()) as unknown as JsonRecord[];
+  const matched = matchEntityReference(
+    value,
+    candidates.map((record) => ({
+      record,
+      labels: [
+        String(record.displayCode ?? ""),
+        String(record.fullName ?? ""),
+      ],
+    }))
+  );
 
-  const byName = await Client.find({
-    locationId,
-    active: true,
-    fullName: { $regex: `^${escapeRegex(value)}$`, $options: "i" },
-  })
-    .select("_id displayCode fullName")
-    .limit(2)
-    .lean();
-  if (byName.length === 1) return byName[0] as unknown as JsonRecord;
-
-  const partial = await Client.find({
-    locationId,
-    active: true,
-    $or: [
-      { displayCode: { $regex: escapeRegex(value), $options: "i" } },
-      { fullName: { $regex: escapeRegex(value), $options: "i" } },
-    ],
-  })
-    .select("_id displayCode fullName")
-    .limit(3)
-    .lean();
-  if (partial.length === 1) return partial[0] as unknown as JsonRecord;
-  if (partial.length > 1 || byCode.length > 1 || byName.length > 1) {
-    throw new Error(`Client reference "${value}" is ambiguous. Use the display code.`);
+  if (matched.status === "MATCH") return matched.record;
+  if (matched.status === "AMBIGUOUS") {
+    throw new Error(
+      `Client reference "${value}" is ambiguous. Did you mean ${matched.suggestions.join(", ")}?`
+    );
   }
-  throw new Error(`No active client matched "${value}" at this clinic.`);
+
+  throw new Error(
+    matched.suggestions.length > 0
+      ? `No active client matched "${value}". Did you mean ${matched.suggestions.join(", ")}?`
+      : `No active client matched "${value}" at this clinic.`
+  );
 }
 
 async function loadAssignments(locationId: string, date: string): Promise<JsonRecord[]> {

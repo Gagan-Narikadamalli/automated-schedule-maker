@@ -173,6 +173,16 @@ export async function buildSchedulerDateContextSnapshot(context: SchedulerAiCont
         dayData.extendedRules.preventSameStaffClientRepeatSameDay,
       allowSameStaffClientRepeatForCoverageException:
         dayData.extendedRules.allowSameStaffClientRepeatForCoverageException,
+      clientHandoffPenaltyPriority:
+        dayData.extendedRules.clientHandoffPenaltyPriority,
+      staffScheduleCompactnessPriority:
+        dayData.extendedRules.staffScheduleCompactnessPriority,
+      minimalFixAllowProtectedRelocation:
+        dayData.extendedRules.minimalFixAllowProtectedRelocation,
+      minimalFixAllowBreakRelocation:
+        dayData.extendedRules.minimalFixAllowBreakRelocation,
+      preserveManualOverrides:
+        dayData.extendedRules.preserveManualOverrides,
       breakEligibilityHours: dayData.extendedRules.breakEligibilityHours,
       breakWindowStart: dayData.extendedRules.breakWindowStart ?? null,
       breakWindowEnd: dayData.extendedRules.breakWindowEnd ?? null,

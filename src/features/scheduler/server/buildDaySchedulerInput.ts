@@ -169,6 +169,11 @@ function getDefaultRules(): ExtendedSchedulerRules {
     continuityPriority: 35,
     rotationPriority: 60,
     workloadBalancePriority: 10,
+    clientHandoffPenaltyPriority: 25,
+    staffScheduleCompactnessPriority: 8,
+    minimalFixAllowProtectedRelocation: true,
+    minimalFixAllowBreakRelocation: true,
+    preserveManualOverrides: true,
     scheduleStabilityPriority: 140,
     weekdayTemplatePriority: 75,
     weeklyHoursPriority: 12,
@@ -247,6 +252,26 @@ function mapRules(document: DatabaseRecord | null): ExtendedSchedulerRules {
     ),
     workloadBalancePriority: Number(
       document.workloadBalancePriority ?? defaults.workloadBalancePriority
+    ),
+    clientHandoffPenaltyPriority: Number(
+      document.clientHandoffPenaltyPriority ??
+        defaults.clientHandoffPenaltyPriority
+    ),
+    staffScheduleCompactnessPriority: Number(
+      document.staffScheduleCompactnessPriority ??
+        defaults.staffScheduleCompactnessPriority
+    ),
+    minimalFixAllowProtectedRelocation: Boolean(
+      document.minimalFixAllowProtectedRelocation ??
+        defaults.minimalFixAllowProtectedRelocation
+    ),
+    minimalFixAllowBreakRelocation: Boolean(
+      document.minimalFixAllowBreakRelocation ??
+        defaults.minimalFixAllowBreakRelocation
+    ),
+    preserveManualOverrides: Boolean(
+      document.preserveManualOverrides ??
+        defaults.preserveManualOverrides
     ),
     scheduleStabilityPriority: Number(
       document.scheduleStabilityPriority ?? defaults.scheduleStabilityPriority
@@ -876,6 +901,16 @@ export async function buildDaySchedulerInput(
         extendedRules.rotationPriority,
       workloadBalancePriority:
         extendedRules.workloadBalancePriority,
+      clientHandoffPenaltyPriority:
+        extendedRules.clientHandoffPenaltyPriority,
+      staffScheduleCompactnessPriority:
+        extendedRules.staffScheduleCompactnessPriority,
+      minimalFixAllowProtectedRelocation:
+        extendedRules.minimalFixAllowProtectedRelocation,
+      minimalFixAllowBreakRelocation:
+        extendedRules.minimalFixAllowBreakRelocation,
+      preserveManualOverrides:
+        extendedRules.preserveManualOverrides,
       scheduleStabilityPriority:
         extendedRules.scheduleStabilityPriority,
       weekdayTemplatePriority:

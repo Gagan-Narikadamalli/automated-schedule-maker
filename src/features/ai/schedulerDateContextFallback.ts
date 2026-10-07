@@ -1,3 +1,4 @@
+import { matchEntityReference } from "./entityReference";
 import { buildDateRecommendations } from "./schedulerDateRecommendations";
 
 type JsonRecord = Record<string, any>;
@@ -12,10 +13,6 @@ type TimeRange = {
   startTime: string | null;
   endTime: string | null;
 };
-
-function normalize(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
-}
 
 function displayTime(time: string): string {
   const match = time.match(/^(\d{2}):(\d{2})$/);
@@ -144,21 +141,25 @@ function formatSegment(segment: JsonRecord, perspective: "staff" | "client" | "g
 }
 
 function findStaff(request: string, staff: JsonRecord[]): JsonRecord | null {
-  const normalizedRequest = normalize(request);
-  const exactish = staff.filter((member) => {
-    const name = normalize(String(member.name ?? ""));
-    return Boolean(name) && normalizedRequest.includes(name);
-  });
-  return exactish.length === 1 ? exactish[0] : null;
+  const matched = matchEntityReference(
+    request,
+    staff.map((member) => ({
+      record: member,
+      labels: [String(member.name ?? "")],
+    }))
+  );
+  return matched.status === "MATCH" ? matched.record : null;
 }
 
 function findClient(request: string, clients: JsonRecord[]): JsonRecord | null {
-  const normalizedRequest = normalize(request);
-  const exactish = clients.filter((client) => {
-    const code = normalize(String(client.displayCode ?? ""));
-    return Boolean(code) && normalizedRequest.includes(code);
-  });
-  return exactish.length === 1 ? exactish[0] : null;
+  const matched = matchEntityReference(
+    request,
+    clients.map((client) => ({
+      record: client,
+      labels: [String(client.displayCode ?? "")],
+    }))
+  );
+  return matched.status === "MATCH" ? matched.record : null;
 }
 
 function slotWithinRange(slot: string, range: TimeRange): boolean {

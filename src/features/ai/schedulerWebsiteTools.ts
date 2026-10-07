@@ -25,6 +25,7 @@ import { SpeechSession } from "@/models/SpeechSession";
 import { Staff } from "@/models/Staff";
 import { Team } from "@/models/Team";
 
+import { matchEntityReference } from "./entityReference";
 import type { SchedulerAiContext } from "./types";
 
 type JsonRecord = Record<string, any>;
@@ -305,6 +306,26 @@ const rulesSchema = jsonSchema<JsonRecord>({
     continuityPriority: { type: "number" },
     rotationPriority: { type: "number" },
     workloadBalancePriority: { type: "number" },
+    clientHandoffPenaltyPriority: {
+      type: "number",
+      description:
+        "Soft priority from 0-200 that discourages unnecessary staff handoffs between neighboring blocks for the same client.",
+    },
+    staffScheduleCompactnessPriority: {
+      type: "number",
+      description:
+        "Soft priority from 0-200 that prefers placing work next to a staff member's existing assignments to reduce avoidable idle gaps.",
+    },
+    minimalFixAllowProtectedRelocation: {
+      type: "boolean",
+      description:
+        "Whether Minimal Fix may relocate manager/manual client blocks when needed for coverage.",
+    },
+    minimalFixAllowBreakRelocation: {
+      type: "boolean",
+      description:
+        "Whether Minimal Fix may temporarily move a break and recalculate it afterward when needed for client coverage.",
+    },
     scheduleStabilityPriority: { type: "number" },
     weekdayTemplatePriority: { type: "number" },
     weeklyHoursPriority: { type: "number" },
@@ -411,49 +432,139 @@ async function invokeJson(handler: RouteHandler, method: string, body?: JsonReco
   return { ok: response.ok, status: response.status, ...data };
 }
 
-async function resolveStaff(locationId: string, reference: string, roles?: string[]): Promise<JsonRecord> {
+async function resolveStaff(
+  locationId: string,
+  reference: string,
+  roles?: string[]
+): Promise<JsonRecord> {
   await connectToDatabase();
   const value = reference.trim();
   if (!value) throw new Error("A staff reference is required.");
-  const base: JsonRecord = { locationId, active: true, ...(roles?.length ? { role: { $in: roles } } : {}) };
+
+  const base: JsonRecord = {
+    locationId,
+    active: true,
+    ...(roles?.length ? { role: { $in: roles } } : {}),
+  };
+
   if (isObjectId(value)) {
     const found = await Staff.findOne({ ...base, _id: value }).lean();
     if (found) return found as unknown as JsonRecord;
   }
-  const exact = await Staff.find({ ...base, fullName: { $regex: `^${escapeRegex(value)}$`, $options: "i" } }).limit(2).lean();
-  if (exact.length === 1) return exact[0] as unknown as JsonRecord;
-  const partial = await Staff.find({ ...base, fullName: { $regex: escapeRegex(value), $options: "i" } }).limit(3).lean();
-  if (partial.length === 1) return partial[0] as unknown as JsonRecord;
-  if (partial.length > 1 || exact.length > 1) throw new Error(`Staff reference "${value}" is ambiguous. Use the full staff name.`);
-  throw new Error(`No active staff member matched "${value}" at this clinic.`);
+
+  const candidates = (await Staff.find(base)
+    .select("_id fullName role teamId")
+    .limit(250)
+    .lean()) as unknown as JsonRecord[];
+  const matched = matchEntityReference(
+    value,
+    candidates.map((record) => ({
+      record,
+      labels: [String(record.fullName ?? "")],
+    }))
+  );
+
+  if (matched.status === "MATCH") return matched.record;
+  if (matched.status === "AMBIGUOUS") {
+    throw new Error(
+      `Staff reference "${value}" is ambiguous. Did you mean ${matched.suggestions.join(", ")}?`
+    );
+  }
+
+  throw new Error(
+    matched.suggestions.length > 0
+      ? `No active staff member matched "${value}". Did you mean ${matched.suggestions.join(", ")}?`
+      : `No active staff member matched "${value}" at this clinic.`
+  );
 }
 
-async function resolveClient(locationId: string, reference: string): Promise<JsonRecord> {
+async function resolveClient(
+  locationId: string,
+  reference: string
+): Promise<JsonRecord> {
   await connectToDatabase();
   const value = reference.trim();
   if (!value) throw new Error("A client reference is required.");
+
   if (isObjectId(value)) {
-    const found = await Client.findOne({ _id: value, locationId, active: true }).lean();
+    const found = await Client.findOne({
+      _id: value,
+      locationId,
+      active: true,
+    }).lean();
     if (found) return found as unknown as JsonRecord;
   }
-  const byCode = await Client.find({ locationId, active: true, displayCode: { $regex: `^${escapeRegex(value)}$`, $options: "i" } }).limit(2).lean();
-  if (byCode.length === 1) return byCode[0] as unknown as JsonRecord;
-  const byName = await Client.find({ locationId, active: true, fullName: { $regex: `^${escapeRegex(value)}$`, $options: "i" } }).limit(2).lean();
-  if (byName.length === 1) return byName[0] as unknown as JsonRecord;
-  throw new Error(`No unique active client matched "${value}". Use the client display code or exact name.`);
+
+  const candidates = (await Client.find({ locationId, active: true })
+    .select("_id displayCode fullName teamId")
+    .limit(500)
+    .lean()) as unknown as JsonRecord[];
+  const matched = matchEntityReference(
+    value,
+    candidates.map((record) => ({
+      record,
+      labels: [
+        String(record.displayCode ?? ""),
+        String(record.fullName ?? ""),
+      ],
+    }))
+  );
+
+  if (matched.status === "MATCH") return matched.record;
+  if (matched.status === "AMBIGUOUS") {
+    throw new Error(
+      `Client reference "${value}" is ambiguous. Did you mean ${matched.suggestions.join(", ")}?`
+    );
+  }
+
+  throw new Error(
+    matched.suggestions.length > 0
+      ? `No active client matched "${value}". Did you mean ${matched.suggestions.join(", ")}?`
+      : `No active client matched "${value}" at this clinic.`
+  );
 }
 
-async function resolveTeam(locationId: string, reference: string): Promise<JsonRecord> {
+async function resolveTeam(
+  locationId: string,
+  reference: string
+): Promise<JsonRecord> {
   await connectToDatabase();
   const value = reference.trim();
   if (!value) throw new Error("A team reference is required.");
+
   if (isObjectId(value)) {
-    const found = await Team.findOne({ _id: value, locationId, active: true }).lean();
+    const found = await Team.findOne({
+      _id: value,
+      locationId,
+      active: true,
+    }).lean();
     if (found) return found as unknown as JsonRecord;
   }
-  const found = await Team.find({ locationId, active: true, name: { $regex: `^${escapeRegex(value)}$`, $options: "i" } }).limit(2).lean();
-  if (found.length === 1) return found[0] as unknown as JsonRecord;
-  throw new Error(`No unique active team matched "${value}".`);
+
+  const candidates = (await Team.find({ locationId, active: true })
+    .select("_id name color")
+    .limit(100)
+    .lean()) as unknown as JsonRecord[];
+  const matched = matchEntityReference(
+    value,
+    candidates.map((record) => ({
+      record,
+      labels: [String(record.name ?? "")],
+    }))
+  );
+
+  if (matched.status === "MATCH") return matched.record;
+  if (matched.status === "AMBIGUOUS") {
+    throw new Error(
+      `Team reference "${value}" is ambiguous. Did you mean ${matched.suggestions.join(", ")}?`
+    );
+  }
+
+  throw new Error(
+    matched.suggestions.length > 0
+      ? `No active team matched "${value}". Did you mean ${matched.suggestions.join(", ")}?`
+      : `No active team matched "${value}" at this clinic.`
+  );
 }
 
 async function optionalTeamId(locationId: string, reference: string | null | undefined): Promise<string | null | undefined> {
@@ -765,7 +876,7 @@ export function createSchedulerWebsiteTools(context: SchedulerAiContext) {
 
     update_scheduler_rules: tool({
       description:
-        "Update clinic-wide automatic scheduler rules and priorities such as break window/eligibility, weekly hour ranges, client/staff minimum and maximum continuous pairing duration, same-day pair reuse, rotation/continuity priorities, schedule hours, role coverage priorities, historical/template preferences, and supervision target. Only send fields the user actually wants changed.",
+        "Update clinic-wide automatic scheduler rules and priorities such as break window/eligibility, weekly hour ranges, client/staff minimum and maximum continuous pairing duration, same-day pair reuse, handoff reduction, staff schedule compactness, Minimal Fix protection behavior, rotation/continuity priorities, schedule hours, role coverage priorities, historical/template preferences, and supervision target. Only send fields the user actually wants changed.",
       inputSchema: rulesSchema,
       execute: async (changes) => invokeJson(updateSchedulingRules, "PUT", { locationId, ...changes }),
     }),

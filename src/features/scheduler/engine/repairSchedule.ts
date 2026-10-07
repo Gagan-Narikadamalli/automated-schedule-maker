@@ -17,7 +17,8 @@ function slotKey(staffId: string, startTime: string): string {
 function shouldKeepAssignmentDuringRepair(
   assignment: SchedulerAssignment,
   affectedStaffIds: Set<string>,
-  affectedSlotKeys: Set<string> | null
+  affectedSlotKeys: Set<string> | null,
+  preserveManualOverrides: boolean
 ): boolean {
   const assignmentKey = slotKey(assignment.staffId, assignment.startTime);
   const isAffectedSlot = affectedSlotKeys
@@ -32,12 +33,19 @@ function shouldKeepAssignmentDuringRepair(
   //
   // Explicit MANUAL manager overrides are still preserved. If a manager truly
   // wants something inside the call-out window, Manual Mode owns that decision.
-  if (isAffectedSlot && assignment.source !== "MANUAL") {
+  if (isAffectedSlot) {
+    if (
+      assignment.source === "MANUAL" ||
+      assignment.locked
+    ) {
+      return preserveManualOverrides;
+    }
+
     return false;
   }
 
   if (assignment.locked || assignment.source === "MANUAL") {
-    return true;
+    return preserveManualOverrides;
   }
 
   if (
@@ -85,7 +93,8 @@ export function repairSchedule(
       shouldKeepAssignmentDuringRepair(
         assignment,
         affectedStaffIdSet,
-        affectedSlotKeys
+        affectedSlotKeys,
+        input.rules.preserveManualOverrides
       )
     )
     .map((assignment) => ({

@@ -23,10 +23,11 @@ type SwapCandidate = {
 };
 
 function shouldPreserveExistingAssignment(
-  assignment: SchedulerAssignment
+  assignment: SchedulerAssignment,
+  preserveManualOverrides: boolean
 ): boolean {
   if (assignment.locked || assignment.source === "MANUAL") {
-    return true;
+    return preserveManualOverrides;
   }
 
   return (
@@ -843,10 +844,18 @@ function attemptBreakReleaseRepair(
 export function repairCoverageMinimally(
   input: SchedulerInput,
   priorityRequirements: Array<{ clientId: string; startTime: string }> = [],
-  options: { allowAutomaticOverrides?: boolean } = {}
+  options: {
+    allowAutomaticOverrides?: boolean;
+    allowProtectedRelocation?: boolean;
+    allowBreakRelocation?: boolean;
+  } = {}
 ): SchedulerResult {
   const callOutStaffIds = new Set(input.callOutStaffIds);
   const allowAutomaticOverrides = options.allowAutomaticOverrides === true;
+  const allowProtectedRelocation =
+    options.allowProtectedRelocation ?? allowAutomaticOverrides;
+  const allowBreakRelocation =
+    options.allowBreakRelocation ?? allowAutomaticOverrides;
   const assignments: SchedulerAssignment[] = input.existingAssignments.map(
     (assignment) => ({ ...assignment })
   );
@@ -931,7 +940,7 @@ export function repairCoverageMinimally(
       continue;
     }
 
-    if (allowAutomaticOverrides) {
+    if (allowProtectedRelocation) {
       const repairedByProtectedSwap = attemptSingleSwapRepair(
         requirement,
         input,
@@ -953,13 +962,15 @@ export function repairCoverageMinimally(
         continue;
       }
 
-      const repairedByBreakRelease = attemptBreakReleaseRepair(
+      const repairedByBreakRelease = allowBreakRelocation
+        ? attemptBreakReleaseRepair(
         requirement,
         input,
         assignments,
         callOutStaffIds,
         false
-      );
+      )
+        : false;
 
       if (repairedByBreakRelease) {
         warnings.push({
@@ -1036,7 +1047,7 @@ export function repairCoverageMinimally(
         }
       }
 
-      if (!coveredByRepeatException && allowAutomaticOverrides) {
+      if (!coveredByRepeatException && allowProtectedRelocation) {
         const repairedByProtectedRepeatSwap = attemptSingleSwapRepair(
           requirement,
           input,
@@ -1056,7 +1067,7 @@ export function repairCoverageMinimally(
         }
       }
 
-      if (!coveredByRepeatException && allowAutomaticOverrides) {
+      if (!coveredByRepeatException && allowBreakRelocation) {
         const repairedByRepeatBreakRelease = attemptBreakReleaseRepair(
           requirement,
           input,
@@ -1117,7 +1128,11 @@ export function generateSchedule(input: SchedulerInput): SchedulerResult {
   const callOutStaffIds = new Set(input.callOutStaffIds);
 
   const protectedAssignments = input.existingAssignments.filter(
-    shouldPreserveExistingAssignment
+    (assignment) =>
+      shouldPreserveExistingAssignment(
+        assignment,
+        input.rules.preserveManualOverrides
+      )
   );
 
   const assignments: SchedulerAssignment[] = protectedAssignments.map(
