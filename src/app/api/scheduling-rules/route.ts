@@ -31,6 +31,10 @@ type RulesRequest = {
   continuityPriority?: number;
   rotationPriority?: number;
   workloadBalancePriority?: number;
+  clientHandoffPenaltyPriority?: number;
+  staffScheduleCompactnessPriority?: number;
+  minimalFixAllowProtectedRelocation?: boolean;
+  minimalFixAllowBreakRelocation?: boolean;
   scheduleStabilityPriority?: number;
   weekdayTemplatePriority?: number;
   weeklyHoursPriority?: number;
@@ -78,6 +82,10 @@ function defaultRules(locationId: string) {
     continuityPriority: 35,
     rotationPriority: 60,
     workloadBalancePriority: 10,
+    clientHandoffPenaltyPriority: 25,
+    staffScheduleCompactnessPriority: 8,
+    minimalFixAllowProtectedRelocation: true,
+    minimalFixAllowBreakRelocation: true,
     scheduleStabilityPriority: 140,
     weekdayTemplatePriority: 75,
     weeklyHoursPriority: 12,
@@ -276,6 +284,8 @@ export async function PUT(request: Request) {
       body.continuityPriority,
       body.rotationPriority,
       body.workloadBalancePriority,
+      body.clientHandoffPenaltyPriority,
+      body.staffScheduleCompactnessPriority,
       body.scheduleStabilityPriority,
       body.weekdayTemplatePriority,
       body.weeklyHoursPriority,
