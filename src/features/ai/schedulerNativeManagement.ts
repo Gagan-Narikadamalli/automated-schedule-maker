@@ -73,8 +73,18 @@ function numberNear(message: string, pattern: RegExp): number | undefined {
 }
 
 function toggleValue(message: string): boolean | undefined {
-  if (/\b(?:enable|enabled|turn\s+on|use|yes|true)\b/i.test(message)) return true;
-  if (/\b(?:disable|disabled|turn\s+off|do\s+not\s+use|don't\s+use|false)\b/i.test(message)) return false;
+  if (
+    /\b(?:disable|disabled|turn\s+off|do\s+not\s+use|don't\s+use|false)\b/i.test(message) ||
+    /\bturn\b[\s\S]*\boff\b/i.test(message)
+  ) {
+    return false;
+  }
+  if (
+    /\b(?:enable|enabled|turn\s+on|use|yes|true)\b/i.test(message) ||
+    /\bturn\b[\s\S]*\bon\b/i.test(message)
+  ) {
+    return true;
+  }
   return undefined;
 }
 
