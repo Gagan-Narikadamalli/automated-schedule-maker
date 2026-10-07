@@ -343,17 +343,6 @@ export async function PUT(request: Request) {
       (change) => change.assignmentType === "EMPTY"
     );
 
-    if (deleteChanges.length > 0) {
-      await ScheduleAssignment.deleteMany({
-        locationId,
-        date,
-        $or: deleteChanges.map((change) => ({
-          staffId: change.staffId,
-          startTime: change.startTime,
-        })),
-      });
-    }
-
     const writeOperations = normalizedChanges
       .map((change, index) => ({ change, index }))
       .filter(({ change }) => change.assignmentType !== "EMPTY")
@@ -385,7 +374,20 @@ export async function PUT(request: Request) {
       }));
 
     if (writeOperations.length > 0) {
+      // Save replacements first. If this fails, existing cells are still
+      // present because EMPTY/source cells have not been deleted yet.
       await ScheduleAssignment.bulkWrite(writeOperations, { ordered: true });
+    }
+
+    if (deleteChanges.length > 0) {
+      await ScheduleAssignment.deleteMany({
+        locationId,
+        date,
+        $or: deleteChanges.map((change) => ({
+          staffId: change.staffId,
+          startTime: change.startTime,
+        })),
+      });
     }
 
     const clientPlacements = normalizedChanges
