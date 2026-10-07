@@ -9,7 +9,10 @@ import {
 } from "@/lib/api/auth";
 import { writeAuditLog } from "@/lib/api/audit";
 import { connectToDatabase } from "@/lib/db";
+import { Client } from "@/models/Client";
+import { Staff } from "@/models/Staff";
 import { Team } from "@/models/Team";
+import { TrialDataset } from "@/models/TrialDataset";
 
 type TeamUpdateRequest = {
   name?: string;
@@ -116,6 +119,82 @@ export async function PATCH(request: Request, context: RouteContext) {
 
     return NextResponse.json(
       { error: "Team could not be updated." },
+      { status: 500 }
+    );
+  }
+}
+
+
+export async function DELETE(_request: Request, context: RouteContext) {
+  const auth = await requireApiSession();
+
+  if (auth.error) {
+    return auth.error;
+  }
+
+  if (!sessionHasAnyRole(auth.session, PEOPLE_WRITE_ROLES)) {
+    return forbiddenResponse();
+  }
+
+  try {
+    const { id } = await context.params;
+
+    await connectToDatabase();
+
+    const team = await Team.findById(id);
+
+    if (!team) {
+      return NextResponse.json(
+        { error: "Team was not found." },
+        { status: 404 }
+      );
+    }
+
+    const locationId = String(team.locationId);
+
+    if (!sessionCanAccessLocation(auth.session, locationId)) {
+      return forbiddenResponse("You do not have access to this location.");
+    }
+
+    const before = team.toObject();
+
+    await Promise.all([
+      Staff.updateMany(
+        { locationId, teamId: team._id },
+        { $set: { teamId: null } }
+      ),
+      Client.updateMany(
+        { locationId, teamId: team._id },
+        { $set: { teamId: null } }
+      ),
+      TrialDataset.updateMany(
+        { locationId },
+        { $pull: { teamIds: team._id } }
+      ),
+    ]);
+
+    await Team.deleteOne({ _id: team._id });
+
+    await writeAuditLog({
+      locationId,
+      userId: auth.session.userId,
+      action: "DELETE",
+      entityType: "TEAM",
+      entityId: String(team._id),
+      summary: `Deleted team ${team.name}; staff and clients were moved to No team.`,
+      before,
+      after: null,
+    });
+
+    return NextResponse.json({
+      success: true,
+      deletedId: String(team._id),
+    });
+  } catch (error) {
+    console.error("Failed to delete team:", error);
+
+    return NextResponse.json(
+      { error: "Team could not be deleted." },
       { status: 500 }
     );
   }
