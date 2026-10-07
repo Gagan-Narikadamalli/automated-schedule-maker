@@ -136,7 +136,8 @@ export type SchedulerWarning = {
     | "CLIENT_TECH_LIMIT"
     | "STAFF_HOUR_LIMIT"
     | "CAPACITY_SHORTAGE"
-    | "REPAIRED_BY_SWAP";
+    | "REPAIRED_BY_SWAP"
+    | "PAIR_REUSE_EXCEPTION";
   message: string;
 };
 
