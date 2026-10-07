@@ -293,6 +293,54 @@ function countEligibleStaff(
   ).length;
 }
 
+function explainUncoveredRequirement(
+  requirement: ClientRequirement,
+  input: SchedulerInput,
+  assignments: SchedulerAssignment[],
+  callOutStaffIds: Set<string>
+): string {
+  const scheduledStaff = input.staff.filter(
+    (staffMember) =>
+      !callOutStaffIds.has(staffMember.id) &&
+      staffMember.availableSlots.includes(requirement.startTime)
+  );
+
+  if (scheduledStaff.length === 0) {
+    return `No staff member is scheduled or available at ${requirement.startTime}. Client coverage extends beyond the current staff shifts.`;
+  }
+
+  const freeStaff = scheduledStaff.filter(
+    (staffMember) =>
+      !assignments.some(
+        (assignment) =>
+          assignment.staffId === staffMember.id &&
+          assignment.startTime === requirement.startTime
+      )
+  );
+
+  if (freeStaff.length === 0) {
+    return `All ${scheduledStaff.length} staff member(s) available at ${requirement.startTime} already have an assignment in that block.`;
+  }
+
+  const eligibleFreeStaff = freeStaff.filter((staffMember) =>
+    canAssignStaffToClient({
+      staffMember,
+      client: requirement.client,
+      startTime: requirement.startTime,
+      assignments,
+      callOutStaffIds,
+      rules: input.rules,
+      allowSameDayPairRepeat: true,
+    }).allowed
+  );
+
+  if (eligibleFreeStaff.length === 0) {
+    return `${freeStaff.length} staff member(s) are free at ${requirement.startTime}, but client/staff eligibility, service-location, hour-limit, rotation, or relationship rules prevent a valid assignment.`;
+  }
+
+  return `Staff capacity exists at ${requirement.startTime}, but no safe final placement remained after coverage and repair passes. Repair Schedule should retry this block before manager placement.`;
+}
+
 function supportPriority(client: SchedulerClient): number {
   if (client.supportLevel === "HIGH_SUPPORT") {
     return 3;
@@ -1095,9 +1143,12 @@ export function repairCoverageMinimally(
       clientId: requirement.client.id,
       clientCode: requirement.client.displayCode,
       startTime: requirement.startTime,
-      reason: input.rules.allowSameStaffClientRepeatForCoverageException
-        ? "All normal non-repeat placements and repairs were exhausted, and no valid last-resort same-day pair reuse could cover this requirement."
-        : "All normal non-repeat placements and repairs were exhausted, and same-day pair reuse exceptions are disabled.",
+      reason: explainUncoveredRequirement(
+        requirement,
+        input,
+        assignments,
+        callOutStaffIds
+      ),
     });
     warnings.push({
       code: "NO_ELIGIBLE_STAFF",
@@ -1314,9 +1365,12 @@ export function generateSchedule(input: SchedulerInput): SchedulerResult {
       clientId: requirement.client.id,
       clientCode: requirement.client.displayCode,
       startTime: requirement.startTime,
-      reason: input.rules.allowSameStaffClientRepeatForCoverageException
-        ? "No normal non-repeat assignment or swap could cover this requirement, and no valid last-resort same-day pair reuse remained."
-        : "No normal non-repeat assignment or swap could cover this requirement, and same-day pair reuse exceptions are disabled.",
+      reason: explainUncoveredRequirement(
+        requirement,
+        input,
+        assignments,
+        callOutStaffIds
+      ),
     });
 
     warnings.push({
