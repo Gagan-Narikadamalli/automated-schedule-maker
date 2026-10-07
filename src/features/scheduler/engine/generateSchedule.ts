@@ -789,8 +789,20 @@ function attemptBreakReleaseRepair(
       continue;
     }
 
+    const minimumPlan = buildMinimumPairingPlan(
+      requirement,
+      staffMember,
+      input,
+      assignmentsWithoutBreak,
+      callOutStaffIds
+    );
+
+    if (!minimumPlan) {
+      continue;
+    }
+
     assignments.splice(assignmentIndex, 1);
-    assignments.push(createAutoAssignment(staffMember, requirement));
+    assignments.push(...minimumPlan);
     return true;
   }
 
