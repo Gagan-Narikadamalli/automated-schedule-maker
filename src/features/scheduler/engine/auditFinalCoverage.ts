@@ -23,7 +23,8 @@ export function auditFinalCoverage(
   clients: SchedulerClient[],
   assignments: SchedulerAssignment[],
   baseMetrics: SchedulerResult["metrics"],
-  slotLengthMinutes: number
+  slotLengthMinutes: number,
+  knownUncoveredRequirements: UncoveredRequirement[] = []
 ): CoverageAudit {
   const coveredKeys = new Set(
     assignments
@@ -40,6 +41,12 @@ export function auditFinalCoverage(
       )
   );
 
+  const knownReasonByKey = new Map(
+    knownUncoveredRequirements.map((requirement) => [
+      requirementKey(requirement.clientId, requirement.startTime),
+      requirement.reason,
+    ])
+  );
   const uncoveredRequirements: UncoveredRequirement[] = [];
   let requiredClientSlots = 0;
   let coveredClientSlots = 0;
@@ -58,6 +65,7 @@ export function auditFinalCoverage(
         clientCode: client.displayCode,
         startTime,
         reason:
+          knownReasonByKey.get(requirementKey(client.id, startTime)) ??
           "This required client block is empty in the final saved schedule after nap, speech, and break placement.",
       });
     }
