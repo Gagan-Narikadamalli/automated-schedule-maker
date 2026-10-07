@@ -115,6 +115,14 @@ export type SchedulerRules = {
   historicalSlotPriority?: number;
   historicalBreakPriority?: number;
   autoUseHistoricalPatterns?: boolean;
+  napDurationRulesEnabled?: boolean;
+  napMinimumMinutes?: number;
+  napPreferredMinutes?: number;
+  napMaximumMinutes?: number;
+  speechDurationRulesEnabled?: boolean;
+  speechMinimumMinutes?: number;
+  speechPreferredMinutes?: number;
+  speechMaximumMinutes?: number;
 };
 
 export type SchedulerInput = {
