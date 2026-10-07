@@ -42,7 +42,6 @@ function serializeException(record: PlainRecord) {
       ? {
           id: String(client._id ?? client.id ?? ""),
           displayCode: String(client.displayCode ?? ""),
-          fullName: String(client.fullName ?? ""),
           color: String(client.color ?? "#D9F4EE"),
         }
       : null,
@@ -73,7 +72,7 @@ export async function GET(request: Request) {
   try {
     await connectToDatabase();
     const records = await ClientAttendanceException.find({ locationId, date })
-      .populate("clientId", "displayCode fullName color")
+      .populate("clientId", "displayCode color")
       .sort({ startTime: 1 })
       .lean();
 
@@ -148,7 +147,7 @@ export async function POST(request: Request) {
     });
 
     const populated = await ClientAttendanceException.findById(record._id)
-      .populate("clientId", "displayCode fullName color")
+      .populate("clientId", "displayCode color")
       .lean();
 
     return NextResponse.json(
