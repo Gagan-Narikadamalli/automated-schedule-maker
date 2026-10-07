@@ -24,27 +24,127 @@ function plan(message: string, history: SchedulerAiHistoryMessage[]) {
 
 let value = plan("Ca Cr and code anything you like and then today", [
   { role: "user", text: "create a new client named CaCr" },
-  { role: "assistant", text: "Creating a client requires the full name, display code (the short label shown in schedule blocks, for example CaCr), and start date. You can also say choose the display code and I will derive one." },
+  {
+    role: "assistant",
+    text:
+      "Creating a client requires the full name, display code, start date, and regular attendance days/hours (for example Monday-Friday from 9 AM to 3 PM).",
+  },
 ]);
+assert.equal(value.result.intent, "CLARIFICATION");
+
+const clientReadyHistory: SchedulerAiHistoryMessage[] = [
+  { role: "user", text: "create a new client named CaCr" },
+  {
+    role: "assistant",
+    text:
+      "Creating a client requires the full name, display code, start date, and regular attendance days/hours (for example Monday-Friday from 9 AM to 3 PM).",
+  },
+  {
+    role: "user",
+    text: "Ca Cr and code anything you like and then today",
+  },
+  {
+    role: "assistant",
+    text:
+      "Creating a client requires the full name, display code, start date, and regular attendance days/hours (for example Monday-Friday from 9 AM to 3 PM).",
+  },
+];
+
+value = plan(
+  "weekdays from 9 am to 3 pm\n\n[SCHEDULER TIME NORMALIZATION: The user's intended time range was deterministically parsed as 9:00 AM–3:00 PM (09:00-15:00). Use these exact times for scheduler lookups and tool calls.]",
+  clientReadyHistory
+);
 assert.equal(value.result.intent, "CLIENT_MANAGEMENT");
 assert.equal(value.result.input.fullName, "Ca Cr");
 assert.equal(value.result.input.displayCode, "CaCr");
 assert.equal(value.result.input.startDate, date);
+assert.deepEqual(value.result.input.attendancePatterns, [
+  {
+    name: "Regular attendance",
+    days: ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"],
+    startTime: "09:00",
+    endTime: "15:00",
+  },
+]);
 
 value = plan("today", [
   { role: "user", text: "create a new staff member" },
-  { role: "assistant", text: "Creating a staff member requires the full name, role (BT/RBT/INTERN/BCBA/OFFICE_MANAGER/OTHER), full-time or part-time status, and start date." },
+  {
+    role: "assistant",
+    text:
+      "Creating a staff member requires the full name, role (BT/RBT/INTERN/BCBA/OFFICE_MANAGER/OTHER), full-time or part-time status, start date, and regular working days/hours (for example Monday-Friday from 8 AM to 4 PM).",
+  },
   { role: "user", text: "Ania Regias" },
-  { role: "assistant", text: "Creating a staff member requires the full name, role (BT/RBT/INTERN/BCBA/OFFICE_MANAGER/OTHER), full-time or part-time status, and start date." },
+  {
+    role: "assistant",
+    text:
+      "Creating a staff member requires the full name, role (BT/RBT/INTERN/BCBA/OFFICE_MANAGER/OTHER), full-time or part-time status, start date, and regular working days/hours (for example Monday-Friday from 8 AM to 4 PM).",
+  },
   { role: "user", text: "BT" },
-  { role: "assistant", text: "Creating a staff member requires the full name, role (BT/RBT/INTERN/BCBA/OFFICE_MANAGER/OTHER), full-time or part-time status, and start date." },
+  {
+    role: "assistant",
+    text:
+      "Creating a staff member requires the full name, role (BT/RBT/INTERN/BCBA/OFFICE_MANAGER/OTHER), full-time or part-time status, start date, and regular working days/hours (for example Monday-Friday from 8 AM to 4 PM).",
+  },
   { role: "user", text: "full-0time" },
-  { role: "assistant", text: "Creating a staff member requires the full name, role (BT/RBT/INTERN/BCBA/OFFICE_MANAGER/OTHER), full-time or part-time status, and start date." },
+  {
+    role: "assistant",
+    text:
+      "Creating a staff member requires the full name, role (BT/RBT/INTERN/BCBA/OFFICE_MANAGER/OTHER), full-time or part-time status, start date, and regular working days/hours (for example Monday-Friday from 8 AM to 4 PM).",
+  },
 ]);
+assert.equal(value.result.intent, "CLARIFICATION");
+
+const staffReadyHistory: SchedulerAiHistoryMessage[] = [
+  { role: "user", text: "create a new staff member" },
+  {
+    role: "assistant",
+    text:
+      "Creating a staff member requires the full name, role (BT/RBT/INTERN/BCBA/OFFICE_MANAGER/OTHER), full-time or part-time status, start date, and regular working days/hours (for example Monday-Friday from 8 AM to 4 PM).",
+  },
+  { role: "user", text: "Ania Regias" },
+  {
+    role: "assistant",
+    text:
+      "Creating a staff member requires the full name, role (BT/RBT/INTERN/BCBA/OFFICE_MANAGER/OTHER), full-time or part-time status, start date, and regular working days/hours (for example Monday-Friday from 8 AM to 4 PM).",
+  },
+  { role: "user", text: "BT" },
+  {
+    role: "assistant",
+    text:
+      "Creating a staff member requires the full name, role (BT/RBT/INTERN/BCBA/OFFICE_MANAGER/OTHER), full-time or part-time status, start date, and regular working days/hours (for example Monday-Friday from 8 AM to 4 PM).",
+  },
+  { role: "user", text: "full-0time" },
+  {
+    role: "assistant",
+    text:
+      "Creating a staff member requires the full name, role (BT/RBT/INTERN/BCBA/OFFICE_MANAGER/OTHER), full-time or part-time status, start date, and regular working days/hours (for example Monday-Friday from 8 AM to 4 PM).",
+  },
+  { role: "user", text: "today" },
+  {
+    role: "assistant",
+    text:
+      "Creating a staff member requires the full name, role (BT/RBT/INTERN/BCBA/OFFICE_MANAGER/OTHER), full-time or part-time status, start date, and regular working days/hours (for example Monday-Friday from 8 AM to 4 PM).",
+  },
+];
+
+value = plan(
+  "weekdays from 8 am to 5 pm\n\n[SCHEDULER TIME NORMALIZATION: The user's intended time range was deterministically parsed as 8:00 AM–5:00 PM (08:00-17:00). Use these exact times for scheduler lookups and tool calls.]",
+  staffReadyHistory
+);
 assert.equal(value.result.intent, "STAFF_MANAGEMENT");
 assert.equal(value.result.input.fullName, "Ania Regias");
 assert.equal(value.result.input.role, "BT");
 assert.equal(value.result.input.employeeType, "FULL_TIME");
+assert.equal(value.result.input.startDate, date);
+assert.deepEqual(value.result.input.shiftPatterns, [
+  {
+    name: "Regular schedule",
+    days: ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"],
+    startTime: "08:00",
+    endTime: "17:00",
+  },
+]);
 
 value = plan("Monday Base", [
   { role: "user", text: "apply template" },
@@ -138,5 +238,20 @@ for (const reply of [
     false
   );
 }
+
+
+const unknown = planNativeSchedulerAction({
+  message: "flibberty wobble this thing please",
+  date,
+  history: [],
+  writeToolsEnabled: true,
+});
+assert.equal(unknown.intent, "CLARIFICATION");
+assert.equal(unknown.toolName, "__native_clarification__");
+assert.equal(unknown.input.message, "I am unable to understand your request.");
+assert.equal(
+  ensureSchedulerConversationClosing("I am unable to understand your request."),
+  "I am unable to understand your request."
+);
 
 console.log("Native Scheduler AI generalized clarification tests passed.");
