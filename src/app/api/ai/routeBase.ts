@@ -32,7 +32,6 @@ import {
 import type {
   SchedulerAiAttachment,
   SchedulerAiContext,
-  SchedulerAiDateSource,
   SchedulerAiHistoryMessage,
   SchedulerAiRequest,
   SchedulerAiResponse,
@@ -77,61 +76,6 @@ function dateInNewYork(): string {
   }).formatToParts(new Date());
   const values = new Map(parts.map((part) => [part.type, part.value]));
   return `${values.get("year")}-${values.get("month")}-${values.get("day")}`;
-}
-
-function formatLocalDate(value: Date): string {
-  const year = value.getFullYear();
-  const month = String(value.getMonth() + 1).padStart(2, "0");
-  const day = String(value.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function shiftDate(dateText: string, days: number): string {
-  const value = new Date(`${dateText}T12:00:00`);
-  value.setDate(value.getDate() + days);
-  return formatLocalDate(value);
-}
-
-function weekdayDate(anchorDate: string, weekday: number, weekShift = 0): string {
-  const value = new Date(`${anchorDate}T12:00:00`);
-  const currentDay = value.getDay();
-  const mondayOffset = currentDay === 0 ? -6 : 1 - currentDay;
-  value.setDate(value.getDate() + mondayOffset + weekday + weekShift * 7);
-  return formatLocalDate(value);
-}
-
-function parseNamedOrNumericDate(message: string, anchorDate: string): string | null {
-  const slash = message.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(20\d{2}|\d{2}))?\b/);
-  if (slash) {
-    const [, monthText, dayText, yearText] = slash;
-    const anchorYear = Number(anchorDate.slice(0, 4));
-    const year = yearText
-      ? Number(yearText.length === 2 ? `20${yearText}` : yearText)
-      : anchorYear;
-    const month = Number(monthText);
-    const day = Number(dayText);
-    const candidate = new Date(year, month - 1, day, 12, 0, 0);
-    if (
-      candidate.getFullYear() === year &&
-      candidate.getMonth() === month - 1 &&
-      candidate.getDate() === day
-    ) {
-      return formatLocalDate(candidate);
-    }
-  }
-
-  const monthNames =
-    "january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec";
-  const named = message.match(
-    new RegExp(`\\b(${monthNames})\\s+(\\d{1,2})(?:,?\\s+(20\\d{2}))?\\b`, "i")
-  );
-  if (named) {
-    const parsed = new Date(
-      `${named[1]} ${named[2]}, ${named[3] || anchorDate.slice(0, 4)} 12:00:00`
-    );
-    if (!Number.isNaN(parsed.getTime())) return formatLocalDate(parsed);
-  }
-  return null;
 }
 
 function cleanHistory(value: unknown): SchedulerAiHistoryMessage[] {
@@ -306,124 +250,6 @@ Analyze the attached screenshot(s) as scheduling source data. Do not perform or 
   });
 
   return result.text.trim().slice(0, MAX_ATTACHMENT_CONTEXT_LENGTH);
-}
-
-function isAffirmativeContinuation(message: string): boolean {
-  const normalized = message
-    .trim()
-    .toLowerCase()
-    .replace(/[.!?]+$/g, "")
-    .replace(/\s+/g, " ");
-  return /^(yes|yeah|yep|sure|ok|okay|yes please|please do|go ahead|proceed|do it|generate it|create it|make it|allow it|override it|yes override|yes proceed)$/.test(
-    normalized
-  );
-}
-
-function recentConversationDate(
-  history: SchedulerAiHistoryMessage[],
-  anchorDate: string
-): string | null {
-  for (const entry of [...history].slice(-6).reverse()) {
-    const isoDate = entry.text.match(/\b(20\d{2}-\d{2}-\d{2})\b/)?.[1];
-    if (isoDate) return isoDate;
-    const namedOrNumeric = parseNamedOrNumericDate(entry.text, anchorDate);
-    if (namedOrNumeric) return namedOrNumeric;
-  }
-  return null;
-}
-
-function resolveDateContext(
-  message: string,
-  selectedDate: string,
-  todayDate: string,
-  dateSelectionExplicit: boolean,
-  history: SchedulerAiHistoryMessage[]
-): { date: string; source: SchedulerAiDateSource } {
-  const normalized = message.toLowerCase();
-  const isoDate = message.match(/\b(20\d{2}-\d{2}-\d{2})\b/)?.[1];
-  if (isoDate) return { date: isoDate, source: "EXPLICIT_DATE" };
-
-  const namedOrNumeric = parseNamedOrNumericDate(message, selectedDate);
-  if (namedOrNumeric) {
-    return { date: namedOrNumeric, source: "EXPLICIT_DATE" };
-  }
-
-  if (/\b(today|current date|right now|now)\b/.test(normalized)) {
-    return { date: todayDate, source: "TODAY" };
-  }
-  if (/\btomorrow\b/.test(normalized)) {
-    return { date: shiftDate(todayDate, 1), source: "RELATIVE_DATE" };
-  }
-  if (/\byesterday\b/.test(normalized)) {
-    return { date: shiftDate(todayDate, -1), source: "RELATIVE_DATE" };
-  }
-
-  const weekdays = [
-    { names: ["monday", "mon"], offset: 0 },
-    { names: ["tuesday", "tue", "tues"], offset: 1 },
-    { names: ["wednesday", "wed"], offset: 2 },
-    { names: ["thursday", "thu", "thur", "thurs"], offset: 3 },
-    { names: ["friday", "fri"], offset: 4 },
-    { names: ["saturday", "sat"], offset: 5 },
-    { names: ["sunday", "sun"], offset: 6 },
-  ];
-
-  for (const weekday of weekdays) {
-    const pattern = new RegExp(`\\b(${weekday.names.join("|")})\\b`, "i");
-    if (!pattern.test(message)) continue;
-    const weekShift = /\bnext\b/i.test(message)
-      ? 1
-      : /\b(last|previous)\b/i.test(message)
-        ? -1
-        : 0;
-    return {
-      date: weekdayDate(selectedDate, weekday.offset, weekShift),
-      source: "WEEKDAY",
-    };
-  }
-
-  if (
-    /\b(this|current|the)\s+(work\s+)?week\b/.test(normalized) ||
-    /\b(generate|build|make|fix|repair)\s+(the\s+)?(work\s+)?week\b/.test(normalized)
-  ) {
-    return { date: selectedDate, source: "SELECTED_WEEK" };
-  }
-
-  if (
-    /\b(this|selected)\s+day\b/.test(normalized) ||
-    /\b(current|this)\s+schedule\b/.test(normalized)
-  ) {
-    return { date: selectedDate, source: "SELECTED_DAY" };
-  }
-
-  const conversationDate = recentConversationDate(history, selectedDate);
-  const latestAssistant = [...history]
-    .reverse()
-    .find((entry) => entry.role === "assistant")?.text.toLowerCase();
-  if (
-    conversationDate &&
-    (isAffirmativeContinuation(message) ||
-      Boolean(latestAssistant?.includes("which day")) ||
-      Boolean(latestAssistant?.includes("what date")) ||
-      Boolean(latestAssistant?.includes("would you like me to generate")) ||
-      Boolean(latestAssistant?.includes("would you like to proceed")) ||
-      Boolean(latestAssistant?.includes("do you allow me to override")))
-  ) {
-    return { date: conversationDate, source: "CONVERSATION" };
-  }
-
-  // A follow-up that only corrects a time/person/client should stay on the most
-  // recently established conversation date. Explicit new dates/weekdays above
-  // always win, so this cannot silently change an explicitly supplied day.
-  if (conversationDate && history.length > 0) {
-    return { date: conversationDate, source: "CONVERSATION" };
-  }
-
-  if (dateSelectionExplicit) {
-    return { date: selectedDate, source: "SELECTED_DAY" };
-  }
-
-  return { date: selectedDate, source: "PASSIVE_SELECTION" };
 }
 
 function stringifyLimited(value: unknown, maxLength: number): string {
