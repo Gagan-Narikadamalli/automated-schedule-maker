@@ -297,16 +297,36 @@ function answerNeedsFollowUp(reply: string): boolean {
     normalized.includes("would you like to proceed") ||
     normalized.includes("still want to proceed") ||
     normalized.includes("want me to proceed") ||
-    normalized.includes("do you allow me to override")
+    normalized.includes("do you allow me to override") ||
+    normalized.includes("i need a few required details") ||
+    normalized.includes("i need the following required") ||
+    normalized.includes("i just need") ||
+    normalized.includes("i need two more") ||
+    normalized.includes("please provide") ||
+    normalized.includes("please send") ||
+    normalized.includes("before i can create") ||
+    normalized.includes("before i can update") ||
+    normalized.includes("before i can continue") ||
+    normalized.includes("which person do you mean") ||
+    normalized.includes("which client do you mean") ||
+    normalized.includes("which staff member do you mean")
   );
 }
 
 function ensureConversationClosing(reply: string): string {
-  if (answerNeedsFollowUp(reply)) return reply;
+  const genericClosing =
+    /\n*is there anything else (you('|’)d|you would) like help with\??\s*$/i;
+  const withoutGenericClosing = reply.replace(genericClosing, "").trim();
+
+  if (answerNeedsFollowUp(withoutGenericClosing)) {
+    return withoutGenericClosing;
+  }
+
   if (/is there anything else (you('|’)d|you would) like help with\??/i.test(reply)) {
     return reply;
   }
-  return `${reply.trim()}\n\n${CLOSING_QUESTION}`;
+
+  return `${withoutGenericClosing}\n\n${CLOSING_QUESTION}`;
 }
 
 export async function POST(request: Request) {

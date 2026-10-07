@@ -10,6 +10,12 @@ import { POST as createStaff } from "@/app/api/staff/route";
 import { PATCH as updateStaff } from "@/app/api/staff/[id]/route";
 import { GET as getSupervision, POST as saveSupervision } from "@/app/api/supervision/route";
 import { POST as createTeam } from "@/app/api/teams/route";
+import {
+  GET as getTemplates,
+  POST as createTemplate,
+  DELETE as archiveTemplate,
+} from "@/app/api/templates/route";
+import { POST as applyTemplate } from "@/app/api/templates/apply/route";
 import { PATCH as updateTeam } from "@/app/api/teams/[id]/route";
 import { connectToDatabase } from "@/lib/db";
 import { Client } from "@/models/Client";
@@ -105,6 +111,22 @@ type AttendanceInput = {
   endTime?: string;
   note?: string;
   exceptionId?: string;
+};
+
+type TemplateInput = {
+  action: "LIST" | "CREATE" | "APPLY" | "ARCHIVE";
+  template?: string;
+  name?: string;
+  dayOfWeek?:
+    | "MONDAY"
+    | "TUESDAY"
+    | "WEDNESDAY"
+    | "THURSDAY"
+    | "FRIDAY"
+    | "SATURDAY"
+    | "SUNDAY";
+  sourceDate?: string;
+  targetDate?: string;
 };
 
 type SupervisionInput = {
@@ -282,6 +304,44 @@ const rulesSchema = jsonSchema<JsonRecord>({
   additionalProperties: false,
 });
 
+const templateSchema = jsonSchema<TemplateInput>({
+  type: "object",
+  properties: {
+    action: {
+      type: "string",
+      enum: ["LIST", "CREATE", "APPLY", "ARCHIVE"],
+    },
+    template: {
+      type: "string",
+      description: "Template ID or exact template name for APPLY/ARCHIVE.",
+    },
+    name: { type: "string" },
+    dayOfWeek: {
+      type: "string",
+      enum: [
+        "MONDAY",
+        "TUESDAY",
+        "WEDNESDAY",
+        "THURSDAY",
+        "FRIDAY",
+        "SATURDAY",
+        "SUNDAY",
+      ],
+    },
+    sourceDate: {
+      type: "string",
+      description: "YYYY-MM-DD source schedule date for CREATE.",
+    },
+    targetDate: {
+      type: "string",
+      description:
+        "YYYY-MM-DD destination date for APPLY. Defaults to the selected scheduler date.",
+    },
+  },
+  required: ["action"],
+  additionalProperties: false,
+});
+
 const supervisionSchema = jsonSchema<SupervisionInput>({
   type: "object",
   properties: {
@@ -413,6 +473,7 @@ export const SCHEDULER_WEBSITE_WRITE_TOOL_NAMES = new Set([
   "manage_client_attendance",
   "update_scheduler_rules",
   "save_supervision_record",
+  "manage_schedule_template",
 ]);
 
 export function createSchedulerWebsiteTools(context: SchedulerAiContext) {
@@ -687,6 +748,114 @@ export function createSchedulerWebsiteTools(context: SchedulerAiContext) {
         "Update clinic-wide automatic scheduler rules and priorities such as break window/eligibility, weekly hour ranges, rotation/continuity priorities, schedule hours, role coverage priorities, historical/template preferences, and supervision target. Only send fields the user actually wants changed.",
       inputSchema: rulesSchema,
       execute: async (changes) => invokeJson(updateSchedulingRules, "PUT", { locationId, ...changes }),
+    }),
+
+    manage_schedule_template: tool({
+      description:
+        "List, create, apply, or archive reusable schedule templates. CREATE can save a populated source schedule date into a named weekday template. APPLY revalidates the template against the target date's staff/client constraints and preserves protected target cells. Resolve template names safely instead of inventing IDs.",
+      inputSchema: templateSchema,
+      execute: async (input) => {
+        const listTemplates = async () =>
+          invokeJson(
+            getTemplates,
+            "GET",
+            undefined,
+            `http://scheduler-ai.internal/api/templates?locationId=${encodeURIComponent(locationId)}`
+          );
+
+        if (input.action === "LIST") {
+          const listed = await listTemplates();
+          return { ...listed, changed: false, readOnly: true };
+        }
+
+        if (input.action === "CREATE") {
+          const name = input.name?.trim() ?? "";
+          const sourceDate = input.sourceDate?.trim() || date;
+          const explicitDay = input.dayOfWeek?.trim().toUpperCase();
+          const parsed = /^\d{4}-\d{2}-\d{2}$/.test(sourceDate)
+            ? new Date(`${sourceDate}T00:00:00Z`)
+            : null;
+          const days = [
+            "SUNDAY",
+            "MONDAY",
+            "TUESDAY",
+            "WEDNESDAY",
+            "THURSDAY",
+            "FRIDAY",
+            "SATURDAY",
+          ];
+          const dayOfWeek =
+            explicitDay ||
+            (parsed && !Number.isNaN(parsed.getTime())
+              ? days[parsed.getUTCDay()]
+              : "");
+
+          if (!name || !dayOfWeek) {
+            return {
+              ok: false,
+              error:
+                "Creating a schedule template requires a template name and a valid source date/day.",
+            };
+          }
+
+          return invokeJson(createTemplate, "POST", {
+            locationId,
+            name,
+            dayOfWeek,
+            sourceDate,
+          });
+        }
+
+        const reference = input.template?.trim() ?? "";
+        if (!reference) {
+          return {
+            ok: false,
+            error: "Applying or archiving a template requires a template name or ID.",
+          };
+        }
+
+        const listed = await listTemplates();
+        const templates = Array.isArray(listed.templates)
+          ? (listed.templates as JsonRecord[])
+          : [];
+        const normalized = reference.toLowerCase();
+        const matches = templates.filter(
+          (template) =>
+            String(template.id ?? "").toLowerCase() === normalized ||
+            String(template.name ?? "").toLowerCase() === normalized
+        );
+
+        if (matches.length !== 1) {
+          return {
+            ok: false,
+            needsClarification: true,
+            matches: matches.map((template) => ({
+              id: String(template.id ?? ""),
+              name: String(template.name ?? ""),
+              dayOfWeek: String(template.dayOfWeek ?? ""),
+            })),
+            error:
+              matches.length === 0
+                ? `No active schedule template matched "${reference}".`
+                : `More than one schedule template matched "${reference}".`,
+          };
+        }
+
+        const templateId = String(matches[0].id);
+        if (input.action === "APPLY") {
+          const targetDate = input.targetDate?.trim() || date;
+          return invokeJson(applyTemplate, "POST", {
+            locationId,
+            templateId,
+            targetDate,
+          });
+        }
+
+        return invokeJson(archiveTemplate, "DELETE", {
+          locationId,
+          templateId,
+        });
+      },
     }),
 
     save_supervision_record: tool({

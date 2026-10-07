@@ -131,6 +131,15 @@ const SAVED_PROMPT_GROUPS: SavedPromptGroup[] = [
     ],
   },
   {
+    title: "Templates",
+    prompts: [
+      "Show me the active schedule templates for this clinic.",
+      "Save [source date] as a template named [template name].",
+      "Apply template [template name] to [target date], revalidate it, and tell me which blocks were skipped or changed.",
+      "Archive template [template name] after confirming you matched the correct template.",
+    ],
+  },
+  {
     title: "Supervision",
     prompts: [
       "Show me the supervision plan for [month] and identify staff who are below target or missing records.",
@@ -527,7 +536,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
 
           <div className={styles.promptHint}>
             <span>
-              Ask naturally — schedule checks, generation, Minimal Fix, moves/replacements, Unplaced work, staff/client profiles, call-outs, attendance, naps/speech, teams, rules, supervision, or planning. Use Saved prompts for realistic examples.
+              Ask naturally — schedule checks, generation, Minimal Fix, moves/replacements, Unplaced work, staff/client profiles, call-outs, attendance, naps/speech, teams, templates, rules, supervision, or planning. Use Saved prompts for realistic examples.
             </span>
             <button
               type="button"
@@ -567,7 +576,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
           <div className={styles.messages} aria-live="polite">
             {messages.length === 0 ? (
               <div className={styles.emptyState}>
-                Ask a question or request a change in normal language. For a clear date, Scheduler AI loads that day's staff availability, client requirements, saved assignments, breaks, events, call-outs, unplaced work, and coverage before answering. If a day is unclear, it will ask which day. If the requested day has no generated schedule, it will offer to generate it.
+                Ask a question or request a change in normal language. You can also create or update staff, clients, teams, templates, attendance, events, rules, and supervision through conversation. For a clear date, Scheduler AI loads that day's staff availability, client requirements, saved assignments, breaks, events, call-outs, unplaced work, and coverage before answering. If a day is unclear, it will ask which day. If the requested day has no generated schedule, it will offer to generate it.
               </div>
             ) : (
               messages.map((message) => (
