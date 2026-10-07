@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "test:scheduler": "tsx scripts/test-scheduler.ts && tsx scripts/test-repair.ts && tsx scripts/test-preflight.ts && tsx scripts/test-break-eligibility.ts && tsx scripts/test-preflight-eligibility.ts && tsx scripts/test-native-scheduler-ai.ts && tsx scripts/test-native-scheduler-ai-conversation.ts && tsx scripts/test-native-scheduler-ai-language.ts && tsx scripts/test-native-scheduler-ai-management.ts && tsx scripts/test-native-scheduler-ai-followup.ts && tsx scripts/test-native-scheduler-ai-evaluation.ts && tsx scripts/test-native-scheduler-ai-typos.ts && tsx scripts/test-native-scheduler-ai-parity.ts && tsx scripts/test-native-scheduler-ai-lifecycle.ts && tsx scripts/test-native-scheduler-ai-dates.ts",
+    "test:scheduler": "tsx scripts/test-scheduler.ts && tsx scripts/test-repair.ts && tsx scripts/test-preflight.ts && tsx scripts/test-break-eligibility.ts && tsx scripts/test-preflight-eligibility.ts && tsx scripts/test-native-scheduler-ai.ts && tsx scripts/test-native-scheduler-ai-conversation.ts && tsx scripts/test-native-scheduler-ai-language.ts && tsx scripts/test-native-scheduler-ai-management.ts && tsx scripts/test-native-scheduler-ai-followup.ts && tsx scripts/test-native-scheduler-ai-evaluation.ts && tsx scripts/test-native-scheduler-ai-typos.ts && tsx scripts/test-native-scheduler-ai-parity.ts && tsx scripts/test-native-scheduler-ai-lifecycle.ts && tsx scripts/test-native-scheduler-ai-dates.ts && tsx scripts/test-callout-visibility.ts",
     "start": "next start",
     "test:native-ai": "tsx scripts/test-native-scheduler-ai.ts",
     "test:native-ai-conversation": "tsx scripts/test-native-scheduler-ai-conversation.ts",
@@ -16,7 +16,8 @@
     "test:native-ai-typos": "tsx scripts/test-native-scheduler-ai-typos.ts",
     "test:native-ai-parity": "tsx scripts/test-native-scheduler-ai-parity.ts",
     "test:native-ai-lifecycle": "tsx scripts/test-native-scheduler-ai-lifecycle.ts",
-    "test:native-ai-dates": "tsx scripts/test-native-scheduler-ai-dates.ts"
+    "test:native-ai-dates": "tsx scripts/test-native-scheduler-ai-dates.ts",
+    "test:callout-visibility": "tsx scripts/test-callout-visibility.ts"
   },
   "dependencies": {
     "ai": "^7.0.123",
