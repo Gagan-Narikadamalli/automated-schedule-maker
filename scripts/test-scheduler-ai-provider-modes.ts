@@ -71,6 +71,22 @@ assert.equal(fs.existsSync(path.join(root, nativeEntry)), true);
 assert.equal(fs.existsSync(path.join(root, paidEntry)), true);
 
 const nativeGraph = transitiveImports(nativeEntry);
+const paidGraph = transitiveImports(paidEntry);
+for (const nativeFile of [
+  "src/app/api/ai/native/route.ts",
+  "src/features/ai/schedulerNativeAi.ts",
+  "src/features/ai/schedulerNativeEvaluation.ts",
+  "src/features/ai/schedulerNativeFollowUp.ts",
+  "src/features/ai/schedulerNativeKnowledge.ts",
+  "src/features/ai/schedulerNativeManagement.ts",
+]) {
+  assert.equal(
+    paidGraph.files.has(nativeFile),
+    false,
+    `Paid Scheduler AI must stay independent of ${nativeFile}.`
+  );
+}
+
 assert.equal(
   nativeGraph.packages.has("ai"),
   false,
@@ -132,5 +148,5 @@ assert.match(nativeRoute, /thinkingLevel: "low"/);
 assert.doesNotMatch(nativeRoute, /ToolLoopAgent|generateText|AI_GATEWAY|openai\//i);
 
 console.log(
-  `Scheduler AI isolation tests passed (Native graph: ${nativeGraph.files.size} project files, no paid AI SDK dependency).`
+  `Scheduler AI isolation tests passed (Native graph: ${nativeGraph.files.size} files; Paid graph: ${paidGraph.files.size} files; no cross-provider imports).`
 );
