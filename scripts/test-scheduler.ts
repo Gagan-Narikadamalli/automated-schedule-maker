@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 
+import { matchEntityReference } from "../src/features/ai/entityReference";
 import { generateSchedule } from "../src/features/scheduler/engine/generateSchedule";
 import { buildHistoricalPatternScores } from "../src/features/scheduler/engine/historicalPatterns";
 import { reserveStaffBreaks } from "../src/features/scheduler/engine/reserveBreaks";
@@ -360,6 +361,147 @@ function testManualAssignmentsStayProtected() {
     "bt-2",
     "The automatic scheduler must not move a locked manager assignment."
   );
+}
+
+function testManualAssignmentsCanBeRebuiltWhenPreservationIsOff() {
+  const staff = [
+    createStaff("bt-1", "BT One", "BT", ["08:00"]),
+    createStaff("bt-2", "BT Two", "BT", ["08:00"]),
+  ];
+  const clients = [
+    createClient("client-1", "AA", ["08:00"]),
+  ];
+  const manualAssignment: SchedulerAssignment = {
+    id: "manual-rebuild",
+    staffId: "bt-2",
+    clientId: "client-1",
+    startTime: "08:00",
+    assignmentType: "CLIENT_1_TO_1",
+    source: "MANUAL",
+    locked: true,
+  };
+  const input = createInput(staff, clients, [manualAssignment]);
+  input.rules.preserveManualOverrides = false;
+
+  const result = generateSchedule(input);
+
+  assert.equal(
+    result.assignments.some(
+      (assignment) => assignment.id === "manual-rebuild"
+    ),
+    false,
+    "When manual preservation is disabled, Generate may rebuild a manager-entered client assignment."
+  );
+  assert.equal(
+    result.metrics.coveredClientSlots,
+    1,
+    "Rebuilding manual client cells must still preserve required client coverage."
+  );
+}
+
+function testHandoffPenaltyPrefersNeighboringClientContinuity() {
+  const staff = [
+    createStaff("bt-1", "BT One", "BT", ["08:00", "08:30"]),
+    createStaff("bt-2", "BT Two", "BT", ["08:30"]),
+  ];
+  const client = createClient("client-1", "AA", ["08:00", "08:30"]);
+  const existing: SchedulerAssignment[] = [
+    {
+      id: "manual-aa-0800",
+      staffId: "bt-1",
+      clientId: "client-1",
+      startTime: "08:00",
+      assignmentType: "CLIENT_1_TO_1",
+      source: "MANUAL",
+      locked: true,
+    },
+  ];
+  const input = createInput(staff, [client], existing);
+  input.rules.preferStaffContinuity = false;
+  input.rules.continuityPriority = 0;
+  input.rules.workloadBalancePriority = 0;
+  input.rules.staffScheduleCompactnessPriority = 0;
+  input.rules.clientHandoffPenaltyPriority = 100;
+
+  const result = generateSchedule(input);
+  const atEightThirty = clientAssignments(result.assignments).find(
+    (assignment) =>
+      assignment.clientId === "client-1" &&
+      assignment.startTime === "08:30"
+  );
+
+  assert.equal(
+    atEightThirty?.staffId,
+    "bt-1",
+    "A strong handoff-reduction preference should avoid an unnecessary staff change between neighboring blocks."
+  );
+}
+
+function testCompactnessPrefersAdjacentStaffWork() {
+  const staff = [
+    createStaff("bt-1", "BT One", "BT", ["08:00", "08:30"]),
+    createStaff("bt-2", "BT Two", "BT", ["08:30"]),
+  ];
+  const clients = [
+    createClient("client-a", "AA", ["08:00"]),
+    createClient("client-b", "BB", ["08:30"]),
+  ];
+  const existing: SchedulerAssignment[] = [
+    {
+      id: "manual-aa",
+      staffId: "bt-1",
+      clientId: "client-a",
+      startTime: "08:00",
+      assignmentType: "CLIENT_1_TO_1",
+      source: "MANUAL",
+      locked: true,
+    },
+  ];
+  const input = createInput(staff, clients, existing);
+  input.rules.workloadBalancePriority = 0;
+  input.rules.clientHandoffPenaltyPriority = 0;
+  input.rules.staffScheduleCompactnessPriority = 100;
+
+  const result = generateSchedule(input);
+  const clientB = clientAssignments(result.assignments).find(
+    (assignment) =>
+      assignment.clientId === "client-b" &&
+      assignment.startTime === "08:30"
+  );
+
+  assert.equal(
+    clientB?.staffId,
+    "bt-1",
+    "Compactness priority should prefer adjacent work over creating an avoidable isolated staff gap."
+  );
+}
+
+function testAiEntityMatchingIgnoresCaseSpacingAndSmallTypos() {
+  const areyana = { id: "1", name: "Areyana" };
+  const anias = { id: "2", name: "Anias" };
+  const candidates = [
+    { record: areyana, labels: ["Areyana"] },
+    { record: anias, labels: ["Anias"] },
+  ];
+
+  const mixedCase = matchEntityReference("aReYaNa", candidates);
+  assert.equal(mixedCase.status, "MATCH");
+  if (mixedCase.status === "MATCH") {
+    assert.equal(mixedCase.record.id, "1");
+  }
+
+  const punctuation = matchEntityReference("Are-yana", candidates);
+  assert.equal(punctuation.status, "MATCH");
+  if (punctuation.status === "MATCH") {
+    assert.equal(punctuation.record.id, "1");
+  }
+
+  const typo = matchEntityReference("Areyanna", candidates);
+  assert.equal(typo.status, "MATCH");
+  if (typo.status === "MATCH") {
+    assert.equal(typo.record.id, "1");
+    assert.equal(typo.fuzzy, true);
+  }
 }
 
 function testHigherSupportClientRotates() {
@@ -786,6 +928,10 @@ function runSchedulerRegressionScenarios() {
   testImportedHistoricalPatternGuidesMatching();
   testPartialBuildKeepsSafeCoverage();
   testManualAssignmentsStayProtected();
+  testManualAssignmentsCanBeRebuiltWhenPreservationIsOff();
+  testHandoffPenaltyPrefersNeighboringClientContinuity();
+  testCompactnessPrefersAdjacentStaffWork();
+  testAiEntityMatchingIgnoresCaseSpacingAndSmallTypos();
   testHigherSupportClientRotates();
   testWeeklyMaximumIsHardLimit();
   testTemplateReferenceGuidesStableMatching();
