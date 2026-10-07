@@ -195,8 +195,8 @@ export function TeamCardManager() {
     setModalOpen(true);
   }
 
-  function closeModal() {
-    if (saving) {
+  function closeModal(force = false) {
+    if (saving && !force) {
       return;
     }
     setModalOpen(false);
@@ -298,8 +298,8 @@ export function TeamCardManager() {
       }
 
       await syncMembership(teamId);
+      closeModal(true);
       await loadLocationData(selectedLocationId);
-      closeModal();
       setMessage(`${trimmedName} was saved with its current staff and client membership.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Team could not be saved.");
@@ -448,7 +448,7 @@ export function TeamCardManager() {
         onClose={closeModal}
         footer={
           <>
-            <button type="button" className="button button-secondary" disabled={saving} onClick={closeModal}>Cancel</button>
+            <button type="button" className="button button-secondary" disabled={saving} onClick={() => closeModal()}>Cancel</button>
             <button type="button" className="button button-primary" disabled={saving} onClick={() => void saveTeam()}>
               {saving ? "Saving..." : editingId ? "Save Changes" : "Add Team"}
             </button>
