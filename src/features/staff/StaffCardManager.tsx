@@ -281,8 +281,8 @@ export function StaffCardManager() {
     setModalOpen(true);
   }
 
-  function closeModal() {
-    if (saving) {
+  function closeModal(force = false) {
+    if (saving && !force) {
       return;
     }
 
@@ -373,8 +373,8 @@ export function StaffCardManager() {
       }
 
       const savedName = form.fullName.trim();
+      closeModal(true);
       await loadLocationData(selectedLocationId);
-      closeModal();
       setMessage(`${savedName} was saved and is available to the scheduler.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Staff member could not be saved.");
@@ -545,6 +545,11 @@ export function StaffCardManager() {
                   </div>
 
                   <div className={cardStyles.chips}>
+                    {(staffMember.shiftPatterns ?? []).length === 0 && staffMember.active ? (
+                      <span className={cardStyles.chip}>
+                        Needs working days/hours before scheduling
+                      </span>
+                    ) : null}
                     {(staffMember.shiftPatterns ?? []).slice(0, 3).map((pattern, index) => (
                       <span key={`${staffMember.id}-${index}`} className={cardStyles.chip}>
                         {pattern.name}: {pattern.startTime}-{pattern.endTime}
@@ -591,7 +596,7 @@ export function StaffCardManager() {
               type="button"
               className="button button-secondary"
               disabled={saving}
-              onClick={closeModal}
+              onClick={() => closeModal()}
             >
               Cancel
             </button>
