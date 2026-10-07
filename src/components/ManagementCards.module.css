@@ -420,3 +420,66 @@
   font-size: 0.72rem;
   line-height: 1.4;
 }
+
+
+.quickSchedule {
+  display: grid;
+  gap: 12px;
+  margin: 14px 0 16px;
+  padding: 14px;
+  border: 1px solid #d6e7ef;
+  border-radius: 14px;
+  background: #ffffff;
+}
+
+.quickSchedule > strong {
+  color: #173f59;
+  font-size: 0.86rem;
+}
+
+.quickSchedule > span {
+  color: #6d7f8b;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.weeklyEditor {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.weeklyEditorRow {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.7fr) repeat(2, minmax(150px, 1fr));
+  gap: 12px;
+  align-items: end;
+  padding: 12px;
+  border: 1px solid #dce9ef;
+  border-radius: 13px;
+  background: #ffffff;
+}
+
+.weeklyDayToggle {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  gap: 9px;
+  color: #234f68;
+}
+
+.weeklyDayToggle input {
+  width: 17px;
+  height: 17px;
+}
+
+.weeklyDayToggle strong {
+  font-size: 0.86rem;
+}
+
+@media (max-width: 720px) {
+  .weeklyEditorRow {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+}
