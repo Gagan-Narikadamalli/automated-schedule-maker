@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { calculateSchedulerReadiness } from "@/features/scheduler/engine/preflight";
+import { applyFixedNapSessions } from "@/features/scheduler/server/applyFixedNapSessions";
 import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySchedulerInput";
 
 export async function GET(request: Request) {
@@ -24,8 +25,13 @@ export async function GET(request: Request) {
     }
 
     const dayData = await buildDaySchedulerInput(locationId, date);
+    const fixedNapApplication = await applyFixedNapSessions(
+      locationId,
+      date,
+      dayData.input
+    );
     const readiness = calculateSchedulerReadiness(
-      dayData.input,
+      fixedNapApplication.input,
       dayData.extendedRules
     );
 
