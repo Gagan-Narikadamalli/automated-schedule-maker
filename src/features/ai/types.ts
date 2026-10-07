@@ -1,4 +1,6 @@
 export type SchedulerAiMode = "READ_ONLY" | "AUTONOMOUS";
+export type SchedulerAiProviderMode = "native" | "gateway";
+export type SchedulerAiThinkingLevel = "low" | "high";
 
 export type SchedulerAiDateSource =
   | "TODAY"
@@ -48,6 +50,7 @@ export type SchedulerAiRequest = {
   dateSelectionExplicit?: boolean;
   history?: SchedulerAiHistoryMessage[];
   attachments?: SchedulerAiAttachment[];
+  provider?: SchedulerAiProviderMode;
 };
 
 export type SchedulerAiResponse = {
@@ -57,6 +60,8 @@ export type SchedulerAiResponse = {
   writeToolsUsed: string[];
   changed: boolean;
   mode: SchedulerAiMode;
+  provider: SchedulerAiProviderMode;
+  thinkingLevel: SchedulerAiThinkingLevel;
   effectiveDate?: string;
   attachmentAnalysis?: string;
   attachmentNames?: string[];
