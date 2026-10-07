@@ -13,6 +13,7 @@ import type {
   SchedulerAssignment,
   SchedulerStaff,
 } from "@/features/scheduler/engine/types";
+import { applyFixedNapSessions } from "@/features/scheduler/server/applyFixedNapSessions";
 import { applyHistoricalTraining } from "@/features/scheduler/server/applyHistoricalTraining";
 import { applyLivingstonWorkbookTrial } from "@/features/scheduler/server/applyLivingstonWorkbookTrial";
 import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySchedulerInput";
@@ -219,10 +220,15 @@ export async function POST(request: Request) {
     }
 
     const dayData = await buildDaySchedulerInput(locationId, date);
+    const fixedNapApplication = await applyFixedNapSessions(
+      locationId,
+      date,
+      dayData.input
+    );
 
     const workbookTraining = await applyLivingstonWorkbookTrial(
       locationId,
-      dayData.input
+      fixedNapApplication.input
     );
 
     const historicalTraining = await applyHistoricalTraining(
@@ -515,6 +521,8 @@ export async function POST(request: Request) {
         metrics: finalMetrics,
         uncoveredRequirements: result.uncoveredRequirements,
         warningCount: result.warnings.length,
+        fixedNapSessionsApplied: fixedNapApplication.sessionCount,
+        fixedNapClientsApplied: fixedNapApplication.clientCount,
         workbookTrainingApplied: workbookTraining.applied,
         importedTrainingScheduleDays:
           historicalTraining.matchedScheduleDayCount,
@@ -539,6 +547,8 @@ export async function POST(request: Request) {
       breakReliefSwapCount: breakPlan?.reliefSwapCount ?? 0,
       unplacedBreakStaffIds: breakPlan?.unplacedBreakStaffIds ?? [],
       totalBreakCount,
+      fixedNapSessionsApplied: fixedNapApplication.sessionCount,
+      fixedNapClientsApplied: fixedNapApplication.clientCount,
       metrics: finalMetrics,
       warnings: result.warnings,
       uncoveredRequirements: result.uncoveredRequirements,
