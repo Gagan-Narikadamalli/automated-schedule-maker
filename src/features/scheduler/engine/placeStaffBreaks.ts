@@ -11,6 +11,7 @@ import type {
 export type PostCoverageBreakRules = {
   breakWindowStart: string;
   breakWindowEnd: string;
+  breakSchedulingEnabled?: boolean;
   defaultBreakMinutes: number;
   breakEligibilityHours: number;
   slotLengthMinutes: number;
@@ -230,62 +231,133 @@ function createBreakAssignment(
   };
 }
 
-function findBestFreeBreak(
+function buildBreakSlotTimes(
+  startTime: string,
+  durationMinutes: number,
+  slotLengthMinutes: number
+): string[] {
+  const blockCount = Math.max(
+    Math.ceil(durationMinutes / slotLengthMinutes),
+    1
+  );
+  const slots: string[] = [];
+
+  for (let index = 0; index < blockCount; index += 1) {
+    const slot = shiftTime(startTime, index * slotLengthMinutes);
+
+    if (!slot) {
+      return [];
+    }
+
+    slots.push(slot);
+  }
+
+  return slots;
+}
+
+function findBestFreeBreaks(
   staffMember: SchedulerStaff,
   assignments: SchedulerAssignment[],
   clients: SchedulerClient[],
   referenceAssignments: SchedulerAssignment[],
   rules: PostCoverageBreakRules
-): SchedulerAssignment | null {
+): SchedulerAssignment[] {
   const historicalPriority = Math.max(rules.historicalBreakPriority ?? 80, 0);
   const candidates = staffMember.availableSlots
-    .filter((startTime) => {
-      const occupied = assignments.some(
-        (assignment) =>
-          assignment.staffId === staffMember.id &&
-          assignment.startTime === startTime
-      );
-
-      return !occupied;
-    })
     .map((startTime) => {
-      const fixedEvent = findFixedEventForStaffSlot(
-        staffMember.id,
+      const slotTimes = buildBreakSlotTimes(
         startTime,
-        assignments,
-        clients,
+        rules.defaultBreakMinutes,
         rules.slotLengthMinutes
       );
-      const insideNormalWindow =
-        startTime >= rules.breakWindowStart && startTime < rules.breakWindowEnd;
-      const insideNapExtension =
-        fixedEvent?.assignmentType === "BREAK_NAP" &&
-        startTime >= rules.breakWindowStart &&
-        startTime < NAP_BREAK_WINDOW_END;
 
-      if (!insideNormalWindow && !insideNapExtension) {
+      if (slotTimes.length === 0) {
         return null;
       }
 
-      const historicalCount = countReferenceBreaks(
-        staffMember.id,
-        startTime,
-        referenceAssignments
+      const slotDetails = slotTimes.map((slotTime) => {
+        if (!staffMember.availableSlots.includes(slotTime)) {
+          return null;
+        }
+
+        const occupied = assignments.some(
+          (assignment) =>
+            assignment.staffId === staffMember.id &&
+            assignment.startTime === slotTime
+        );
+
+        if (occupied) {
+          return null;
+        }
+
+        const fixedEvent = findFixedEventForStaffSlot(
+          staffMember.id,
+          slotTime,
+          assignments,
+          clients,
+          rules.slotLengthMinutes
+        );
+        const insideNormalWindow =
+          slotTime >= rules.breakWindowStart &&
+          slotTime < rules.breakWindowEnd;
+        const insideNapExtension =
+          fixedEvent?.assignmentType === "BREAK_NAP" &&
+          slotTime >= rules.breakWindowStart &&
+          slotTime < NAP_BREAK_WINDOW_END;
+
+        if (!insideNormalWindow && !insideNapExtension) {
+          return null;
+        }
+
+        return {
+          slotTime,
+          fixedEvent,
+        };
+      });
+
+      if (slotDetails.some((detail) => detail === null)) {
+        return null;
+      }
+
+      const details = slotDetails as Array<{
+        slotTime: string;
+        fixedEvent: FixedEventCandidate | null;
+      }>;
+      const historicalCount = details.reduce(
+        (total, detail) =>
+          total +
+          countReferenceBreaks(
+            staffMember.id,
+            detail.slotTime,
+            referenceAssignments
+          ),
+        0
       );
-      const eventPriority = fixedEvent ? fixedEvent.priority : 100;
+      const eventPriority = Math.min(
+        ...details.map((detail) =>
+          detail.fixedEvent ? detail.fixedEvent.priority : 100
+        )
+      );
       const score =
         eventPriority * 10 +
         timeDistanceFromNoon(startTime) -
         Math.min(historicalCount, 4) * historicalPriority;
 
-      return { startTime, fixedEvent, score };
+      return {
+        startTime,
+        details,
+        score,
+      };
     })
     .filter(
       (
         candidate
       ): candidate is {
         startTime: string;
-        fixedEvent: FixedEventCandidate | null;
+        details: Array<{
+          slotTime: string;
+          fixedEvent: FixedEventCandidate | null;
+        }>;
         score: number;
       } => candidate !== null
     )
@@ -299,9 +371,17 @@ function findBestFreeBreak(
 
   const best = candidates[0];
 
-  return best
-    ? createBreakAssignment(staffMember, best.startTime, best.fixedEvent)
-    : null;
+  if (!best) {
+    return [];
+  }
+
+  return best.details.map((detail) =>
+    createBreakAssignment(
+      staffMember,
+      detail.slotTime,
+      detail.fixedEvent
+    )
+  );
 }
 
 function findReliefSwap(
@@ -459,8 +539,9 @@ export function placeStaffBreaksAfterCoverage({
   allowProtectedRelief = false,
 }: PlaceStaffBreaksInput): PlaceStaffBreaksResult {
   if (
+    rules.breakSchedulingEnabled === false ||
     rules.defaultBreakMinutes <= 0 ||
-    rules.defaultBreakMinutes !== rules.slotLengthMinutes
+    rules.defaultBreakMinutes % rules.slotLengthMinutes !== 0
   ) {
     return {
       assignments: initialAssignments.map((assignment) => ({ ...assignment })),
@@ -502,7 +583,7 @@ export function placeStaffBreaksAfterCoverage({
       continue;
     }
 
-    const freeBreak = findBestFreeBreak(
+    const freeBreaks = findBestFreeBreaks(
       staffMember,
       assignments,
       clients,
@@ -510,9 +591,17 @@ export function placeStaffBreaksAfterCoverage({
       rules
     );
 
-    if (freeBreak) {
-      assignments.push(freeBreak);
-      reservedBreaks.push(freeBreak);
+    if (freeBreaks.length > 0) {
+      assignments.push(...freeBreaks);
+      reservedBreaks.push(...freeBreaks);
+      continue;
+    }
+
+    // Multi-block breaks must be placed as one contiguous free window. The
+    // single-block relief swap remains available for the normal 30-minute
+    // clinic break.
+    if (rules.defaultBreakMinutes !== rules.slotLengthMinutes) {
+      unplacedBreakStaffIds.push(staffMember.id);
       continue;
     }
 
