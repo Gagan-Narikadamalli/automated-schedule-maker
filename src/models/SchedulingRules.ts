@@ -131,6 +131,26 @@ const SchedulingRulesSchema = new Schema(
       min: 0,
       max: 200,
     },
+    clientHandoffPenaltyPriority: {
+      type: Number,
+      default: 25,
+      min: 0,
+      max: 200,
+    },
+    staffScheduleCompactnessPriority: {
+      type: Number,
+      default: 8,
+      min: 0,
+      max: 200,
+    },
+    minimalFixAllowProtectedRelocation: {
+      type: Boolean,
+      default: true,
+    },
+    minimalFixAllowBreakRelocation: {
+      type: Boolean,
+      default: true,
+    },
     scheduleStabilityPriority: {
       type: Number,
       default: 140,
