@@ -245,7 +245,7 @@ export function ClientCardManager() {
   const [attendanceDraft, setAttendanceDraft] = useState<TimePattern>(emptyAttendance);
   const [weeklyAttendanceSchedule, setWeeklyAttendanceSchedule] =
     useState<WeeklySchedule>(() =>
-      createWeeklySchedule("08:00", "16:00", true)
+      createWeeklySchedule("08:00", "16:00", false)
     );
   const [napDraft, setNapDraft] = useState<TimePattern>(emptyNap);
   const [weeklyNapSchedule, setWeeklyNapSchedule] =
@@ -381,7 +381,7 @@ export function ClientCardManager() {
     setForm(emptyClientForm());
     setAttendanceDraft(emptyAttendance());
     setWeeklyAttendanceSchedule(
-      createWeeklySchedule("08:00", "16:00", true)
+      createWeeklySchedule("08:00", "16:00", false)
     );
     setNapDraft(emptyNap());
     setWeeklyNapSchedule(
@@ -452,7 +452,7 @@ export function ClientCardManager() {
     setForm(emptyClientForm());
     setAttendanceDraft(emptyAttendance());
     setWeeklyAttendanceSchedule(
-      createWeeklySchedule("08:00", "16:00", true)
+      createWeeklySchedule("08:00", "16:00", false)
     );
     setNapDraft(emptyNap());
     setWeeklyNapSchedule(
@@ -599,10 +599,15 @@ export function ClientCardManager() {
       return;
     }
 
-    const attendanceScheduleError = validateWeeklySchedule(
-      weeklyAttendanceSchedule,
-      "attendance"
-    );
+    const hasAttendanceHours = Object.values(
+      weeklyAttendanceSchedule
+    ).some((day) => day.enabled);
+    const attendanceScheduleError = hasAttendanceHours
+      ? validateWeeklySchedule(
+          weeklyAttendanceSchedule,
+          "attendance"
+        )
+      : null;
 
     if (attendanceScheduleError) {
       setMessage(attendanceScheduleError);
@@ -693,7 +698,11 @@ export function ClientCardManager() {
       const savedCode = displayCode;
       closeModal(true);
       await loadLocationData(selectedLocationId);
-      setMessage(`${savedCode} was saved and is available to the scheduler.`);
+      setMessage(
+        attendancePatterns.length > 0
+          ? `${savedCode} was saved and is available to the scheduler.`
+          : `${savedCode} was saved. Add attendance days/hours before the automatic scheduler can schedule this client.`
+      );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Client could not be saved.");
     } finally {
@@ -706,7 +715,7 @@ export function ClientCardManager() {
       eyebrow: "DELETE CLIENT",
       title: `Permanently delete ${client.displayCode}?`,
       description:
-        `This removes ${client.fullName}'s client profile and its linked live schedule, nap, speech, attendance, unplaced, and template references. Imported historical-learning text is preserved.`,
+        `This removes client ${client.displayCode} and its linked live schedule, nap, speech, attendance, unplaced, and template references. Imported historical-learning text is preserved.`,
       actions: [
         {
           id: "delete",
@@ -827,7 +836,11 @@ export function ClientCardManager() {
                       <div className={cardStyles.avatar}>{initials(client.displayCode)}</div>
                       <div className={cardStyles.identityCopy}>
                         <h3>{client.displayCode}</h3>
-                        <p>{client.fullName}</p>
+                        <p>
+                          {client.serviceSetting === "IN_HOME"
+                            ? "Home Client"
+                            : "Regular Kid / In-Center"}
+                        </p>
                       </div>
                     </div>
                     <span className={`${cardStyles.pill} ${client.active ? "" : cardStyles.pillMuted}`}>
@@ -1015,11 +1028,10 @@ export function ClientCardManager() {
               </select>
             </label>
             <label className="form-field">
-              <span>Service location</span>
+              <span>Client type</span>
               <select value={form.serviceSetting} onChange={(event) => setForm((current) => ({ ...current, serviceSetting: event.target.value as ServiceSetting }))}>
-                <option value="IN_CENTER">In center</option>
-                <option value="IN_HOME">In home</option>
-                <option value="BOTH">Both</option>
+                <option value="IN_CENTER">Regular Kid / In-Center Client</option>
+                <option value="IN_HOME">Home Client</option>
               </select>
             </label>
             <label className="form-field">
