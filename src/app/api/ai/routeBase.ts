@@ -300,7 +300,10 @@ function answerNeedsFollowUp(reply: string): boolean {
     normalized.includes("do you allow me to override") ||
     normalized.includes("i need a few required details") ||
     normalized.includes("i need the following required") ||
-    normalized.includes("please provide the required") ||
+    normalized.includes("i just need") ||
+    normalized.includes("i need two more") ||
+    normalized.includes("please provide") ||
+    normalized.includes("please send") ||
     normalized.includes("before i can create") ||
     normalized.includes("before i can update") ||
     normalized.includes("before i can continue") ||
