@@ -4,6 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 
 import cardStyles from "@/components/ManagementCards.module.css";
 import { ManagementModal } from "@/components/ManagementModal";
+import {
+  createWeeklySchedule,
+  patternsFromWeeklySchedule,
+  validateWeeklySchedule,
+  weeklyScheduleFromPatterns,
+  type WeeklySchedule,
+} from "@/features/shared/weeklySchedule";
 
 type EmployeeType = "FULL_TIME" | "PART_TIME";
 type ServiceSetting = "IN_CENTER" | "IN_HOME" | "BOTH";
@@ -178,6 +185,10 @@ export function StaffCardManager() {
   const [query, setQuery] = useState("");
   const [form, setForm] = useState<StaffForm>(emptyForm);
   const [shiftDraft, setShiftDraft] = useState<ShiftPattern>(emptyShift);
+  const [weeklyShiftSchedule, setWeeklyShiftSchedule] =
+    useState<WeeklySchedule>(() =>
+      createWeeklySchedule("08:00", "17:00", true)
+    );
   const [editingId, setEditingId] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -279,6 +290,9 @@ export function StaffCardManager() {
     setEditingId(null);
     setForm(emptyForm());
     setShiftDraft(emptyShift());
+    setWeeklyShiftSchedule(
+      createWeeklySchedule("08:00", "17:00", true)
+    );
     setModalOpen(true);
   }
 
@@ -302,6 +316,13 @@ export function StaffCardManager() {
       })),
     });
     setShiftDraft(emptyShift());
+    setWeeklyShiftSchedule(
+      weeklyScheduleFromPatterns(
+        staffMember.shiftPatterns ?? [],
+        "08:00",
+        "17:00"
+      )
+    );
     setModalOpen(true);
   }
 
@@ -314,6 +335,9 @@ export function StaffCardManager() {
     setEditingId(null);
     setForm(emptyForm());
     setShiftDraft(emptyShift());
+    setWeeklyShiftSchedule(
+      createWeeklySchedule("08:00", "17:00", true)
+    );
   }
 
   function toggleShiftDay(day: string) {
@@ -325,9 +349,9 @@ export function StaffCardManager() {
     }));
   }
 
-  function addShiftPattern() {
-    if (!shiftDraft.name.trim() || shiftDraft.days.length === 0) {
-      setMessage("Give the shift a name and choose at least one weekday.");
+  function applyShiftToSelectedDays() {
+    if (shiftDraft.days.length === 0) {
+      setMessage("Choose at least one weekday to apply the shift.");
       return;
     }
 
@@ -336,18 +360,46 @@ export function StaffCardManager() {
       return;
     }
 
-    setForm((current) => ({
+    setWeeklyShiftSchedule((current) => {
+      const next = { ...current };
+
+      for (const day of shiftDraft.days) {
+        next[day] = {
+          enabled: true,
+          startTime: shiftDraft.startTime,
+          endTime: shiftDraft.endTime,
+        };
+      }
+
+      return next;
+    });
+    setMessage(
+      `Applied ${shiftDraft.startTime}-${shiftDraft.endTime} to the selected weekdays.`
+    );
+  }
+
+  function toggleWeeklyShiftDay(day: string) {
+    setWeeklyShiftSchedule((current) => ({
       ...current,
-      shiftPatterns: [
-        ...current.shiftPatterns,
-        {
-          ...shiftDraft,
-          name: shiftDraft.name.trim(),
-          days: [...shiftDraft.days],
-        },
-      ],
+      [day]: {
+        ...current[day],
+        enabled: !current[day]?.enabled,
+      },
     }));
-    setShiftDraft(emptyShift());
+  }
+
+  function updateWeeklyShiftTime(
+    day: string,
+    field: "startTime" | "endTime",
+    value: string
+  ) {
+    setWeeklyShiftSchedule((current) => ({
+      ...current,
+      [day]: {
+        ...current[day],
+        [field]: value,
+      },
+    }));
   }
 
   async function saveStaff() {
@@ -356,10 +408,20 @@ export function StaffCardManager() {
       return;
     }
 
-    if (form.shiftPatterns.length === 0) {
-      setMessage("Add at least one working-hours pattern before saving the staff member.");
+    const weeklyScheduleError = validateWeeklySchedule(
+      weeklyShiftSchedule,
+      "working"
+    );
+
+    if (weeklyScheduleError) {
+      setMessage(weeklyScheduleError);
       return;
     }
+
+    const shiftPatterns = patternsFromWeeklySchedule(
+      weeklyShiftSchedule,
+      "Regular shift"
+    );
 
     if (
       form.minimumWeeklyHours < 0 ||
@@ -391,7 +453,7 @@ export function StaffCardManager() {
             minimumWeeklyHours: form.minimumWeeklyHours,
             targetWeeklyHours: form.targetWeeklyHours,
             maximumWeeklyHours: form.maximumWeeklyHours,
-            shiftPatterns: form.shiftPatterns,
+            shiftPatterns,
           }),
         }
       );
@@ -841,88 +903,126 @@ export function StaffCardManager() {
         </div>
 
         <div className={cardStyles.formSection}>
-          <h3>Recurring availability</h3>
-          <p>Add one or more normal shift patterns. Different weekdays can have different hours.</p>
+          <h3>Weekly availability</h3>
+          <p>
+            Set the actual working hours for each weekday. Use Quick Apply when
+            several days share the same shift, then adjust any individual day
+            below. The automatic scheduler uses these daily hours directly.
+          </p>
 
-          <div className="form-grid">
-            <label className="form-field form-field-wide">
-              <span>Pattern name</span>
-              <input
-                value={shiftDraft.name}
-                onChange={(event) =>
-                  setShiftDraft((current) => ({ ...current, name: event.target.value }))
-                }
-              />
-            </label>
-            <label className="form-field">
-              <span>Starts</span>
-              <input
-                type="time"
-                value={shiftDraft.startTime}
-                onChange={(event) =>
-                  setShiftDraft((current) => ({ ...current, startTime: event.target.value }))
-                }
-              />
-            </label>
-            <label className="form-field">
-              <span>Ends</span>
-              <input
-                type="time"
-                value={shiftDraft.endTime}
-                onChange={(event) =>
-                  setShiftDraft((current) => ({ ...current, endTime: event.target.value }))
-                }
-              />
-            </label>
-          </div>
+          <div className={cardStyles.quickSchedule}>
+            <strong>Quick Apply</strong>
+            <span>
+              Example: select Mon, Tue, Wed and apply 09:00-17:00, then select
+              Thu, Fri and apply 08:00-16:00.
+            </span>
 
-          <div className="day-selector">
-            {WEEKDAYS.map(([value, label]) => (
-              <label key={value} className="checkbox-card">
+            <div className="form-grid">
+              <label className="form-field">
+                <span>Starts</span>
                 <input
-                  type="checkbox"
-                  checked={shiftDraft.days.includes(value)}
-                  onChange={() => toggleShiftDay(value)}
+                  type="time"
+                  value={shiftDraft.startTime}
+                  onChange={(event) =>
+                    setShiftDraft((current) => ({
+                      ...current,
+                      startTime: event.target.value,
+                    }))
+                  }
                 />
-                <span>{label}</span>
               </label>
-            ))}
-          </div>
+              <label className="form-field">
+                <span>Ends</span>
+                <input
+                  type="time"
+                  value={shiftDraft.endTime}
+                  onChange={(event) =>
+                    setShiftDraft((current) => ({
+                      ...current,
+                      endTime: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+            </div>
 
-          <div className="form-actions">
+            <div className="day-selector">
+              {WEEKDAYS.map(([value, label]) => (
+                <label key={value} className="checkbox-card">
+                  <input
+                    type="checkbox"
+                    checked={shiftDraft.days.includes(value)}
+                    onChange={() => toggleShiftDay(value)}
+                  />
+                  <span>{label}</span>
+                </label>
+              ))}
+            </div>
+
             <button
               type="button"
               className="button button-secondary button-small"
-              onClick={addShiftPattern}
+              onClick={applyShiftToSelectedDays}
             >
-              + Add shift pattern
+              Apply to selected days
             </button>
           </div>
 
-          {form.shiftPatterns.length > 0 ? (
-            <div className={cardStyles.chips}>
-              {form.shiftPatterns.map((pattern, index) => (
-                <button
-                  key={`${pattern.name}-${index}`}
-                  type="button"
-                  className={cardStyles.chip}
-                  title="Click to remove this shift"
-                  onClick={() =>
-                    setForm((current) => ({
-                      ...current,
-                      shiftPatterns: current.shiftPatterns.filter(
-                        (_, patternIndex) => patternIndex !== index
-                      ),
-                    }))
-                  }
-                >
-                  {pattern.name} · {pattern.startTime}-{pattern.endTime} ×
-                </button>
-              ))}
-            </div>
-          ) : (
-            <p className="helper-text">No recurring shifts added yet.</p>
-          )}
+          <div className={cardStyles.weeklyEditor}>
+            {WEEKDAYS.map(([value, label]) => {
+              const daySchedule = weeklyShiftSchedule[value];
+
+              return (
+                <div key={value} className={cardStyles.weeklyEditorRow}>
+                  <label className={cardStyles.weeklyDayToggle}>
+                    <input
+                      type="checkbox"
+                      checked={daySchedule?.enabled ?? false}
+                      onChange={() => toggleWeeklyShiftDay(value)}
+                    />
+                    <strong>{label}</strong>
+                  </label>
+
+                  <label className="form-field">
+                    <span>Start</span>
+                    <input
+                      type="time"
+                      disabled={!daySchedule?.enabled}
+                      value={daySchedule?.startTime ?? "08:00"}
+                      onChange={(event) =>
+                        updateWeeklyShiftTime(
+                          value,
+                          "startTime",
+                          event.target.value
+                        )
+                      }
+                    />
+                  </label>
+
+                  <label className="form-field">
+                    <span>End</span>
+                    <input
+                      type="time"
+                      disabled={!daySchedule?.enabled}
+                      value={daySchedule?.endTime ?? "17:00"}
+                      onChange={(event) =>
+                        updateWeeklyShiftTime(
+                          value,
+                          "endTime",
+                          event.target.value
+                        )
+                      }
+                    />
+                  </label>
+                </div>
+              );
+            })}
+          </div>
+
+          <p className="helper-text">
+            Uncheck a weekday for a normal day off. You no longer need to create
+            or select separate shift-pattern chips.
+          </p>
         </div>
 
         <div className={`${cardStyles.modalMessage} inline-message`}>{message}</div>
