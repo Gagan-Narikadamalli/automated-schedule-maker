@@ -696,6 +696,7 @@ async function loadPendingAction(args: {
   }
 
   return {
+    date: String(found.date || ""),
     intent: String(found.intent),
     toolName: String(found.toolName),
     input:
@@ -839,6 +840,12 @@ export async function runNativeSchedulerAi(args: {
   }
 
   if (pending && isNativeConfirmation(args.message)) {
+    if (pending.date && pending.date !== args.date) {
+      return emptyNativeResult(
+        `The pending Native Scheduler AI change is for ${pending.date}, but the current conversation resolved to ${args.date}. No database change was made. Mention/select ${pending.date} and confirm again, or cancel the pending action.`
+      );
+    }
+
     if (!args.writeToolsEnabled) {
       return emptyNativeResult(
         "The pending action is understood, but scheduler write actions are currently disabled. No database change was made."
@@ -864,7 +871,7 @@ export async function runNativeSchedulerAi(args: {
         locationId: args.locationId,
         userId: args.userId,
         date: args.date,
-        pending: revised,
+        pending: { ...revised, date: pending.date || args.date },
         preview,
       });
       return {
@@ -927,6 +934,7 @@ export async function runNativeSchedulerAi(args: {
     }
 
     const pendingPlan: NativePendingSnapshot = {
+      date: args.date,
       intent: plan.intent,
       toolName: plan.toolName,
       input: plan.input,

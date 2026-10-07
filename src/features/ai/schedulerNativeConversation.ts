@@ -1,6 +1,7 @@
 import type { NativeSchedulerPlan } from "./schedulerNativeAi";
 
 export type NativePendingSnapshot = {
+  date?: string;
   intent: string;
   toolName: string;
   input: Record<string, unknown>;
