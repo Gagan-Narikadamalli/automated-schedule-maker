@@ -20,7 +20,8 @@
     "test:callout-visibility": "tsx scripts/test-callout-visibility.ts",
     "test:native-ai-date-workflows": "tsx scripts/test-native-scheduler-ai-date-workflows.ts",
     "test:ai-provider": "tsx scripts/test-scheduler-ai-provider-modes.ts",
-    "test:dead-code": "tsc --noEmit --noUnusedLocals --noUnusedParameters"
+    "test:dead-code": "tsc --noEmit --noUnusedLocals --noUnusedParameters",
+    "test:native-ai-isolation": "tsx scripts/test-scheduler-ai-provider-modes.ts"
   },
   "dependencies": {
     "ai": "^7.0.123",
