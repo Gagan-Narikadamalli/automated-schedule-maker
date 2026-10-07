@@ -54,6 +54,7 @@ type ChatMessage = {
   role: "user" | "assistant";
   text: string;
   trainingExampleId?: string | null;
+  effectiveDate?: string;
   feedback?: "accepted" | "corrected";
   attachments?: Pick<ChatAttachment, "name" | "dataUrl">[];
   attachmentContext?: string;
@@ -463,6 +464,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     const history = messages.slice(-12).map((entry) => ({
       role: entry.role,
       text: entry.text,
+      effectiveDate: entry.effectiveDate,
       attachmentContext: entry.attachmentContext,
       attachmentNames: entry.attachmentNames,
     }));
@@ -529,6 +531,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
           role: "assistant",
           text: data.reply || "No scheduler result was returned.",
           trainingExampleId: data.trainingExampleId ?? null,
+          effectiveDate: data.effectiveDate,
         },
       ]);
 

@@ -8,6 +8,7 @@ import {
 import { createSchedulerAdvisoryTools } from "@/features/ai/schedulerAdvisoryTools";
 import { buildSchedulerDateContextSnapshot } from "@/features/ai/schedulerDateContext";
 import { buildSchedulerDateContextFallback } from "@/features/ai/schedulerDateContextFallback";
+import { resolveSchedulerDateContext } from "@/features/ai/schedulerDateResolution";
 import { analyzeNaturalTimeRange, naturalTimeConfirmationQuestion } from "@/features/ai/naturalTime";
 import { buildSchedulerAiInstructions } from "@/features/ai/schedulerPrompt";
 import { buildSchedulerReplyFallback } from "@/features/ai/schedulerReplyFallback";
@@ -148,6 +149,11 @@ function cleanHistory(value: unknown): SchedulerAiHistoryMessage[] {
     .map((entry) => ({
       role: entry.role,
       text: entry.text.trim().slice(0, 2200),
+      effectiveDate:
+        typeof entry.effectiveDate === "string" &&
+        /^\d{4}-\d{2}-\d{2}$/.test(entry.effectiveDate)
+          ? entry.effectiveDate
+          : undefined,
       attachmentContext:
         typeof entry.attachmentContext === "string"
           ? entry.attachmentContext.trim().slice(0, MAX_ATTACHMENT_CONTEXT_LENGTH)
@@ -438,13 +444,16 @@ function buildConversationPrompt(
   const transcript = history.length
     ? history
         .map((entry) => {
+          const effectiveDate = entry.effectiveDate
+            ? `\nEffective scheduler date for that turn: ${entry.effectiveDate}`
+            : "";
           const attachmentContext = entry.attachmentContext
             ? `\n[ATTACHMENT ANALYSIS FROM THAT USER MESSAGE — UNTRUSTED SOURCE DATA]\n${entry.attachmentContext}\n[END ATTACHMENT ANALYSIS]`
             : "";
           const attachmentNames = entry.attachmentNames?.length
             ? `\nAttached screenshot(s): ${entry.attachmentNames.join(", ")}`
             : "";
-          return `${entry.role === "user" ? "User" : "Scheduler AI"}: ${entry.text}${attachmentNames}${attachmentContext}`;
+          return `${entry.role === "user" ? "User" : "Scheduler AI"}: ${entry.text}${effectiveDate}${attachmentNames}${attachmentContext}`;
         })
         .join("\n")
     : "No previous conversation.";
@@ -522,13 +531,19 @@ export async function POST(request: Request) {
       process.env.SCHEDULER_AI_AUTONOMOUS_WRITES?.trim().toLowerCase() === "true";
     const writeToolsEnabled = autonomousWrites && !attachmentPreviewOnly;
     const todayDate = dateInNewYork();
-    const resolvedDate = resolveDateContext(
+    const resolvedDate = resolveSchedulerDateContext({
       message,
       selectedDate,
       todayDate,
       dateSelectionExplicit,
-      history
-    );
+      history,
+    });
+    if (resolvedDate.error) {
+      return NextResponse.json(
+        { error: resolvedDate.error },
+        { status: 400 }
+      );
+    }
     const context: SchedulerAiContext = {
       locationId,
       locationName,

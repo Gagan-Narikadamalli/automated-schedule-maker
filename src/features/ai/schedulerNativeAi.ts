@@ -314,7 +314,7 @@ function extractClientReplacementAnalysis(message: string): {
 
 function extractTemplateReference(message: string): string | null {
   return firstEntity(message, [
-    /\b(?:use|apply)\s+(?:the\s+)?(?:schedule\s+)?template\s+["']?(.+?)["']?(?=\s+(?:for|on|today|tomorrow)\b|[?.!,]|$)/i,
+    /\b(?:use|apply)\s+(?:the\s+)?(?:schedule\s+)?template\s+["']?(.+?)["']?(?=\s+(?:for|on|to|today|tomorrow)\b|[?.!,]|$)/i,
   ]);
 }
 

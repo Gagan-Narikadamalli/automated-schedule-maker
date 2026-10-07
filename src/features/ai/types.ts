@@ -35,6 +35,7 @@ export type SchedulerAiAttachment = {
 export type SchedulerAiHistoryMessage = {
   role: "user" | "assistant";
   text: string;
+  effectiveDate?: string;
   attachmentContext?: string;
   attachmentNames?: string[];
 };
