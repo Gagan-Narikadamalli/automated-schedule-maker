@@ -977,6 +977,13 @@ function summarizeNativeToolResult(
 
   if (plan.intent === "STAFF_SUMMARY") {
     const staff = Array.isArray(output.staff) ? output.staff : [];
+    const totalProfileCount = Number(output.totalProfileCount ?? staff.length);
+    const activeProfileCount = Number(
+      output.activeProfileCount ?? staff.length
+    );
+    const activeOnSelectedDateCount = Number(
+      output.activeOnSelectedDateCount ?? staff.length
+    );
     const calledOut = staff
       .map((value: unknown) => asRecord(value))
       .filter((item) => item.calledOut)
@@ -989,8 +996,12 @@ function summarizeNativeToolResult(
           item.breakStatus === "MULTIPLE_BREAKS"
       )
       .map((item) => `${item.name}: ${item.breakStatus}`);
+    const profileLine =
+      activeOnSelectedDateCount === 0 && totalProfileCount > 0
+        ? `There are ${totalProfileCount} staff profile(s) in MongoDB (${activeProfileCount} marked active), but none are active for the selected date ${date}. This usually means the selected date is outside their configured start/end dates; it does not mean the staff database was deleted.`
+        : `Staff active for ${date}: ${activeOnSelectedDateCount}. Total staff profiles: ${totalProfileCount}; marked active: ${activeProfileCount}.`;
     return [
-      `Staff summary for ${date}: ${staff.length} active staff record(s).`,
+      profileLine,
       calledOut.length
         ? `Called out: ${calledOut.join(", ")}.`
         : "No call-outs are shown in the selected-day staff data.",
@@ -1021,7 +1032,14 @@ function summarizeNativeToolResult(
   }
 
   if (output.scheduleAvailable === false) {
-    return `The schedule for ${date} has not been generated yet.`;
+    const recentDates = Array.isArray(output.recentSavedScheduleDates)
+      ? output.recentSavedScheduleDates.filter(
+          (value: unknown): value is string => typeof value === "string"
+        )
+      : [];
+    return recentDates.length
+      ? `There are no saved schedule blocks for ${date}. Recent saved schedule dates still in MongoDB: ${recentDates.join(", ")}.`
+      : `There are no saved schedule blocks for ${date}, and no other saved schedule dates were found for this clinic.`;
   }
   const rows = summarizeSegments(output.segments);
   return rows.length
