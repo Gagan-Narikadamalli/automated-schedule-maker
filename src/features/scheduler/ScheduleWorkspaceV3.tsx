@@ -67,6 +67,7 @@ type ScheduleResponse = {
   date?: string;
   staff?: ScheduleStaff[];
   assignments?: ScheduleAssignment[];
+  recentSavedScheduleDates?: string[];
   requiredClientSlots?: number;
   error?: string;
 };
@@ -485,8 +486,11 @@ export function ScheduleWorkspaceV3() {
         loadUnplacedAssignments(requestedLocationId, requestedDate),
         loadCallOuts(requestedLocationId, requestedDate),
       ]);
+      const recentDates = data.recentSavedScheduleDates ?? [];
       setStatusMessage(
-        `Loaded ${nextAssignments.length} saved assignment${nextAssignments.length === 1 ? "" : "s"}. ${data.requiredClientSlots ?? 0} client blocks require coverage.`
+        nextAssignments.length === 0 && recentDates.length > 0
+          ? `No saved assignments exist for ${requestedDate}. Other saved schedules still exist in MongoDB on recent dates: ${recentDates.join(", ")}.`
+          : `Loaded ${nextAssignments.length} saved assignment${nextAssignments.length === 1 ? "" : "s"}. ${data.requiredClientSlots ?? 0} client blocks require coverage.`
       );
     } catch (error) {
       setLocations(DEMO_LOCATIONS);
