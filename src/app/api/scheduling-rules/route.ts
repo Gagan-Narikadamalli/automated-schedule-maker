@@ -15,6 +15,7 @@ type RulesRequest = {
   minimumClientStaffAssignmentMinutes?: number;
   maximumClientStaffConsecutiveHours?: number;
   preventSameStaffClientRepeatSameDay?: boolean;
+  allowSameStaffClientRepeatForCoverageException?: boolean;
   defaultBreakMinutes?: number;
   breakEligibilityHours?: number;
   breakWindowStart?: string;
@@ -61,6 +62,7 @@ function defaultRules(locationId: string) {
     minimumClientStaffAssignmentMinutes: 30,
     maximumClientStaffConsecutiveHours: 4,
     preventSameStaffClientRepeatSameDay: true,
+    allowSameStaffClientRepeatForCoverageException: true,
     defaultBreakMinutes: 30,
     breakEligibilityHours: 6,
     breakWindowStart: "11:00",
