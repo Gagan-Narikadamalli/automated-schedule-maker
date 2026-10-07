@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import { useActionConfirmDialog } from "@/components/ActionConfirmDialog";
+
 type LocationOption = {
   id: string;
   name: string;
@@ -81,6 +83,7 @@ export function TeamManager() {
   const [message, setMessage] = useState(
     "Loading teams, staff, and clients from MongoDB..."
   );
+  const { requestActionDialog, actionDialog } = useActionConfirmDialog();
 
   const activeStaff = useMemo(
     () => staff.filter((staffMember) => staffMember.active),
@@ -396,11 +399,21 @@ export function TeamManager() {
   }
 
   async function archiveTeam(team: TeamRecord) {
-    const confirmed = window.confirm(
-      `Archive ${team.name}? Active staff and clients currently assigned to this team will be moved to Unassigned.`
-    );
+    const choice = await requestActionDialog({
+      eyebrow: "ARCHIVE TEAM",
+      title: `Archive ${team.name}?`,
+      description:
+        "Active staff and clients currently assigned to this team will be moved to Unassigned.",
+      actions: [
+        {
+          id: "archive",
+          label: "Archive team",
+          tone: "danger",
+        },
+      ],
+    });
 
-    if (!confirmed) {
+    if (choice !== "archive") {
       return;
     }
 
@@ -453,6 +466,7 @@ export function TeamManager() {
 
   return (
     <div className="management-layout">
+      {actionDialog}
       <section className="section-card">
         <div className="panel-heading-row">
           <div>
