@@ -16,6 +16,7 @@ type RulesRequest = {
   maximumClientStaffConsecutiveHours?: number;
   preventSameStaffClientRepeatSameDay?: boolean;
   allowSameStaffClientRepeatForCoverageException?: boolean;
+  breakSchedulingEnabled?: boolean;
   defaultBreakMinutes?: number;
   breakEligibilityHours?: number;
   breakWindowStart?: string;
@@ -75,6 +76,7 @@ function defaultRules(locationId: string) {
     maximumClientStaffConsecutiveHours: 4,
     preventSameStaffClientRepeatSameDay: true,
     allowSameStaffClientRepeatForCoverageException: true,
+    breakSchedulingEnabled: true,
     defaultBreakMinutes: 30,
     breakEligibilityHours: 6,
     breakWindowStart: "11:00",
@@ -112,7 +114,7 @@ function defaultRules(locationId: string) {
     napMinimumMinutes: 30,
     napPreferredMinutes: 30,
     napMaximumMinutes: 60,
-    speechDurationRulesEnabled: false,
+    speechDurationRulesEnabled: true,
     speechMinimumMinutes: 30,
     speechPreferredMinutes: 30,
     speechMaximumMinutes: 60,
@@ -171,32 +173,6 @@ function validateEventDurationValue(value: number | undefined): boolean {
     value === undefined ||
     (value >= 30 && value <= 240 && value % 30 === 0)
   );
-}
-
-function durationRuleError(
-  label: string,
-  minimumMinutes: number,
-  preferredMinutes: number,
-  maximumMinutes: number
-): string | null {
-  if (
-    minimumMinutes < 30 ||
-    maximumMinutes > 240 ||
-    minimumMinutes % 30 !== 0 ||
-    preferredMinutes % 30 !== 0 ||
-    maximumMinutes % 30 !== 0
-  ) {
-    return `${label} duration values must use 30-minute increments between 30 and 240 minutes.`;
-  }
-
-  if (
-    minimumMinutes > preferredMinutes ||
-    preferredMinutes > maximumMinutes
-  ) {
-    return `${label} duration must satisfy minimum <= preferred <= maximum.`;
-  }
-
-  return null;
 }
 
 export async function GET(request: Request) {
@@ -317,10 +293,13 @@ export async function PUT(request: Request) {
     if (
       body.defaultBreakMinutes !== undefined &&
       body.defaultBreakMinutes !== 0 &&
-      body.defaultBreakMinutes !== 30
+      !validateEventDurationValue(body.defaultBreakMinutes)
     ) {
       return NextResponse.json(
-        { error: "Automatic breaks currently support 0 or 30 minutes." },
+        {
+          error:
+            "Break duration must use 30-minute increments between 30 and 240 minutes.",
+        },
         { status: 400 }
       );
     }
@@ -336,19 +315,15 @@ export async function PUT(request: Request) {
     }
 
     const durationValuesAreValid = [
-      body.napMinimumMinutes,
       body.napPreferredMinutes,
-      body.napMaximumMinutes,
-      body.speechMinimumMinutes,
       body.speechPreferredMinutes,
-      body.speechMaximumMinutes,
     ].every(validateEventDurationValue);
 
     if (!durationValuesAreValid) {
       return NextResponse.json(
         {
           error:
-            "Nap and Speech duration values must use 30-minute increments between 30 and 240 minutes.",
+            "Nap and Speech durations must use 30-minute increments between 30 and 240 minutes.",
         },
         { status: 400 }
       );
@@ -415,25 +390,13 @@ export async function PUT(request: Request) {
       body
     );
 
-    const napDurationError = durationRuleError(
-      "Nap",
-      changes.napMinimumMinutes,
-      changes.napPreferredMinutes,
-      changes.napMaximumMinutes
-    );
-    const speechDurationError = durationRuleError(
-      "Speech",
-      changes.speechMinimumMinutes,
-      changes.speechPreferredMinutes,
-      changes.speechMaximumMinutes
-    );
-
-    if (napDurationError || speechDurationError) {
-      return NextResponse.json(
-        { error: napDurationError || speechDurationError },
-        { status: 400 }
-      );
-    }
+    // Legacy min/max fields are kept in MongoDB for compatibility with
+    // previously saved rules. The current scheduler uses one exact event
+    // duration inside each configured placement window.
+    changes.napMinimumMinutes = changes.napPreferredMinutes;
+    changes.napMaximumMinutes = changes.napPreferredMinutes;
+    changes.speechMinimumMinutes = changes.speechPreferredMinutes;
+    changes.speechMaximumMinutes = changes.speechPreferredMinutes;
 
     if (
       changes.minimumClientStaffAssignmentMinutes >
