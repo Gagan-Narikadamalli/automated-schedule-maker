@@ -4,7 +4,7 @@ The Native Scheduler AI is a scheduler-specific intelligence layer implemented i
 
 ## Architecture
 
-Manager message -> deterministic date/time normalization -> Native Scheduler AI intent planner -> existing scheduler tool -> scheduler validation/database logic -> deterministic result formatter.
+Manager message -> `/api/ai/native` -> deterministic date/time normalization -> Native Scheduler AI intent planner -> provider-neutral scheduler tool executor -> scheduler validation/database logic -> deterministic result formatter.
 
 The existing scheduler, templates, historical patterns, safety checks, database, and audit behavior remain authoritative.
 
@@ -29,21 +29,26 @@ Unknown scheduler questions use live day-schedule evidence rather than inventing
 
 ## Safety
 
-Native mode still uses the existing validated scheduler tools. Locked/manual and rule override flags are false on first attempts. Bulk replacement keeps its occupied-target confirmation behavior. Minimal Fix uses the existing deterministic repair engine.
+Native AI uses the existing validated scheduler rules and database APIs through provider-neutral TypeScript tool executors. Locked/manual and rule override flags are false on first attempts. Bulk replacement keeps its occupied-target confirmation behavior. Minimal Fix uses the existing deterministic repair engine.
 
-When SCHEDULER_AI_PROVIDER=native, no external AI/model inference request is made.
+The Native endpoint does not import Vercel AI Gateway, OpenAI model code, the AI SDK tool adapter, or the Paid AI route. It does not make an external model/inference request.
 
-Screenshot understanding is deliberately disabled in native mode for Phase 1 so images are never silently sent to an external AI service.
+Screenshot understanding is deliberately disabled in Native AI so images are never silently sent to an external AI service.
 
-## Configuration
+## Independent endpoints
 
-Set SCHEDULER_AI_PROVIDER=native to use the built-from-scratch engine. The default remains gateway until native coverage and regression tests are sufficient to switch production safely.
+- Free / Native AI: `/api/ai/native`
+- Paid / Gateway AI: `/api/ai/paid`
+
+The UI chooses the endpoint directly. There is no global provider environment switch and no shared provider dispatcher. The two AI implementations share only scheduler infrastructure such as date parsing, database models, validation rules, and provider-neutral scheduler executors.
+
+The Paid AI implementation may be removed later without changing the Native endpoint or Native planner. The Native dependency graph is regression-tested so it may not import the `ai` package, `routeBase.ts`, the Paid endpoint, or the Paid tool adapter.
 
 ## Testing
 
-Run npm run test:native-ai.
+Run `npm run test:native-ai` for Native intent coverage and `npm run test:native-ai-isolation` for provider-independence checks.
 
-The main npm run test:scheduler suite also includes the native AI intent tests.
+The main `npm run test:scheduler` suite includes both Native behavior and isolation regression tests.
 
 ## Next phases
 
