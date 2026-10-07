@@ -1,6 +1,7 @@
 import { Types } from "mongoose";
 import { NextResponse } from "next/server";
 
+import { auditFinalCoverage } from "@/features/scheduler/engine/auditFinalCoverage";
 import { getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
 import { repairCoverageMinimally } from "@/features/scheduler/engine/generateSchedule";
 import { placeStaffBreaksAfterCoverage } from "@/features/scheduler/engine/placeStaffBreaks";
@@ -438,10 +439,17 @@ export async function POST(request: Request) {
       throw writeError;
     }
 
+    const finalCoverage = auditFinalCoverage(
+      schedulerInput.clients,
+      result.assignments,
+      result.metrics,
+      dayData.extendedRules.slotLengthMinutes
+    );
+
     const managerGapCount = await syncAutoUnplacedGaps(
       locationId,
       date,
-      result.uncoveredRequirements,
+      finalCoverage.uncoveredRequirements,
       result.assignments
     );
 
@@ -452,16 +460,16 @@ export async function POST(request: Request) {
       dayData.extendedRules.slotLengthMinutes / 60;
     const breakHoursReserved = totalBreakCount * slotHours;
     const finalMetrics = {
-      ...result.metrics,
+      ...finalCoverage.metrics,
       breakHoursReserved,
       netStaffCoverageHours: Math.max(
-        result.metrics.staffAvailableHours - breakHoursReserved,
+        finalCoverage.metrics.staffAvailableHours - breakHoursReserved,
         0
       ),
       additionalLaborHoursNeeded: Math.max(
-        result.metrics.requiredClientHours -
+        finalCoverage.metrics.requiredClientHours -
           Math.max(
-            result.metrics.staffAvailableHours - breakHoursReserved,
+            finalCoverage.metrics.staffAvailableHours - breakHoursReserved,
             0
           ),
         0
@@ -519,7 +527,7 @@ export async function POST(request: Request) {
         unplacedBreakStaffIds: breakPlan?.unplacedBreakStaffIds ?? [],
         totalBreakCount,
         metrics: finalMetrics,
-        uncoveredRequirements: result.uncoveredRequirements,
+        uncoveredRequirements: finalCoverage.uncoveredRequirements,
         warningCount: result.warnings.length,
         fixedNapSessionsApplied: fixedNapApplication.sessionCount,
         fixedNapClientsApplied: fixedNapApplication.clientCount,
@@ -551,7 +559,7 @@ export async function POST(request: Request) {
       fixedNapClientsApplied: fixedNapApplication.clientCount,
       metrics: finalMetrics,
       warnings: result.warnings,
-      uncoveredRequirements: result.uncoveredRequirements,
+      uncoveredRequirements: finalCoverage.uncoveredRequirements,
     });
   } catch (error) {
     console.error("Schedule repair failed:", error);
