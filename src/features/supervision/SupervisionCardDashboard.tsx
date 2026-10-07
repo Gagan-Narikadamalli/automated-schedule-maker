@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import cardStyles from "@/components/ManagementCards.module.css";
+import { useActionConfirmDialog } from "@/components/ActionConfirmDialog";
 import { ManagementModal } from "@/components/ManagementModal";
 
 type LocationOption = {
@@ -92,6 +93,7 @@ export function SupervisionCardDashboard() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("Loading supervision planning data...");
+  const { requestActionDialog, actionDialog } = useActionConfirmDialog();
 
   const rows = data?.rows ?? [];
   const supervisors = data?.supervisors ?? [];
@@ -263,11 +265,21 @@ export function SupervisionCardDashboard() {
       return;
     }
 
-    const confirmed = window.confirm(
-      `Delete the saved ${month} supervision record for ${row.staffName}? This does not delete the staff member.`
-    );
+    const choice = await requestActionDialog({
+      eyebrow: "DELETE SUPERVISION RECORD",
+      title: `Delete ${row.staffName}'s ${month} supervision record?`,
+      description:
+        "This removes only the saved supervision record. It does not delete the staff member.",
+      actions: [
+        {
+          id: "delete",
+          label: "Delete record",
+          tone: "danger",
+        },
+      ],
+    });
 
-    if (!confirmed) {
+    if (choice !== "delete") {
       return;
     }
 
@@ -305,6 +317,7 @@ export function SupervisionCardDashboard() {
 
   return (
     <div className="management-layout">
+      {actionDialog}
       <section className="section-card">
         <div className={cardStyles.toolbar}>
           <div className={cardStyles.toolbarLeft}>
