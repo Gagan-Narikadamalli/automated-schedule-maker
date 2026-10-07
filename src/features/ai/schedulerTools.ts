@@ -1,4 +1,4 @@
-import { jsonSchema, tool } from "ai";
+import { jsonSchema, tool } from "./schedulerToolDefinition";
 
 import { calculateSchedulerReadiness } from "@/features/scheduler/engine/preflight";
 import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySchedulerInput";
