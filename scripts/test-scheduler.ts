@@ -672,6 +672,108 @@ function testConfigurableMinimumContinuousPairing() {
   );
 }
 
+function testNonRepeatSwapWinsBeforeRepeatFallback() {
+  const staff = [
+    createStaff("bt-x", "A Staff", "BT", ["10:00"]),
+    createStaff("bt-y", "Repeat Staff", "BT", ["08:00", "10:00"]),
+    createStaff("bt-z", "Z Staff", "BT", ["10:00"]),
+  ];
+  const clientA = createClient(
+    "client-a",
+    "ZZ",
+    ["08:00", "10:00"],
+    {
+      staffRelationships: {
+        "bt-z": "HARD_RESTRICTION",
+      },
+    }
+  );
+  const clientB = createClient(
+    "client-b",
+    "AA",
+    ["10:00"]
+  );
+  const existing: SchedulerAssignment[] = [
+    {
+      id: "manual-repeat-history",
+      staffId: "bt-y",
+      clientId: "client-a",
+      startTime: "08:00",
+      assignmentType: "CLIENT_1_TO_1",
+      source: "MANUAL",
+      locked: true,
+    },
+  ];
+  const input = createInput(staff, [clientA, clientB], existing);
+  input.rules.preventSameStaffClientRepeatSameDay = true;
+  input.rules.allowSameStaffClientRepeatForCoverageException = true;
+
+  const result = generateSchedule(input);
+  const atTenForClientA = clientAssignments(result.assignments).find(
+    (assignment) =>
+      assignment.clientId === "client-a" &&
+      assignment.startTime === "10:00"
+  );
+  const pairReuseWarning = result.warnings.find(
+    (warning) => warning.code === "PAIR_REUSE_EXCEPTION"
+  );
+
+  assert.equal(
+    atTenForClientA?.staffId,
+    "bt-x",
+    "The scheduler should first use a normal non-repeat swap instead of immediately reusing Repeat Staff with the same client."
+  );
+  assert.equal(
+    pairReuseWarning,
+    undefined,
+    "A same-day repeat exception must not be used while a valid non-repeat swap can cover the remaining client."
+  );
+}
+
+function testRepeatFallbackCoversOnlyAfterNormalPassFails() {
+  const staff = [
+    createStaff("bt-only", "Only Staff", "BT", ["08:00", "10:00"]),
+  ];
+  const client = createClient(
+    "client-repeat-last-resort",
+    "LAST",
+    ["08:00", "10:00"]
+  );
+  const existing: SchedulerAssignment[] = [
+    {
+      id: "manual-first-session",
+      staffId: "bt-only",
+      clientId: "client-repeat-last-resort",
+      startTime: "08:00",
+      assignmentType: "CLIENT_1_TO_1",
+      source: "MANUAL",
+      locked: true,
+    },
+  ];
+  const input = createInput(staff, [client], existing);
+  input.rules.preventSameStaffClientRepeatSameDay = true;
+  input.rules.allowSameStaffClientRepeatForCoverageException = true;
+
+  const result = generateSchedule(input);
+  const repeatedAssignment = clientAssignments(result.assignments).find(
+    (assignment) =>
+      assignment.clientId === "client-repeat-last-resort" &&
+      assignment.startTime === "10:00"
+  );
+
+  assert.equal(
+    repeatedAssignment?.staffId,
+    "bt-only",
+    "When no different eligible staff member or non-repeat repair exists, the final fallback may reuse the earlier staff/client pair."
+  );
+  assert.ok(
+    result.warnings.some(
+      (warning) => warning.code === "PAIR_REUSE_EXCEPTION"
+    ),
+    "A last-resort same-day repeat must be explicitly reported as a coverage exception."
+  );
+}
+
 function runSchedulerRegressionScenarios() {
   testRoleCoverageOrder();
   testHistoricalPreferenceCannotJumpRoleTier();
@@ -687,6 +789,8 @@ function runSchedulerRegressionScenarios() {
   testGlobalMaximumForcesClientStaffRotation();
   testSamePairDoesNotReturnAfterGap();
   testConfigurableMinimumContinuousPairing();
+  testNonRepeatSwapWinsBeforeRepeatFallback();
+  testRepeatFallbackCoversOnlyAfterNormalPassFails();
 
   console.log("Automatic scheduler regression scenarios passed.");
 }
