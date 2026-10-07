@@ -106,12 +106,36 @@ function eventClient(message: string, kind: "nap" | "speech"): string | null {
 }
 
 function weekdays(message: string): string[] {
+  if (/\bevery\s+weekday\b/i.test(message)) {
+    return ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"];
+  }
+  if (/\bevery\s+day\b/i.test(message)) {
+    return [
+      "MONDAY",
+      "TUESDAY",
+      "WEDNESDAY",
+      "THURSDAY",
+      "FRIDAY",
+      "SATURDAY",
+      "SUNDAY",
+    ];
+  }
+  if (/\bevery\s+weekend\b/i.test(message)) {
+    return ["SATURDAY", "SUNDAY"];
+  }
+
   const values: Array<[RegExp, string]> = [
-    [/\bmonday\b/i, "MONDAY"], [/\btuesday\b/i, "TUESDAY"], [/\bwednesday\b/i, "WEDNESDAY"],
-    [/\bthursday\b/i, "THURSDAY"], [/\bfriday\b/i, "FRIDAY"], [/\bsaturday\b/i, "SATURDAY"],
+    [/\bmonday\b/i, "MONDAY"],
+    [/\btuesday\b/i, "TUESDAY"],
+    [/\bwednesday\b/i, "WEDNESDAY"],
+    [/\bthursday\b/i, "THURSDAY"],
+    [/\bfriday\b/i, "FRIDAY"],
+    [/\bsaturday\b/i, "SATURDAY"],
     [/\bsunday\b/i, "SUNDAY"],
   ];
-  return values.filter(([pattern]) => pattern.test(message)).map(([, day]) => day);
+  return values
+    .filter(([pattern]) => pattern.test(message))
+    .map(([, day]) => day);
 }
 
 export function planNativeManagementAction(args: {
@@ -270,8 +294,35 @@ export function planNativeManagementAction(args: {
       if (action === "ADD" && (!args.times.startTime || !args.times.endTime)) {
         return clarification("Adding a " + kind + " event requires both a start time and end time.");
       }
-      const recurringDays = /\b(?:every|recurr|weekly)\b/i.test(raw) ? weekdays(raw) : [];
-      const seriesEndDate = raw.match(/\b(?:until|through)\s+(20\d{2}-\d{2}-\d{2})\b/i)?.[1];
+      const recurringRequested = /\b(?:every|recurr|weekly)\b/i.test(raw);
+      const recurringDays = recurringRequested ? weekdays(raw) : [];
+      const betweenDates = raw.match(
+        /\bbetween\s+(20\d{2}-\d{2}-\d{2})\s+(?:and|to)\s+(20\d{2}-\d{2}-\d{2})\b/i
+      );
+      const explicitSeriesStartDate =
+        betweenDates?.[1] ||
+        raw.match(/\b(?:starting|from)\s+(20\d{2}-\d{2}-\d{2})\b/i)?.[1];
+      const seriesEndDate =
+        betweenDates?.[2] ||
+        raw.match(/\b(?:until|through|ending)\s+(20\d{2}-\d{2}-\d{2})\b/i)?.[1];
+      const seriesStartDate = explicitSeriesStartDate || args.date;
+
+      if (
+        recurringRequested &&
+        seriesStartDate &&
+        seriesEndDate &&
+        seriesEndDate < seriesStartDate
+      ) {
+        return clarification(
+          "The recurring event end date must be on or after its start date."
+        );
+      }
+
+      if (recurringRequested && recurringDays.length === 0) {
+        return clarification(
+          "A recurring nap/speech event needs weekday information, such as every Monday/Wednesday, every weekday, every weekend, or every day."
+        );
+      }
       return {
         intent: "EVENT_MANAGEMENT", toolName: "manage_scheduler_event",
         input: {
@@ -279,7 +330,13 @@ export function planNativeManagementAction(args: {
           ...(args.times.startTime ? { startTime: args.times.startTime } : {}),
           ...(args.times.endTime ? { endTime: args.times.endTime } : {}),
           ...(action === "ADD" && args.date ? { date: args.date } : {}),
-          ...(recurringDays.length ? { seriesStartDate: args.date, ...(seriesEndDate ? { seriesEndDate } : {}), daysOfWeek: recurringDays } : {}),
+          ...(recurringDays.length
+            ? {
+                seriesStartDate,
+                ...(seriesEndDate ? { seriesEndDate } : {}),
+                daysOfWeek: recurringDays,
+              }
+            : {}),
           ...(/\byounger\b/i.test(raw) ? { priorityCategory: "YOUNGER" } : /\bolder\b/i.test(raw) ? { priorityCategory: "OLDER" } : {}),
         },
         confidence: 0.96, explanation: (action === "ADD" ? "Add" : "Remove") + " a " + kind + " scheduler event.",
