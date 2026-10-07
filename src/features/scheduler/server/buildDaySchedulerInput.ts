@@ -3,6 +3,7 @@ import {
   getSlotsInsideTimeRange,
   patternMatchesDate,
 } from "@/features/scheduler/engine/dateUtils";
+import { resolveFlexibleEventWindows } from "@/features/scheduler/engine/flexibleEventWindows";
 import type {
   SchedulerAssignment,
   SchedulerClient,
@@ -40,6 +41,14 @@ export type ExtendedSchedulerRules = SchedulerRules & {
   fullTimeMaximumWeeklyHours: number;
   partTimeMinimumWeeklyHours: number;
   partTimeMaximumWeeklyHours: number;
+  napDurationRulesEnabled: boolean;
+  napMinimumMinutes: number;
+  napPreferredMinutes: number;
+  napMaximumMinutes: number;
+  speechDurationRulesEnabled: boolean;
+  speechMinimumMinutes: number;
+  speechPreferredMinutes: number;
+  speechMaximumMinutes: number;
 };
 
 export type DaySchedulerData = {
@@ -194,6 +203,14 @@ function getDefaultRules(): ExtendedSchedulerRules {
     fullTimeMaximumWeeklyHours: 40,
     partTimeMinimumWeeklyHours: 0,
     partTimeMaximumWeeklyHours: 29,
+    napDurationRulesEnabled: true,
+    napMinimumMinutes: 30,
+    napPreferredMinutes: 30,
+    napMaximumMinutes: 60,
+    speechDurationRulesEnabled: false,
+    speechMinimumMinutes: 30,
+    speechPreferredMinutes: 30,
+    speechMaximumMinutes: 60,
   };
 }
 
@@ -337,6 +354,32 @@ function mapRules(document: DatabaseRecord | null): ExtendedSchedulerRules {
     partTimeMaximumWeeklyHours: Number(
       document.partTimeMaximumWeeklyHours ??
         defaults.partTimeMaximumWeeklyHours
+    ),
+    napDurationRulesEnabled: Boolean(
+      document.napDurationRulesEnabled ??
+        defaults.napDurationRulesEnabled
+    ),
+    napMinimumMinutes: Number(
+      document.napMinimumMinutes ?? defaults.napMinimumMinutes
+    ),
+    napPreferredMinutes: Number(
+      document.napPreferredMinutes ?? defaults.napPreferredMinutes
+    ),
+    napMaximumMinutes: Number(
+      document.napMaximumMinutes ?? defaults.napMaximumMinutes
+    ),
+    speechDurationRulesEnabled: Boolean(
+      document.speechDurationRulesEnabled ??
+        defaults.speechDurationRulesEnabled
+    ),
+    speechMinimumMinutes: Number(
+      document.speechMinimumMinutes ?? defaults.speechMinimumMinutes
+    ),
+    speechPreferredMinutes: Number(
+      document.speechPreferredMinutes ?? defaults.speechPreferredMinutes
+    ),
+    speechMaximumMinutes: Number(
+      document.speechMaximumMinutes ?? defaults.speechMaximumMinutes
     ),
   };
 }
@@ -511,111 +554,156 @@ function mapStaff(
 function mapClients(
   clientDocuments: DatabaseRecord[],
   speechSessions: DatabaseRecord[],
-  date: string
+  date: string,
+  rules: ExtendedSchedulerRules
 ): SchedulerClient[] {
-  return clientDocuments
-    .filter((client) => {
-      return isDateInsideActiveRange(
-        date,
-        client.startDate,
-        client.endDate
-      );
-    })
-    .map((client) => {
-      const clientId = String(client._id);
-      const attendanceSlots = getPatternSlots(
-        client.attendancePatterns,
-        date
-      );
+  const activeClients = clientDocuments.filter((client) => {
+    return isDateInsideActiveRange(
+      date,
+      client.startDate,
+      client.endDate
+    );
+  });
+  const activeClientIds = new Set(
+    activeClients.map((client) => String(client._id))
+  );
 
-      const napRanges: TimeRange[] = (
-        (client.napPatterns ?? []) as DatabaseRecord[]
-      )
-        .filter((pattern) => {
-          const days = Array.isArray(pattern.days)
-            ? pattern.days.map((day: unknown) => String(day))
-            : [];
+  const napWindows = activeClients.flatMap((client) => {
+    const clientId = String(client._id);
 
-          return patternMatchesDate(days, date);
-        })
-        .filter((pattern) => {
-          return Boolean(pattern.startTime && pattern.endTime);
-        })
-        .map((pattern) => ({
-          startTime: String(pattern.startTime),
-          endTime: String(pattern.endTime),
-        }));
+    return ((client.napPatterns ?? []) as DatabaseRecord[])
+      .filter((pattern) => {
+        const days = Array.isArray(pattern.days)
+          ? pattern.days.map((day: unknown) => String(day))
+          : [];
 
-      const speechRanges: TimeRange[] = speechSessions
-        .filter((session) => String(session.clientId) === clientId)
-        .map((session) => ({
-          startTime: String(session.startTime),
-          endTime: String(session.endTime),
-        }));
+        return (
+          patternMatchesDate(days, date) &&
+          Boolean(pattern.startTime && pattern.endTime)
+        );
+      })
+      .map((pattern, index) => ({
+        key: `nap-pattern-${clientId}-${index}`,
+        clientId,
+        startTime: String(pattern.startTime),
+        endTime: String(pattern.endTime),
+        priority: 50,
+      }));
+  });
 
-      const napSlots: string[] = napRanges.flatMap((range) =>
-        getSlotsInsideTimeRange(range.startTime, range.endTime)
-      );
-      const speechSlots: string[] = speechRanges.flatMap((range) =>
-        getSlotsInsideTimeRange(range.startTime, range.endTime)
-      );
-      const staffRelationships: Record<string, StaffRelationship> = {};
+  const speechWindows = speechSessions
+    .filter((session) =>
+      activeClientIds.has(String(session.clientId))
+    )
+    .filter((session) => Boolean(session.startTime && session.endTime))
+    .map((session, index) => ({
+      key: `speech-session-${String(
+        session._id ?? index
+      )}`,
+      clientId: String(session.clientId),
+      startTime: String(session.startTime),
+      endTime: String(session.endTime),
+      priority: 100,
+    }));
 
-      for (const relationship of client.staffRelationships ?? []) {
-        if (!relationship.staffId || !relationship.relationship) {
-          continue;
-        }
+  const resolvedNapSlots = resolveFlexibleEventWindows(
+    napWindows,
+    {
+      enabled: rules.napDurationRulesEnabled,
+      minimumMinutes: rules.napMinimumMinutes,
+      preferredMinutes: rules.napPreferredMinutes,
+      maximumMinutes: rules.napMaximumMinutes,
+      slotLengthMinutes: rules.slotLengthMinutes,
+    }
+  );
+  const resolvedSpeechSlots = resolveFlexibleEventWindows(
+    speechWindows,
+    {
+      enabled: rules.speechDurationRulesEnabled,
+      minimumMinutes: rules.speechMinimumMinutes,
+      preferredMinutes: rules.speechPreferredMinutes,
+      maximumMinutes: rules.speechMaximumMinutes,
+      slotLengthMinutes: rules.slotLengthMinutes,
+    }
+  );
 
-        const relationshipValue = String(relationship.relationship);
+  return activeClients.map((client) => {
+    const clientId = String(client._id);
+    const attendanceSlots = getPatternSlots(
+      client.attendancePatterns,
+      date
+    );
+    const napSlots = [
+      ...new Set(
+        napWindows
+          .filter((window) => window.clientId === clientId)
+          .flatMap((window) => resolvedNapSlots.get(window.key) ?? [])
+      ),
+    ].sort();
+    const speechSlots = [
+      ...new Set(
+        speechWindows
+          .filter((window) => window.clientId === clientId)
+          .flatMap((window) => resolvedSpeechSlots.get(window.key) ?? [])
+      ),
+    ].sort();
+    const blockedSlots = new Set([...napSlots, ...speechSlots]);
+    const staffRelationships: Record<string, StaffRelationship> = {};
 
-        if (
-          relationshipValue === "PREFERRED" ||
-          relationshipValue === "ALLOWED" ||
-          relationshipValue === "HARD_RESTRICTION"
-        ) {
-          staffRelationships[String(relationship.staffId)] =
-            relationshipValue;
-        }
+    for (const relationship of client.staffRelationships ?? []) {
+      if (!relationship.staffId || !relationship.relationship) {
+        continue;
       }
 
-      const supportLevel = normalizeSupportLevel(client.supportLevel);
-      const defaults = defaultRotationRules(supportLevel);
-      const configuredMaxConsecutive = Number(
-        client.maxConsecutiveBlocksWithSameStaff ??
-          defaults.maxConsecutiveBlocksWithSameStaff
-      );
-      const configuredDesiredDifferentStaff = Number(
-        client.desiredDifferentStaffPerDay ??
-          defaults.desiredDifferentStaffPerDay
-      );
+      const relationshipValue = String(relationship.relationship);
 
-      return {
-        id: clientId,
-        displayCode: String(client.displayCode ?? ""),
-        teamId: client.teamId
-          ? String(client.teamId)
+      if (
+        relationshipValue === "PREFERRED" ||
+        relationshipValue === "ALLOWED" ||
+        relationshipValue === "HARD_RESTRICTION"
+      ) {
+        staffRelationships[String(relationship.staffId)] =
+          relationshipValue;
+      }
+    }
+
+    const supportLevel = normalizeSupportLevel(client.supportLevel);
+    const defaults = defaultRotationRules(supportLevel);
+    const configuredMaxConsecutive = Number(
+      client.maxConsecutiveBlocksWithSameStaff ??
+        defaults.maxConsecutiveBlocksWithSameStaff
+    );
+    const configuredDesiredDifferentStaff = Number(
+      client.desiredDifferentStaffPerDay ??
+        defaults.desiredDifferentStaffPerDay
+    );
+
+    return {
+      id: clientId,
+      displayCode: String(client.displayCode ?? ""),
+      teamId: client.teamId
+        ? String(client.teamId)
+        : undefined,
+      serviceSetting: normalizeServiceSetting(
+        client.serviceSetting
+      ),
+      supportLevel,
+      requiredSlots: attendanceSlots.filter(
+        (slot) => !blockedSlots.has(slot)
+      ),
+      napSlots,
+      speechSlots,
+      staffRelationships,
+      maxConsecutiveBlocksWithSameStaff:
+        configuredMaxConsecutive > 0
+          ? configuredMaxConsecutive
           : undefined,
-        serviceSetting: normalizeServiceSetting(
-          client.serviceSetting
-        ),
-        supportLevel,
-        requiredSlots: removeBlockedSlots(attendanceSlots, [
-          ...napRanges,
-          ...speechRanges,
-        ]),
-        napSlots: [...new Set(napSlots)].sort(),
-        speechSlots: [...new Set(speechSlots)].sort(),
-        staffRelationships,
-        maxConsecutiveBlocksWithSameStaff:
-          configuredMaxConsecutive > 0
-            ? configuredMaxConsecutive
-            : undefined,
-        desiredDifferentStaffPerDay: Math.max(
-          configuredDesiredDifferentStaff,
-          1
-        ),
-      };
-    });
+      desiredDifferentStaffPerDay: Math.max(
+        configuredDesiredDifferentStaff,
+        1
+      ),
+    };
+  });
 }
 
 function mapExistingAssignments(
@@ -802,7 +890,8 @@ export async function buildDaySchedulerInput(
   const clients = mapClients(
     clientDocuments,
     speechSessions,
-    date
+    date,
+    extendedRules
   );
   const existingAssignments = mapExistingAssignments(
     assignmentDocuments
