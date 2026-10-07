@@ -284,7 +284,12 @@ const rulesSchema = jsonSchema<JsonRecord>({
     preventSameStaffClientRepeatSameDay: {
       type: "boolean",
       description:
-        "When true, Auto Generate will not reuse the same client/staff pair later in the same day after their continuous block ends.",
+        "When true, Auto Generate will not normally reuse the same client/staff pair later in the same day after their continuous block ends.",
+    },
+    allowSameStaffClientRepeatForCoverageException: {
+      type: "boolean",
+      description:
+        "When true, the scheduler may reuse a same-day staff/client pair only as a last-resort coverage exception after non-repeat options fail. The continuous maximum still applies.",
     },
     defaultBreakMinutes: { type: "number" },
     breakEligibilityHours: { type: "number" },
