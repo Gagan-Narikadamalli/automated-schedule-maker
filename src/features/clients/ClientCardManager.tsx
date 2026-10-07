@@ -305,7 +305,7 @@ export function ClientCardManager() {
           cache: "no-store",
         }),
         fetch(
-          `/api/staff?locationId=${encodeURIComponent(locationId)}&includeArchived=true`,
+          `/api/staff?locationId=${encodeURIComponent(locationId)}`,
           { cache: "no-store" }
         ),
       ]);
@@ -707,7 +707,7 @@ export function ClientCardManager() {
               return (
                 <article
                   key={client.id}
-                  className={`${cardStyles.card} ${client.active ? "" : cardStyles.cardArchived}`}
+                  className={cardStyles.card}
                   style={{ "--accent": client.color } as React.CSSProperties}
                 >
                   <div className={cardStyles.cardTop}>
@@ -719,7 +719,7 @@ export function ClientCardManager() {
                       </div>
                     </div>
                     <span className={`${cardStyles.pill} ${client.active ? "" : cardStyles.pillMuted}`}>
-                      {client.active ? prettyEnum(client.supportLevel) : "Archived"}
+                      {prettyEnum(client.supportLevel)}
                     </span>
                   </div>
 
