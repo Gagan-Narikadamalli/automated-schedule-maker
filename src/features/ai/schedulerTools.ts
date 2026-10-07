@@ -93,10 +93,6 @@ function idFrom(value: unknown): string | null {
   return String(value);
 }
 
-function normalize(value: string): string {
-  return value.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-
 function overlapsRange(
   assignment: { startTime: string; endTime: string },
   startTime?: string,
