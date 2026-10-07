@@ -234,7 +234,8 @@ export async function POST(request: Request) {
         schedulerInput.clients,
         enrichedAssignments,
         coverageResult.metrics,
-        dayData.extendedRules.slotLengthMinutes
+        dayData.extendedRules.slotLengthMinutes,
+        coverageResult.uncoveredRequirements
       );
       const metrics = applyFinalBreakMetrics(
         finalCoverage.metrics,
