@@ -40,6 +40,34 @@ function firstClock(message: string): string | null {
   return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
+function revisionTimeRange(
+  message: string
+): { startTime: string; endTime: string } | null {
+  const normalized = message.match(/\((\d{2}:\d{2})-(\d{2}:\d{2})\)/);
+  if (normalized) {
+    return { startTime: normalized[1], endTime: normalized[2] };
+  }
+
+  const matches = Array.from(
+    message.matchAll(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/gi)
+  );
+  if (matches.length < 2) return null;
+
+  const toTime = (match: RegExpMatchArray): string | null => {
+    let hour = Number(match[1]);
+    const minute = Number(match[2] || "0");
+    const suffix = match[3].toLowerCase();
+    if (hour < 1 || hour > 12 || minute < 0 || minute > 59) return null;
+    if (suffix === "pm" && hour !== 12) hour += 12;
+    if (suffix === "am" && hour === 12) hour = 0;
+    return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+  };
+
+  const startTime = toTime(matches[0]);
+  const endTime = toTime(matches[1]);
+  return startTime && endTime ? { startTime, endTime } : null;
+}
+
 export function reviseNativePendingAction(
   pending: NativePendingSnapshot,
   message: string,
@@ -60,6 +88,9 @@ export function reviseNativePendingAction(
 
   const input = structuredClone(pending.input);
   const clock = firstClock(message);
+  const range = revisionTimeRange(message);
+  let changed = false;
+  let nextDate = pending.date;
 
   const dateBoundIntent =
     [
@@ -81,34 +112,57 @@ export function reviseNativePendingAction(
     resolvedDate !== pending.date &&
     dateBoundIntent
   ) {
+    nextDate = resolvedDate;
     if (pending.intent === "EVENT_MANAGEMENT" && input.date) {
       input.date = resolvedDate;
     }
-    return {
-      ...pending,
-      date: resolvedDate,
-      input,
-      stage: "USER_CONFIRMATION",
-    };
+    changed = true;
   }
 
-  if (clock && pending.intent === "BREAK_EDIT") {
+  if (range) {
+    if (pending.intent === "BREAK_EDIT") {
+      const changes = Array.isArray(input.changes)
+        ? (input.changes as Array<Record<string, unknown>>)
+        : [];
+      if (changes.length === 1) {
+        changes[0] = { ...changes[0], startTime: range.startTime };
+        input.changes = changes;
+        changed = true;
+      }
+    } else if (
+      ["CALL_OUT", "BULK_REPLACE", "EVENT_MANAGEMENT", "ATTENDANCE"].includes(
+        pending.intent
+      )
+    ) {
+      input.startTime = range.startTime;
+      input.endTime = range.endTime;
+      changed = true;
+    } else if (pending.intent === "UNPLACED_PLACE") {
+      input.startTime = range.startTime;
+      changed = true;
+    }
+  } else if (clock && pending.intent === "BREAK_EDIT") {
     const changes = Array.isArray(input.changes)
       ? (input.changes as Array<Record<string, unknown>>)
       : [];
     if (changes.length === 1) {
       changes[0] = { ...changes[0], startTime: clock };
       input.changes = changes;
-      return { ...pending, input, stage: "USER_CONFIRMATION" };
+      changed = true;
     }
-  }
-
-  if (clock && pending.intent === "CALL_OUT") {
+  } else if (clock && pending.intent === "CALL_OUT") {
     input.startTime = clock;
-    return { ...pending, input, stage: "USER_CONFIRMATION" };
+    changed = true;
   }
 
-  return null;
+  return changed
+    ? {
+        ...pending,
+        ...(nextDate ? { date: nextDate } : {}),
+        input,
+        stage: "USER_CONFIRMATION",
+      }
+    : null;
 }
 
 export function nativePlanNeedsConfirmation(plan: NativeSchedulerPlan): boolean {
