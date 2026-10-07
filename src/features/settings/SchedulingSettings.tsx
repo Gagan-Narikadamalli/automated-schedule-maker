@@ -31,6 +31,14 @@ type RulesForm = {
   autoUseWeekdayTemplate: boolean;
   autoUsePreviousWeekdaySchedule: boolean;
   autoUseHistoricalPatterns: boolean;
+  napDurationRulesEnabled: boolean;
+  napMinimumMinutes: number;
+  napPreferredMinutes: number;
+  napMaximumMinutes: number;
+  speechDurationRulesEnabled: boolean;
+  speechMinimumMinutes: number;
+  speechPreferredMinutes: number;
+  speechMaximumMinutes: number;
   preferredStaffPriority: number;
   sameTeamPriority: number;
   continuityPriority: number;
@@ -66,6 +74,12 @@ type NumericRuleField =
   | "maximumClientStaffConsecutiveHours"
   | "defaultBreakMinutes"
   | "breakEligibilityHours"
+  | "napMinimumMinutes"
+  | "napPreferredMinutes"
+  | "napMaximumMinutes"
+  | "speechMinimumMinutes"
+  | "speechPreferredMinutes"
+  | "speechMaximumMinutes"
   | "preferredStaffPriority"
   | "sameTeamPriority"
   | "continuityPriority"
@@ -120,6 +134,14 @@ const DEFAULT_RULES: RulesForm = {
   autoUseWeekdayTemplate: true,
   autoUsePreviousWeekdaySchedule: true,
   autoUseHistoricalPatterns: true,
+  napDurationRulesEnabled: true,
+  napMinimumMinutes: 30,
+  napPreferredMinutes: 30,
+  napMaximumMinutes: 60,
+  speechDurationRulesEnabled: false,
+  speechMinimumMinutes: 30,
+  speechPreferredMinutes: 30,
+  speechMaximumMinutes: 60,
   preferredStaffPriority: 100,
   sameTeamPriority: 40,
   continuityPriority: 35,
@@ -291,7 +313,9 @@ export function SchedulingSettings() {
       | "allowSameStaffClientRepeatForCoverageException"
       | "autoUseWeekdayTemplate"
       | "autoUsePreviousWeekdaySchedule"
-      | "autoUseHistoricalPatterns",
+      | "autoUseHistoricalPatterns"
+      | "napDurationRulesEnabled"
+      | "speechDurationRulesEnabled",
     value: boolean
   ) {
     setRules((currentRules) => ({
@@ -368,6 +392,59 @@ export function SchedulingSettings() {
         "Minimum client/staff assignment cannot be longer than the maximum continuous pairing time."
       );
       return;
+    }
+
+    const flexibleDurationRules = [
+      {
+        label: "Nap",
+        enabled: rules.napDurationRulesEnabled,
+        minimum: rules.napMinimumMinutes,
+        preferred: rules.napPreferredMinutes,
+        maximum: rules.napMaximumMinutes,
+      },
+      {
+        label: "Speech",
+        enabled: rules.speechDurationRulesEnabled,
+        minimum: rules.speechMinimumMinutes,
+        preferred: rules.speechPreferredMinutes,
+        maximum: rules.speechMaximumMinutes,
+      },
+    ];
+
+    for (const durationRule of flexibleDurationRules) {
+      if (!durationRule.enabled) {
+        continue;
+      }
+
+      const values = [
+        durationRule.minimum,
+        durationRule.preferred,
+        durationRule.maximum,
+      ];
+
+      if (
+        values.some(
+          (value) =>
+            value < 30 ||
+            value > 240 ||
+            value % 30 !== 0
+        )
+      ) {
+        setMessage(
+          `${durationRule.label} duration values must use 30-minute increments between 30 and 240 minutes.`
+        );
+        return;
+      }
+
+      if (
+        durationRule.minimum > durationRule.preferred ||
+        durationRule.preferred > durationRule.maximum
+      ) {
+        setMessage(
+          `${durationRule.label} duration must satisfy minimum <= preferred <= maximum.`
+        );
+        return;
+      }
     }
 
     try {
@@ -1147,6 +1224,146 @@ export function SchedulingSettings() {
               Preserve manager-approved manual assignments during Generate and
               Repair.
             </span>
+          </label>
+        </div>
+      </section>
+
+      <section className="section-card">
+        <h2>Flexible Nap & Speech Duration Rules</h2>
+        <p>
+          The client event start/end time is the allowed placement window. When a
+          duration rule is enabled, Auto Generate chooses the actual event blocks
+          inside that window instead of treating the entire window as the event.
+          It prefers the configured duration, stays between the minimum and
+          maximum, and spreads overlapping windows when possible so staff breaks
+          can be placed more cleanly.
+        </p>
+
+        <div className="toggle-list">
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={rules.napDurationRulesEnabled}
+              onChange={(event) =>
+                updateBooleanField(
+                  "napDurationRulesEnabled",
+                  event.target.checked
+                )
+              }
+            />
+            <span>
+              Use flexible nap duration rules. Recommended for nap windows such
+              as 12:00-1:00 when the actual nap is usually one 30-minute block.
+            </span>
+          </label>
+        </div>
+
+        <div className="form-grid">
+          <label className="form-field">
+            <span>Nap minimum duration</span>
+            <input
+              type="number"
+              min="30"
+              max="240"
+              step="30"
+              disabled={!rules.napDurationRulesEnabled}
+              value={rules.napMinimumMinutes}
+              onChange={(event) =>
+                updateNumberField("napMinimumMinutes", event.target.value)
+              }
+            />
+          </label>
+          <label className="form-field">
+            <span>Nap preferred duration</span>
+            <input
+              type="number"
+              min="30"
+              max="240"
+              step="30"
+              disabled={!rules.napDurationRulesEnabled}
+              value={rules.napPreferredMinutes}
+              onChange={(event) =>
+                updateNumberField("napPreferredMinutes", event.target.value)
+              }
+            />
+          </label>
+          <label className="form-field">
+            <span>Nap maximum duration</span>
+            <input
+              type="number"
+              min="30"
+              max="240"
+              step="30"
+              disabled={!rules.napDurationRulesEnabled}
+              value={rules.napMaximumMinutes}
+              onChange={(event) =>
+                updateNumberField("napMaximumMinutes", event.target.value)
+              }
+            />
+          </label>
+        </div>
+
+        <div className="toggle-list">
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={rules.speechDurationRulesEnabled}
+              onChange={(event) =>
+                updateBooleanField(
+                  "speechDurationRulesEnabled",
+                  event.target.checked
+                )
+              }
+            />
+            <span>
+              Use flexible Speech duration rules. Leave this off when Speech
+              start/end times are exact fixed appointments.
+            </span>
+          </label>
+        </div>
+
+        <div className="form-grid">
+          <label className="form-field">
+            <span>Speech minimum duration</span>
+            <input
+              type="number"
+              min="30"
+              max="240"
+              step="30"
+              disabled={!rules.speechDurationRulesEnabled}
+              value={rules.speechMinimumMinutes}
+              onChange={(event) =>
+                updateNumberField("speechMinimumMinutes", event.target.value)
+              }
+            />
+          </label>
+          <label className="form-field">
+            <span>Speech preferred duration</span>
+            <input
+              type="number"
+              min="30"
+              max="240"
+              step="30"
+              disabled={!rules.speechDurationRulesEnabled}
+              value={rules.speechPreferredMinutes}
+              onChange={(event) =>
+                updateNumberField("speechPreferredMinutes", event.target.value)
+              }
+            />
+          </label>
+          <label className="form-field">
+            <span>Speech maximum duration</span>
+            <input
+              type="number"
+              min="30"
+              max="240"
+              step="30"
+              disabled={!rules.speechDurationRulesEnabled}
+              value={rules.speechMaximumMinutes}
+              onChange={(event) =>
+                updateNumberField("speechMaximumMinutes", event.target.value)
+              }
+            />
           </label>
         </div>
       </section>
