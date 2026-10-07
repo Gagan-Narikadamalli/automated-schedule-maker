@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import { EditableNumberInput } from "@/components/EditableNumberInput";
+
 type EmployeeType = "FULL_TIME" | "PART_TIME";
 type ServiceSetting = "IN_CENTER" | "IN_HOME" | "BOTH";
 type StaffRole =
@@ -664,8 +666,8 @@ export function StaffManager() {
 
           <label className="form-field">
             <span>Minimum weekly hours</span>
-            <input
-              type="number"
+            <EditableNumberInput
+              
               min="0"
               step="0.5"
               value={form.minimumWeeklyHours}
@@ -680,8 +682,8 @@ export function StaffManager() {
 
           <label className="form-field">
             <span>Target weekly hours</span>
-            <input
-              type="number"
+            <EditableNumberInput
+              
               min="0"
               step="0.5"
               value={form.targetWeeklyHours}
@@ -696,8 +698,8 @@ export function StaffManager() {
 
           <label className="form-field">
             <span>Maximum weekly hours</span>
-            <input
-              type="number"
+            <EditableNumberInput
+              
               min="0"
               step="0.5"
               value={form.maximumWeeklyHours}
