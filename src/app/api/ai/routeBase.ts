@@ -46,7 +46,7 @@ import { AITrainingExample } from "@/models/AITrainingExample";
 
 export const maxDuration = 300;
 
-const DEFAULT_SCHEDULER_AI_MODEL = "openai/gpt-5-nano";
+const DEFAULT_SCHEDULER_AI_PAID_MODEL = "openai/gpt-5.6-sol";
 const DEFAULT_SCHEDULER_AI_VISION_MODEL = "openai/gpt-5.4";
 const MAX_MESSAGE_LENGTH = 5000;
 const MAX_HISTORY_MESSAGES = 12;
@@ -348,11 +348,16 @@ export async function POST(request: Request) {
       return forbiddenResponse("You do not have access to this scheduler location.");
     }
 
-    const aiProvider = resolveSchedulerAiProvider();
+    const aiProvider = resolveSchedulerAiProvider(
+      body.provider ?? process.env.SCHEDULER_AI_PROVIDER
+    );
+    const thinkingLevel = aiProvider === "native" ? "low" : "high";
     const model =
       aiProvider === "native"
         ? "native/scheduler-v0.1"
-        : process.env.SCHEDULER_AI_MODEL?.trim() || DEFAULT_SCHEDULER_AI_MODEL;
+        : process.env.SCHEDULER_AI_PAID_MODEL?.trim() ||
+          process.env.SCHEDULER_AI_MODEL?.trim() ||
+          DEFAULT_SCHEDULER_AI_PAID_MODEL;
     const autonomousWrites =
       process.env.SCHEDULER_AI_AUTONOMOUS_WRITES?.trim().toLowerCase() === "true";
     const writeToolsEnabled = autonomousWrites && !attachmentPreviewOnly;
@@ -430,6 +435,8 @@ export async function POST(request: Request) {
         writeToolsUsed: [],
         changed: false,
         mode,
+        provider: aiProvider,
+        thinkingLevel,
         effectiveDate: resolvedDate.date,
       };
       return NextResponse.json(response);
@@ -525,6 +532,7 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
         tools,
         toolChoice: "auto",
         stopWhen: stepCountIs(20),
+        reasoning: "high",
         maxOutputTokens: 2400,
       });
 
@@ -626,6 +634,7 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
             toolEvidence,
             MAX_TOOL_EVIDENCE_LENGTH
           )}`,
+          reasoning: "high",
           maxOutputTokens: 1400,
           timeout: {
             totalMs: 55_000,
@@ -720,6 +729,8 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
       writeToolsUsed,
       changed,
       mode,
+      provider: aiProvider,
+      thinkingLevel,
       effectiveDate: resolvedDate.date,
       ...(attachmentPreviewOnly
         ? {
