@@ -42,14 +42,55 @@ function firstClock(message: string): string | null {
 
 export function reviseNativePendingAction(
   pending: NativePendingSnapshot,
-  message: string
+  message: string,
+  resolvedDate?: string
 ): NativePendingSnapshot | null {
-  if (!/\b(?:instead|actually|change|make it|use|not that|rather)\b/i.test(message)) {
+  const revisionLanguage =
+    /\b(?:instead|actually|change|make it|use|not that|rather|do it|move it|same)\b/i.test(
+      message
+    );
+  const dateOnlyRevision =
+    /^(?:today|tomorrow|yesterday|monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?:\s+instead)?[?.!]*$/i.test(
+      message.trim()
+    );
+
+  if (!revisionLanguage && !dateOnlyRevision) {
     return null;
   }
 
   const input = structuredClone(pending.input);
   const clock = firstClock(message);
+
+  const dateBoundIntent =
+    [
+      "GENERATE",
+      "REPAIR",
+      "CALL_OUT",
+      "BREAK_EDIT",
+      "BULK_REPLACE",
+      "ATTENDANCE",
+      "UNPLACED_PLACE",
+      "COPY_DAY",
+    ].includes(pending.intent) ||
+    (pending.intent === "TEMPLATE" && input.action === "APPLY") ||
+    (pending.intent === "EVENT_MANAGEMENT" && !input.seriesEndDate);
+
+  if (
+    resolvedDate &&
+    pending.date &&
+    resolvedDate !== pending.date &&
+    dateBoundIntent
+  ) {
+    if (pending.intent === "EVENT_MANAGEMENT" && input.date) {
+      input.date = resolvedDate;
+    }
+    return {
+      ...pending,
+      date: resolvedDate,
+      input,
+      stage: "USER_CONFIRMATION",
+    };
+  }
 
   if (clock && pending.intent === "BREAK_EDIT") {
     const changes = Array.isArray(input.changes)
@@ -92,20 +133,38 @@ export function nativePlanNeedsConfirmation(plan: NativeSchedulerPlan): boolean 
   ].includes(plan.intent);
 }
 
+export function formatNativeDateLabel(date: string): string {
+  const parsed = /^\d{4}-\d{2}-\d{2}$/.test(date)
+    ? new Date(`${date}T12:00:00Z`)
+    : null;
+  if (!parsed || Number.isNaN(parsed.getTime())) return date;
+
+  const readable = new Intl.DateTimeFormat("en-US", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    timeZone: "UTC",
+  }).format(parsed);
+
+  return `${readable} (${date})`;
+}
+
 export function describeNativePendingAction(
   plan: Pick<NativeSchedulerPlan, "intent" | "input" | "explanation">,
   date: string
 ): string {
   const input = plan.input as Record<string, any>;
+  const dateLabel = formatNativeDateLabel(date);
 
   if (plan.intent === "GENERATE") {
     return input.scope === "WORK_WEEK"
-      ? `Generate the Monday-Friday work-week schedule containing ${date}.`
-      : `Generate the schedule for ${date}.`;
+      ? `Generate the Monday-Friday work-week schedule containing ${dateLabel}.`
+      : `Generate the schedule for ${dateLabel}.`;
   }
 
   if (plan.intent === "REPAIR") {
-    return `Run Minimal Fix on ${date}, prioritizing Unplaced/coverage and required breaks while keeping existing valid work when possible.`;
+    return `Run Minimal Fix on ${dateLabel}, prioritizing Unplaced/coverage and required breaks while keeping existing valid work when possible.`;
   }
 
   if (plan.intent === "CALL_OUT") {
@@ -114,15 +173,15 @@ export function describeNativePendingAction(
       input.startTime || input.endTime
         ? ` (${input.startTime || "08:00"}-${input.endTime || "20:00"})`
         : "";
-    return `${action} ${input.staff} on ${date}${range}.`;
+    return `${action} ${input.staff} on ${dateLabel}${range}.`;
   }
 
   if (plan.intent === "BREAK_EDIT") {
     const change = Array.isArray(input.changes) ? input.changes[0] : null;
     if (change) {
       return change.action === "CLEAR"
-        ? `Remove ${change.staff}'s break at ${change.startTime} on ${date}.`
-        : `Set ${change.staff}'s break at ${change.startTime} on ${date}.`;
+        ? `Remove ${change.staff}'s break at ${change.startTime} on ${dateLabel}.`
+        : `Set ${change.staff}'s break at ${change.startTime} on ${dateLabel}.`;
     }
   }
 
@@ -132,9 +191,9 @@ export function describeNativePendingAction(
         ? ` from ${input.startTime || "start"} to ${input.endTime || "end"}`
         : "";
     if (input.entityType === "STAFF" && input.client) {
-      return `Move client ${input.client} from ${input.source} to ${input.replacement} on ${date}${range}.`;
+      return `Move client ${input.client} from ${input.source} to ${input.replacement} on ${dateLabel}${range}.`;
     }
-    return `Replace ${input.entityType?.toLowerCase() || "schedule"} ${input.source} with ${input.replacement} on ${date}${range}.`;
+    return `Replace ${input.entityType?.toLowerCase() || "schedule"} ${input.source} with ${input.replacement} on ${dateLabel}${range}.`;
   }
 
   if (plan.intent === "TEMPLATE") {
@@ -144,7 +203,7 @@ export function describeNativePendingAction(
     if (input.action === "ARCHIVE") {
       return `Archive schedule template ${input.template}.`;
     }
-    return `Apply schedule template ${input.template} to ${date}.`;
+    return `Apply schedule template ${input.template} to ${dateLabel}.`;
   }
 
   if (plan.intent === "STAFF_MANAGEMENT") {
@@ -172,13 +231,13 @@ export function describeNativePendingAction(
   if (plan.intent === "EVENT_MANAGEMENT") {
     return `${input.action === "ADD" ? "Add" : "Remove"} ${String(
       input.eventType || "scheduler"
-    ).toLowerCase()} event for ${input.client} on ${input.date || date}${
+    ).toLowerCase()} event for ${input.client} on ${input.date ? formatNativeDateLabel(String(input.date)) : dateLabel}${
       input.startTime ? ` from ${input.startTime}` : ""
     }${input.endTime ? ` to ${input.endTime}` : ""}.`;
   }
 
   if (plan.intent === "ATTENDANCE") {
-    return `${input.action === "REMOVE" ? "Remove" : "Record"} client attendance change for ${input.client} on ${date}${
+    return `${input.action === "REMOVE" ? "Remove" : "Record"} client attendance change for ${input.client} on ${dateLabel}${
       input.changeType ? ` (${input.changeType})` : ""
     }.`;
   }
@@ -192,11 +251,11 @@ export function describeNativePendingAction(
   }
 
   if (plan.intent === "UNPLACED_PLACE") {
-    return `Place unplaced client ${input.client} with ${input.staff} at ${input.startTime} on ${date}.`;
+    return `Place unplaced client ${input.client} with ${input.staff} at ${input.startTime} on ${dateLabel}.`;
   }
 
   if (plan.intent === "COPY_DAY") {
-    return `Copy the saved schedule from ${input.sourceDate} into ${date} and revalidate it against ${date}'s current staff/client constraints.`;
+    return `Copy the saved schedule from ${input.sourceDate} into ${dateLabel} and revalidate it against that date's current staff/client constraints.`;
   }
 
   return plan.explanation;
