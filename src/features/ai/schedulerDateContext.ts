@@ -171,6 +171,8 @@ export async function buildSchedulerDateContextSnapshot(context: SchedulerAiCont
         dayData.extendedRules.maximumClientStaffConsecutiveHours,
       preventSameStaffClientRepeatSameDay:
         dayData.extendedRules.preventSameStaffClientRepeatSameDay,
+      allowSameStaffClientRepeatForCoverageException:
+        dayData.extendedRules.allowSameStaffClientRepeatForCoverageException,
       breakEligibilityHours: dayData.extendedRules.breakEligibilityHours,
       breakWindowStart: dayData.extendedRules.breakWindowStart ?? null,
       breakWindowEnd: dayData.extendedRules.breakWindowEnd ?? null,
