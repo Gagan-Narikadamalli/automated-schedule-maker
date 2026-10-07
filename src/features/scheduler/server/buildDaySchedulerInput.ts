@@ -33,6 +33,7 @@ type TimeRange = {
 export type ExtendedSchedulerRules = SchedulerRules & {
   breakWindowStart: string;
   breakWindowEnd: string;
+  breakSchedulingEnabled: boolean;
   defaultBreakMinutes: number;
   breakEligibilityHours: number;
   scheduleStartTime: string;
@@ -195,6 +196,7 @@ function getDefaultRules(): ExtendedSchedulerRules {
     autoUsePreviousWeekdaySchedule: true,
     breakWindowStart: "11:00",
     breakWindowEnd: "13:30",
+    breakSchedulingEnabled: true,
     defaultBreakMinutes: 30,
     breakEligibilityHours: 6,
     scheduleStartTime: "08:00",
@@ -206,11 +208,11 @@ function getDefaultRules(): ExtendedSchedulerRules {
     napDurationRulesEnabled: true,
     napMinimumMinutes: 30,
     napPreferredMinutes: 30,
-    napMaximumMinutes: 60,
-    speechDurationRulesEnabled: false,
+    napMaximumMinutes: 30,
+    speechDurationRulesEnabled: true,
     speechMinimumMinutes: 30,
     speechPreferredMinutes: 30,
-    speechMaximumMinutes: 60,
+    speechMaximumMinutes: 30,
   };
 }
 
@@ -326,6 +328,10 @@ function mapRules(document: DatabaseRecord | null): ExtendedSchedulerRules {
     ),
     breakWindowEnd: String(
       document.breakWindowEnd ?? defaults.breakWindowEnd
+    ),
+    breakSchedulingEnabled: Boolean(
+      document.breakSchedulingEnabled ??
+        defaults.breakSchedulingEnabled
     ),
     defaultBreakMinutes: Number(
       document.defaultBreakMinutes ?? defaults.defaultBreakMinutes
@@ -610,9 +616,7 @@ function mapClients(
     napWindows,
     {
       enabled: rules.napDurationRulesEnabled,
-      minimumMinutes: rules.napMinimumMinutes,
-      preferredMinutes: rules.napPreferredMinutes,
-      maximumMinutes: rules.napMaximumMinutes,
+      durationMinutes: rules.napPreferredMinutes,
       slotLengthMinutes: rules.slotLengthMinutes,
     }
   );
@@ -620,9 +624,7 @@ function mapClients(
     speechWindows,
     {
       enabled: rules.speechDurationRulesEnabled,
-      minimumMinutes: rules.speechMinimumMinutes,
-      preferredMinutes: rules.speechPreferredMinutes,
-      maximumMinutes: rules.speechMaximumMinutes,
+      durationMinutes: rules.speechPreferredMinutes,
       slotLengthMinutes: rules.slotLengthMinutes,
     }
   );
