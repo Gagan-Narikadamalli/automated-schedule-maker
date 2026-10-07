@@ -543,9 +543,9 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
       }
     } catch (error) {
       const messageText =
-        error instanceof Error
+        error instanceof Error && error.message.trim()
           ? error.message
-          : "Scheduler AI could not complete the request. Please try again with different or more specific scheduler information.";
+          : "Scheduler AI is temporarily unavailable. You can continue using the rest of the scheduler normally and try AI again later.";
       setMessages((current) => [
         ...current,
         {

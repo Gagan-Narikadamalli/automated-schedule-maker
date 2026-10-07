@@ -847,21 +847,36 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
   } catch (error) {
     console.error("Scheduler AI request failed:", error);
     const message = error instanceof Error ? error.message : "";
+    const creditOrAccessProblem =
+      /credit|free tier|restricted model|paid credits|no providers available|quota|billing|insufficient/i.test(
+        message
+      );
     const configurationProblem =
-      /gateway|api.?key|oidc|unauthorized|authentication|credit|model.*not found/i.test(
+      /gateway|api.?key|oidc|unauthorized|authentication|model.*not found/i.test(
+        message
+      );
+    const temporaryServiceProblem =
+      /service temporarily unavailable|service unavailable|retry|503|overloaded|capacity/i.test(
         message
       );
     const timeoutProblem = /abort|timeout|timed out/i.test(message);
 
+    const temporarilyUnavailable =
+      creditOrAccessProblem || configurationProblem || temporaryServiceProblem;
+
     return NextResponse.json(
       {
-        error: configurationProblem
-          ? "Scheduler AI is not connected to a usable AI Gateway model yet. Enable Vercel AI Gateway/OIDC for the project or set AI_GATEWAY_API_KEY for local development."
-          : timeoutProblem
-            ? "Scheduler AI reached its execution limit before finishing. Try splitting a very large scheduler request into two prompts."
-            : "Scheduler AI could not complete this request. Please try again with different or more specific scheduler information.",
+        error: creditOrAccessProblem
+          ? "Scheduler AI is temporarily unavailable because its AI service credits or model access are unavailable. You can continue using all non-AI scheduling features normally and try Scheduler AI again later."
+          : configurationProblem
+            ? "Scheduler AI is temporarily unavailable because its AI service connection is not available. You can continue using all non-AI scheduling features normally and try Scheduler AI again later."
+            : temporaryServiceProblem
+              ? "Scheduler AI is temporarily unavailable. You can continue using all non-AI scheduling features normally and try Scheduler AI again shortly."
+              : timeoutProblem
+                ? "Scheduler AI took too long to finish this request. The rest of the scheduler is still available; try a smaller AI request or try again."
+                : "Scheduler AI could not complete this request right now. You can continue using the rest of the scheduler normally and try AI again later.",
       },
-      { status: configurationProblem ? 503 : timeoutProblem ? 504 : 500 }
+      { status: temporarilyUnavailable ? 503 : timeoutProblem ? 504 : 500 }
     );
   }
 }
