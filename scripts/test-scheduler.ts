@@ -963,6 +963,40 @@ function testCoverageFirstSingleSlotFallback() {
   );
 }
 
+function testCoverageFirstCanExceedDailyClientTechCap() {
+  const staff = [
+    createStaff("bt-a", "BT A", "BT", ["08:00"]),
+    createStaff("bt-b", "BT B", "BT", ["08:30"]),
+  ];
+  const client = createClient(
+    "client-cap",
+    "CaEx",
+    ["08:00", "08:30"]
+  );
+  const input = createInput(staff, [client]);
+
+  // The normal preference would permit only one technician for this client,
+  // but the first technician is no longer available at 08:30. Coverage must
+  // win instead of leaving the second required block uncovered.
+  input.rules.maximumTechsPerClientPerDay = 1;
+
+  const result = generateSchedule(input);
+  const assignments = clientAssignments(result.assignments).filter(
+    (item) => item.clientId === "client-cap"
+  );
+
+  assert.equal(
+    assignments.length,
+    2,
+    "Coverage-first fallback should use a second eligible technician when the configured daily technician cap would otherwise leave a client block uncovered."
+  );
+  assert.equal(
+    result.uncoveredRequirements.length,
+    0,
+    "Daily pairing-count preferences must not leave a coverable client block unassigned in the final fallback."
+  );
+}
+
 function runSchedulerRegressionScenarios() {
   testRoleCoverageOrder();
   testHistoricalPreferenceCannotJumpRoleTier();
@@ -985,6 +1019,7 @@ function runSchedulerRegressionScenarios() {
   testNonRepeatSwapWinsBeforeRepeatFallback();
   testRepeatFallbackCoversOnlyAfterNormalPassFails();
   testCoverageFirstSingleSlotFallback();
+  testCoverageFirstCanExceedDailyClientTechCap();
 
   console.log("Automatic scheduler regression scenarios passed.");
 }
