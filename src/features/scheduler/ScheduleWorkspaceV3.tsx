@@ -310,6 +310,24 @@ function unplacedLabel(record: UnplacedRecord): string {
   return record.clientCode || record.displayText.replace(/\s+1:1$/i, "").split(/\s+/)[0] || "Client";
 }
 
+function unplacedReasonLabel(record: UnplacedRecord): string {
+  const reason = record.reason ?? "";
+
+  if (reason.includes("No staff member is scheduled or available")) {
+    return "No staff available at this time";
+  }
+
+  if (reason.includes("already have an assignment")) {
+    return "All available staff are occupied";
+  }
+
+  if (reason.includes("staff member(s) are free")) {
+    return "Free staff blocked by scheduling rules";
+  }
+
+  return "Needs scheduling";
+}
+
 export function ScheduleWorkspaceV3() {
   const [locations, setLocations] = useState<LocationOption[]>([]);
   const [locationId, setLocationId] = useState("");
@@ -1097,7 +1115,7 @@ export function ScheduleWorkspaceV3() {
                     title="Drag this block onto the schedule, or click for details"
                   >
                     <strong>{unplacedLabel(assignment)}</strong>
-                    <span>Needs scheduling</span>
+                    <span>{unplacedReasonLabel(assignment)}</span>
                     {assignment.originalStartTime && <small>{assignment.originalStartTime}</small>}
                   </button>
                   <button type="button" className={`button button-primary button-small ${styles.placeButton}`} disabled={working} onClick={() => beginPlacement(assignment)}>Place</button>
