@@ -20,6 +20,7 @@ type ReplacementInput = {
   entityType: "STAFF" | "CLIENT";
   source: string;
   replacement: string;
+  client?: string;
   startTime?: string;
   endTime?: string;
   allowLockedOverride?: boolean;
@@ -70,6 +71,11 @@ const replaceSchema = jsonSchema<ReplacementInput>({
     replacement: {
       type: "string",
       description: "Replacement staff name or replacement client display code/name.",
+    },
+    client: {
+      type: "string",
+      description:
+        "Optional client display code/name filter when entityType=STAFF. Use this for a request such as 'put CaMe with Areyana instead of Ania from 11 to 11:30' so only CaMe blocks are moved.",
     },
     startTime: {
       type: "string",
@@ -323,12 +329,13 @@ export function createSchedulerBulkTools(context: SchedulerAiContext) {
   return {
     replace_schedule_blocks: tool({
       description:
-        "Deterministically replace MANY saved schedule blocks on the selected date. Use entityType=STAFF for requests like 'replace all Anias blocks with Areyana'. Use entityType=CLIENT for requests like 'replace CaMe with ZiBo everywhere/all blocks'. CLIENT replacement swaps same-time CaMe/ZiBo coverage when both already have coverage; source-only replaced cells leave the displaced source client in Unplaced. STAFF replacement moves every matching source block to the replacement staff at the same time. If the replacement staff already has ANY occupied block at one of those times, the first attempt returns a replacement-clash confirmation instead of overwriting it; after the user says to proceed, retry with allowOccupiedReplacement=true and any displaced target-client blocks are preserved in Unplaced. This occupied-block confirmation is separate from true locked-cell or scheduler-rule overrides. The first attempt must keep all confirmation/override flags false.",
+        "Deterministically replace saved schedule blocks on the selected date. Use entityType=STAFF for requests like 'replace all Anias blocks with Areyana'. When the request names a client too, pass client as a filter, for example 'put CaMe with Areyana instead of Ania from 11 to 11:30'. Use entityType=CLIENT only when replacing one client with another client. CLIENT replacement swaps same-time coverage when both clients are already scheduled; source-only replaced cells leave the displaced source client in Unplaced. STAFF replacement moves matching source blocks to the replacement staff at the same time. If the replacement staff already has ANY occupied block at one of those times, the first attempt returns a replacement-clash confirmation instead of overwriting it; after the user says to proceed, retry with allowOccupiedReplacement=true and any displaced target-client blocks are preserved in Unplaced. This occupied-block confirmation is separate from true locked-cell or scheduler-rule overrides. The first attempt must keep all confirmation/override flags false.",
       inputSchema: replaceSchema,
       execute: async ({
         entityType,
         source,
         replacement,
+        client,
         startTime,
         endTime,
         allowLockedOverride = false,
@@ -371,12 +378,14 @@ export function createSchedulerBulkTools(context: SchedulerAiContext) {
         const occupiedTargetCells: JsonRecord[] = [];
 
         if (entityType === "STAFF") {
-          const [sourceStaff, replacementStaff] = await Promise.all([
+          const [sourceStaff, replacementStaff, clientFilter] = await Promise.all([
             resolveStaff(locationId, source),
             resolveStaff(locationId, replacement),
+            client?.trim() ? resolveClient(locationId, client) : Promise.resolve(null),
           ]);
           const sourceStaffId = String(sourceStaff._id);
           const replacementStaffId = String(replacementStaff._id);
+          const clientFilterId = clientFilter ? String(clientFilter._id) : null;
           if (sourceStaffId === replacementStaffId) {
             return { ok: false, error: "Source and replacement staff are the same person." };
           }
@@ -384,6 +393,7 @@ export function createSchedulerBulkTools(context: SchedulerAiContext) {
           const sourceAssignments = assignments.filter(
             (record) =>
               idFrom(record.staffId) === sourceStaffId &&
+              (!clientFilterId || idFrom(record.clientId) === clientFilterId) &&
               withinRange(String(record.startTime ?? ""), startTime, endTime)
           );
           if (sourceAssignments.length === 0) {

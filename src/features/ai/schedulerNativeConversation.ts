@@ -130,6 +130,9 @@ export function describeNativePendingAction(
       input.startTime || input.endTime
         ? ` from ${input.startTime || "start"} to ${input.endTime || "end"}`
         : "";
+    if (input.entityType === "STAFF" && input.client) {
+      return `Move client ${input.client} from ${input.source} to ${input.replacement} on ${date}${range}.`;
+    }
     return `Replace ${input.entityType?.toLowerCase() || "schedule"} ${input.source} with ${input.replacement} on ${date}${range}.`;
   }
 

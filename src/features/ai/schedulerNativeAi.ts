@@ -12,6 +12,7 @@ import {
 } from "./schedulerNativeConversation";
 import { buildNativeHistoricalKnowledge } from "./schedulerNativeKnowledge";
 import { expandNativeFollowUp } from "./schedulerNativeFollowUp";
+import { normalizeNativeCommandTypos } from "./schedulerNativeText";
 import { planNativeManagementAction } from "./schedulerNativeManagement";
 import type { SchedulerAiHistoryMessage } from "./types";
 
@@ -129,7 +130,7 @@ export function extractNativeTimeRange(message: string): {
 
   const raw = visibleMessage(message);
   const range = raw.match(
-    /\b(?:from|between)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:to|-|and)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i
+    /\b(?:from|between)\s+(\d{1,2})(?:(?::|\s)(\d{2}))?\s*(am|pm)?\s*(?:to|-|and)\s*(\d{1,2})(?:(?::|\s)(\d{2}))?\s*(am|pm)?\b/i
   );
   if (range) {
     const startSuffix = range[3] || range[6];
@@ -139,7 +140,7 @@ export function extractNativeTimeRange(message: string): {
     if (startTime && endTime) return { startTime, endTime };
   }
 
-  const at = raw.match(/\bat\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i);
+  const at = raw.match(/\bat\s+(\d{1,2})(?:(?::|\s)(\d{2}))?\s*(am|pm)?\b/i);
   if (at) {
     const startTime = normalizeClock(at[1], at[2], at[3]);
     if (startTime) return { startTime };
@@ -192,6 +193,37 @@ function extractClientLookup(message: string): string | null {
   ]);
 }
 
+function extractClientStaffReplacement(message: string): {
+  client: string;
+  sourceStaff: string;
+  replacementStaff: string;
+} | null {
+  const raw = visibleMessage(message);
+  const patterns = [
+    /\breplace\s+(?:client\s+)?(.+?)(?:\s+client)?\s+with\s+(.+?)\s+instead\s+of\s+(.+?)(?=\s+(?:from|between|at|today|tomorrow|on)\b|[?.!,]|$)/i,
+    /\b(?:put|assign|move)\s+(?:client\s+)?(.+?)(?:\s+client)?\s+with\s+(.+?)\s+instead\s+of\s+(.+?)(?=\s+(?:from|between|at|today|tomorrow|on)\b|[?.!,]|$)/i,
+    /\bswitch\s+(?:client\s+)?(.+?)(?:\s+client)?\s+from\s+(.+?)\s+to\s+(.+?)(?=\s+(?:from|between|at|today|tomorrow|on)\b|[?.!,]|$)/i,
+  ];
+
+  for (let index = 0; index < patterns.length; index += 1) {
+    const match = raw.match(patterns[index]);
+    if (!match) continue;
+    if (index === 2) {
+      return {
+        client: cleanEntity(match[1]),
+        sourceStaff: cleanEntity(match[2]),
+        replacementStaff: cleanEntity(match[3]),
+      };
+    }
+    return {
+      client: cleanEntity(match[1]),
+      replacementStaff: cleanEntity(match[2]),
+      sourceStaff: cleanEntity(match[3]),
+    };
+  }
+  return null;
+}
+
 function extractReplacement(message: string): {
   source: string;
   replacement: string;
@@ -221,11 +253,12 @@ export function planNativeSchedulerAction(args: {
   writeToolsEnabled?: boolean;
   date?: string;
 }): NativeSchedulerPlan {
-  const raw = visibleMessage(args.message);
-  const times = extractNativeTimeRange(args.message);
+  const normalizedMessage = normalizeNativeCommandTypos(args.message);
+  const raw = visibleMessage(normalizedMessage);
+  const times = extractNativeTimeRange(normalizedMessage);
 
   const managementPlan = planNativeManagementAction({
-    message: args.message,
+    message: normalizedMessage,
     date: args.date,
     times,
   });
@@ -241,7 +274,7 @@ export function planNativeSchedulerAction(args: {
     };
   }
 
-  const templateReference = extractTemplateReference(args.message);
+  const templateReference = extractTemplateReference(normalizedMessage);
   if (templateReference) {
     return {
       intent: "TEMPLATE",
@@ -254,7 +287,7 @@ export function planNativeSchedulerAction(args: {
 
   const removeCallOut =
     /\b(?:remove|delete|clear|cancel)\b[\s\S]*\bcall[- ]?out\b/i.test(raw);
-  const callOutStaff = extractCallOutStaff(args.message);
+  const callOutStaff = extractCallOutStaff(normalizedMessage);
   if (callOutStaff || removeCallOut) {
     const staff =
       callOutStaff ||
@@ -281,7 +314,41 @@ export function planNativeSchedulerAction(args: {
     };
   }
 
-  const replacement = extractReplacement(args.message);
+  const clientStaffReplacement = extractClientStaffReplacement(normalizedMessage);
+  if (clientStaffReplacement) {
+    if (!times.startTime) {
+      return {
+        intent: "CLARIFICATION",
+        toolName: "__native_clarification__",
+        input: {
+          message:
+            "This client/staff replacement needs a start time (and optionally an end time) so I can change only the intended schedule block.",
+        },
+        confidence: 1,
+        explanation: "A precise time is required for targeted client/staff replacement.",
+      };
+    }
+    return {
+      intent: "BULK_REPLACE",
+      toolName: "replace_schedule_blocks",
+      input: {
+        entityType: "STAFF",
+        source: clientStaffReplacement.sourceStaff,
+        replacement: clientStaffReplacement.replacementStaff,
+        client: clientStaffReplacement.client,
+        startTime: times.startTime,
+        ...(times.endTime ? { endTime: times.endTime } : {}),
+        allowLockedOverride: false,
+        allowRuleOverride: false,
+        allowOccupiedReplacement: false,
+      },
+      confidence: 0.99,
+      explanation:
+        "Move only the named client's block from the original staff member to the replacement staff member.",
+    };
+  }
+
+  const replacement = extractReplacement(normalizedMessage);
   if (replacement) {
     return {
       intent: "BULK_REPLACE",
@@ -299,7 +366,7 @@ export function planNativeSchedulerAction(args: {
     };
   }
 
-  const breakStaff = extractBreakStaff(args.message);
+  const breakStaff = extractBreakStaff(normalizedMessage);
   if (breakStaff && times.startTime) {
     const clearing = /\b(?:remove|delete|clear)\b/i.test(raw);
     return {
@@ -405,7 +472,7 @@ export function planNativeSchedulerAction(args: {
     };
   }
 
-  const staffName = extractStaffLookup(args.message);
+  const staffName = extractStaffLookup(normalizedMessage);
   if (staffName) {
     return {
       intent: "STAFF_LOOKUP",
@@ -416,7 +483,7 @@ export function planNativeSchedulerAction(args: {
     };
   }
 
-  const clientCode = extractClientLookup(args.message);
+  const clientCode = extractClientLookup(normalizedMessage);
   if (clientCode) {
     return {
       intent: "CLIENT_LOOKUP",

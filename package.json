@@ -5,14 +5,15 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "test:scheduler": "tsx scripts/test-scheduler.ts && tsx scripts/test-repair.ts && tsx scripts/test-preflight.ts && tsx scripts/test-break-eligibility.ts && tsx scripts/test-preflight-eligibility.ts && tsx scripts/test-native-scheduler-ai.ts && tsx scripts/test-native-scheduler-ai-conversation.ts && tsx scripts/test-native-scheduler-ai-language.ts && tsx scripts/test-native-scheduler-ai-management.ts && tsx scripts/test-native-scheduler-ai-followup.ts && tsx scripts/test-native-scheduler-ai-evaluation.ts",
+    "test:scheduler": "tsx scripts/test-scheduler.ts && tsx scripts/test-repair.ts && tsx scripts/test-preflight.ts && tsx scripts/test-break-eligibility.ts && tsx scripts/test-preflight-eligibility.ts && tsx scripts/test-native-scheduler-ai.ts && tsx scripts/test-native-scheduler-ai-conversation.ts && tsx scripts/test-native-scheduler-ai-language.ts && tsx scripts/test-native-scheduler-ai-management.ts && tsx scripts/test-native-scheduler-ai-followup.ts && tsx scripts/test-native-scheduler-ai-evaluation.ts && tsx scripts/test-native-scheduler-ai-typos.ts",
     "start": "next start",
     "test:native-ai": "tsx scripts/test-native-scheduler-ai.ts",
     "test:native-ai-conversation": "tsx scripts/test-native-scheduler-ai-conversation.ts",
     "test:native-ai-language": "tsx scripts/test-native-scheduler-ai-language.ts",
     "test:native-ai-management": "tsx scripts/test-native-scheduler-ai-management.ts",
     "test:native-ai-followup": "tsx scripts/test-native-scheduler-ai-followup.ts",
-    "test:native-ai-evaluation": "tsx scripts/test-native-scheduler-ai-evaluation.ts"
+    "test:native-ai-evaluation": "tsx scripts/test-native-scheduler-ai-evaluation.ts",
+    "test:native-ai-typos": "tsx scripts/test-native-scheduler-ai-typos.ts"
   },
   "dependencies": {
     "ai": "^7.0.123",
