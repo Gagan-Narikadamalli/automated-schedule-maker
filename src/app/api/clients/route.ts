@@ -43,6 +43,19 @@ type ClientRequest = {
   staffRelationships?: StaffRelationshipRequest[];
 };
 
+function calendarCodePart(value: string): string {
+  const letters = value.trim().replace(/[^A-Za-z]/g, "");
+  if (!letters) return "";
+  return letters.charAt(0).toUpperCase() + letters.charAt(1).toLowerCase();
+}
+
+function displayCodeFromFullName(fullName: string): string {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  const firstName = parts[0] ?? "";
+  const lastName = parts.slice(1).join(" ");
+  return `${calendarCodePart(firstName)}${calendarCodePart(lastName)}`;
+}
+
 function serializeClient(client: Record<string, unknown>) {
   return {
     ...client,
@@ -136,13 +149,34 @@ export async function POST(request: Request) {
     const body = (await request.json()) as ClientRequest;
     const locationId = body.locationId?.trim();
     const fullName = body.fullName?.trim();
-    const displayCode = body.displayCode?.trim();
+    const displayCode = fullName ? displayCodeFromFullName(fullName) : "";
 
-    if (!locationId || !fullName || !displayCode || !body.startDate) {
+    if (!locationId || !fullName || !body.startDate) {
       return NextResponse.json(
         {
           error:
-            "Location, client name, calendar display code, and start date are required.",
+            "Location, client first name, client last name, and start date are required.",
+        },
+        { status: 400 }
+      );
+    }
+
+    const nameParts = fullName.split(/\s+/).filter(Boolean);
+    if (nameParts.length < 2) {
+      return NextResponse.json(
+        {
+          error:
+            "Enter both the client's first name and last name.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (displayCode.length < 4) {
+      return NextResponse.json(
+        {
+          error:
+            "Client first and last names must each contain at least two letters so the calendar code can be generated.",
         },
         { status: 400 }
       );
