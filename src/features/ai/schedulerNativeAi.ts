@@ -337,7 +337,7 @@ export function planNativeSchedulerAction(args: {
     };
   }
 
-  if (/\b(?:unplaced|unassigned|still\s+needs?\s+schedul|needs?\s+to\s+be\s+scheduled)\b/i.test(raw)) {
+  if (/\b(?:unplaced|unassigned|still\s+needs?\s+schedul(?:e|ed|ing)|needs?\s+to\s+be\s+scheduled)\b/i.test(raw)) {
     return {
       intent: "UNPLACED",
       toolName: "get_unplaced_assignments",
