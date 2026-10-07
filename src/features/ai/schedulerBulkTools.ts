@@ -714,7 +714,7 @@ export function createSchedulerBulkTools(context: SchedulerAiContext) {
             date,
             status: "UNPLACED",
           })
-            .populate("clientId", "displayCode fullName")
+            .populate("clientId", "displayCode")
             .limit(2)
             .lean();
           matches = exact as unknown as JsonRecord[];
@@ -728,7 +728,7 @@ export function createSchedulerBulkTools(context: SchedulerAiContext) {
           };
           if (originalStartTime) query.originalStartTime = originalStartTime;
           const found = await UnplacedAssignment.find(query)
-            .populate("clientId", "displayCode fullName")
+            .populate("clientId", "displayCode")
             .sort({ originalStartTime: 1, createdAt: 1 })
             .limit(4)
             .lean();
