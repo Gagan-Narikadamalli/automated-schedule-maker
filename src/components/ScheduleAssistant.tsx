@@ -396,15 +396,10 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     if (working || nextProvider === provider) return;
 
     const requestContext = getRequestContext();
-    const hasConversationState =
-      messages.length > 0 || attachments.length > 0 || Boolean(correctionFor);
 
-    if (
-      hasConversationState &&
-      !(await clearPendingAiState(requestContext.locationId))
-    ) {
+    if (!(await clearPendingAiState(requestContext.locationId))) {
       setStatus(
-        "AI mode was not changed because the previous conversation state could not be cleared safely. Try again."
+        "AI mode was not changed because the previous Native confirmation state could not be cleared safely. Try again."
       );
       return;
     }
