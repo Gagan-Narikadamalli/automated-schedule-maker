@@ -96,6 +96,11 @@ export type SchedulerRules = {
   continuityPriority: number;
   rotationPriority: number;
   workloadBalancePriority: number;
+  clientHandoffPenaltyPriority: number;
+  staffScheduleCompactnessPriority: number;
+  minimalFixAllowProtectedRelocation: boolean;
+  minimalFixAllowBreakRelocation: boolean;
+  preserveManualOverrides: boolean;
   scheduleStabilityPriority: number;
   weekdayTemplatePriority: number;
   weeklyHoursPriority: number;
