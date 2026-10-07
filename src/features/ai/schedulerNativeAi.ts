@@ -42,6 +42,9 @@ export type NativeSchedulerIntent =
   | "RULES"
   | "SUPERVISION"
   | "UNPLACED_PLACE"
+  | "COPY_DAY"
+  | "REPLACEMENT_ANALYSIS"
+  | "IMPROVEMENTS"
   | "CLARIFICATION"
   | "DAY_SUMMARY";
 
@@ -70,6 +73,33 @@ type ExecutableTool = {
 };
 
 const MAX_RESPONSE_ITEMS = 30;
+
+export const NATIVE_SCHEDULER_SUPPORTED_TOOLS = [
+  "lookup_schedule",
+  "get_day_schedule",
+  "get_staff",
+  "get_clients",
+  "get_unplaced_assignments",
+  "check_schedule",
+  "generate_schedule",
+  "repair_schedule",
+  "copy_schedule_day",
+  "record_call_out",
+  "edit_schedule_cells",
+  "replace_schedule_blocks",
+  "place_unplaced_assignment",
+  "get_scheduler_configuration",
+  "manage_staff",
+  "manage_client",
+  "manage_team",
+  "manage_scheduler_event",
+  "manage_client_attendance",
+  "update_scheduler_rules",
+  "manage_schedule_template",
+  "save_supervision_record",
+  "analyze_client_replacement",
+  "suggest_schedule_improvements",
+] as const;
 
 export function resolveSchedulerAiProvider(
   raw = process.env.SCHEDULER_AI_PROVIDER
@@ -241,6 +271,47 @@ function extractReplacement(message: string): {
   };
 }
 
+function shiftIsoDate(date: string, days: number): string {
+  const value = new Date(`${date}T12:00:00Z`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+}
+
+function extractCopySourceDate(message: string, targetDate?: string): string | null {
+  const raw = visibleMessage(message);
+  const explicit = raw.match(
+    /\b(?:copy|use)\s+(?:the\s+)?(?:schedule\s+)?(?:from\s+)?(20\d{2}-\d{2}-\d{2})\b/i
+  )?.[1];
+  if (explicit) return explicit;
+
+  if (targetDate && /\b(?:copy|use)\s+yesterday(?:'s)?\s+schedule\b/i.test(raw)) {
+    return shiftIsoDate(targetDate, -1);
+  }
+
+  return null;
+}
+
+function extractClientReplacementAnalysis(message: string): {
+  sourceClient: string;
+  replacementClient: string;
+} | null {
+  const raw = visibleMessage(message);
+  const patterns = [
+    /\b(?:analyze|check|preview|evaluate)\s+(?:what\s+happens\s+if\s+)?(?:we\s+)?replace\s+(?:client\s+)?(.+?)\s+with\s+(?:client\s+)?(.+?)(?=\s+(?:from|between|at|today|tomorrow|on)\b|[?.!,]|$)/i,
+    /\bwhat\s+(?:would|will)\s+happen\s+if\s+(?:we\s+)?replace\s+(?:client\s+)?(.+?)\s+with\s+(?:client\s+)?(.+?)(?=\s+(?:from|between|at|today|tomorrow|on)\b|[?.!,]|$)/i,
+  ];
+  for (const pattern of patterns) {
+    const match = raw.match(pattern);
+    if (match?.[1] && match?.[2]) {
+      return {
+        sourceClient: cleanEntity(match[1].replace(/\s+client$/i, "")),
+        replacementClient: cleanEntity(match[2].replace(/\s+client$/i, "")),
+      };
+    }
+  }
+  return null;
+}
+
 function extractTemplateReference(message: string): string | null {
   return firstEntity(message, [
     /\b(?:use|apply)\s+(?:the\s+)?(?:schedule\s+)?template\s+["']?(.+?)["']?(?=\s+(?:for|on|today|tomorrow)\b|[?.!,]|$)/i,
@@ -263,6 +334,80 @@ export function planNativeSchedulerAction(args: {
     times,
   });
   if (managementPlan) return managementPlan;
+
+
+  const copySourceDate = extractCopySourceDate(normalizedMessage, args.date);
+  if (
+    copySourceDate &&
+    /\b(?:copy|use)\b[\s\S]*\bschedule\b/i.test(raw)
+  ) {
+    if (!args.date) {
+      return {
+        intent: "CLARIFICATION",
+        toolName: "__native_clarification__",
+        input: { message: "A target schedule date is required before copying another saved day." },
+        confidence: 1,
+        explanation: "Target date is required for schedule copy.",
+      };
+    }
+    if (copySourceDate === args.date) {
+      return {
+        intent: "CLARIFICATION",
+        toolName: "__native_clarification__",
+        input: { message: "The source and target schedule dates are the same. Choose a different source day." },
+        confidence: 1,
+        explanation: "Source and target schedule dates must differ.",
+      };
+    }
+    return {
+      intent: "COPY_DAY",
+      toolName: "copy_schedule_day",
+      input: { sourceDate: copySourceDate },
+      confidence: 0.99,
+      explanation: "Copy a saved schedule day into the selected target date and revalidate it.",
+    };
+  }
+
+  const replacementAnalysis = extractClientReplacementAnalysis(normalizedMessage);
+  if (replacementAnalysis) {
+    return {
+      intent: "REPLACEMENT_ANALYSIS",
+      toolName: "analyze_client_replacement",
+      input: {
+        sourceClient: replacementAnalysis.sourceClient,
+        replacementClient: replacementAnalysis.replacementClient,
+        ...(times.startTime ? { startTime: times.startTime } : {}),
+        ...(times.endTime ? { endTime: times.endTime } : {}),
+      },
+      confidence: 0.98,
+      explanation: "Analyze a client-for-client replacement without changing the schedule.",
+    };
+  }
+
+  if (
+    /\b(?:recommend|recommendation|suggest|suggestion|improve|improvement|optimi[sz]e|better\s+schedule|how\s+can\s+(?:we|i)\s+(?:cover|fit|improve)|how\s+to\s+(?:cover|fit))\b/i.test(
+      raw
+    )
+  ) {
+    const focus =
+      /\bbreaks?\b/i.test(raw) && !/\b(?:coverage|cover|gaps?|uncovered)\b/i.test(raw)
+        ? "BREAKS"
+        : /\b(?:coverage|cover|gaps?|uncovered)\b/i.test(raw) &&
+            !/\bbreaks?\b/i.test(raw)
+          ? "COVERAGE"
+          : "ALL";
+    return {
+      intent: "IMPROVEMENTS",
+      toolName: "suggest_schedule_improvements",
+      input: {
+        focus,
+        ...(times.startTime ? { startTime: times.startTime } : {}),
+        ...(times.endTime ? { endTime: times.endTime } : {}),
+      },
+      confidence: 0.94,
+      explanation: "Analyze the current day and suggest safe scheduling improvements.",
+    };
+  }
 
   if (/\b(?:list|show|what)\b[\s\S]*\btemplates?\b/i.test(raw)) {
     return {
@@ -595,6 +740,7 @@ function summarizeNativeToolResult(
       "RULES",
       "SUPERVISION",
       "UNPLACED_PLACE",
+      "COPY_DAY",
     ].includes(plan.intent)
   ) {
     if (typeof output.message === "string" && output.message.trim()) {
@@ -714,6 +860,61 @@ function summarizeNativeToolResult(
           rows.map((row) => `- ${row}`).join("\n")
         }`
       : `I found no matching scheduled blocks for ${date}.`;
+  }
+
+  if (plan.intent === "REPLACEMENT_ANALYSIS") {
+    const replaceable = Array.isArray(output.replaceable) ? output.replaceable : [];
+    const blocked = Array.isArray(output.blocked) ? output.blocked : [];
+    const lines = [
+      `Replacement analysis for ${output.sourceClient || plan.input.sourceClient} → ${output.replacementClient || plan.input.replacementClient} on ${date}:`,
+      `- Replaceable blocks: ${replaceable.length}`,
+      `- Blocked blocks: ${blocked.length}`,
+    ];
+    for (const value of replaceable.slice(0, 12)) {
+      const item = asRecord(value);
+      lines.push(
+        `- Replaceable: ${item.startTime || "?"} with ${item.staffName || "staff"}${item.sourceWillBecomeUncovered ? " (source client would need replacement coverage)" : ""}`
+      );
+    }
+    for (const value of blocked.slice(0, 8)) {
+      const item = asRecord(value);
+      lines.push(
+        `- Blocked: ${item.startTime || "?"} — ${item.reason || "not directly replaceable"}`
+      );
+    }
+    if (output.warning) lines.push(`- Warning: ${String(output.warning)}`);
+    return lines.join("\n");
+  }
+
+  if (plan.intent === "IMPROVEMENTS") {
+    const coverage = Array.isArray(output.coverageSuggestions)
+      ? output.coverageSuggestions
+      : [];
+    const breaks = Array.isArray(output.breakSuggestions)
+      ? output.breakSuggestions
+      : [];
+    const lines = [
+      `Schedule improvement analysis for ${date}:`,
+      `- Coverage suggestions: ${coverage.length}`,
+      `- Break suggestions: ${breaks.length}`,
+    ];
+    for (const value of coverage.slice(0, 10)) {
+      const item = asRecord(value);
+      const direct = Array.isArray(item.recommendedStaff)
+        ? item.recommendedStaff.join(", ")
+        : "";
+      lines.push(
+        `- ${item.clientCode || "Client"} ${item.startTime || ""}: ${item.kind || "suggestion"}${direct ? ` — ${direct}` : ""}`
+      );
+    }
+    for (const value of breaks.slice(0, 10)) {
+      const item = asRecord(value);
+      lines.push(
+        `- ${item.staffName || "Staff"}: ${item.recommendation || item.kind || "break suggestion"}`
+      );
+    }
+    lines.push("- These are advisory only; any actual edit still requires scheduler validation.");
+    return lines.join("\n");
   }
 
   if (plan.intent === "CONFIGURATION") {

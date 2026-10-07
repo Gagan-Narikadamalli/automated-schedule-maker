@@ -88,6 +88,7 @@ export function nativePlanNeedsConfirmation(plan: NativeSchedulerPlan): boolean 
     "RULES",
     "SUPERVISION",
     "UNPLACED_PLACE",
+    "COPY_DAY",
   ].includes(plan.intent);
 }
 
@@ -192,6 +193,10 @@ export function describeNativePendingAction(
 
   if (plan.intent === "UNPLACED_PLACE") {
     return `Place unplaced client ${input.client} with ${input.staff} at ${input.startTime} on ${date}.`;
+  }
+
+  if (plan.intent === "COPY_DAY") {
+    return `Copy the saved schedule from ${input.sourceDate} into ${date} and revalidate it against ${date}'s current staff/client constraints.`;
   }
 
   return plan.explanation;
