@@ -11,6 +11,10 @@ import { buildSchedulerDateContextFallback } from "@/features/ai/schedulerDateCo
 import { analyzeNaturalTimeRange, naturalTimeConfirmationQuestion } from "@/features/ai/naturalTime";
 import { buildSchedulerAiInstructions } from "@/features/ai/schedulerPrompt";
 import { buildSchedulerReplyFallback } from "@/features/ai/schedulerReplyFallback";
+import {
+  resolveSchedulerAiProvider,
+  runNativeSchedulerAi,
+} from "@/features/ai/schedulerNativeAi";
 import { createSchedulerReadOnlyTools } from "@/features/ai/schedulerTools";
 import {
   createSchedulerWebsiteTools,
@@ -551,8 +555,11 @@ export async function POST(request: Request) {
       return forbiddenResponse("You do not have access to this scheduler location.");
     }
 
+    const aiProvider = resolveSchedulerAiProvider();
     const model =
-      process.env.SCHEDULER_AI_MODEL?.trim() || DEFAULT_SCHEDULER_AI_MODEL;
+      aiProvider === "native"
+        ? "native/scheduler-v0.1"
+        : process.env.SCHEDULER_AI_MODEL?.trim() || DEFAULT_SCHEDULER_AI_MODEL;
     const autonomousWrites =
       process.env.SCHEDULER_AI_AUTONOMOUS_WRITES?.trim().toLowerCase() === "true";
     const writeToolsEnabled = autonomousWrites && !attachmentPreviewOnly;
@@ -576,6 +583,15 @@ export async function POST(request: Request) {
     };
 
     let attachmentAnalysis = "";
+    if (attachmentPreviewOnly && aiProvider === "native") {
+      return NextResponse.json(
+        {
+          error:
+            "Native Scheduler AI image reading is not enabled yet. This native mode does not send screenshots to any outside AI service. Text scheduling commands remain available while the built-from-scratch image reader is developed and tested.",
+        },
+        { status: 422 }
+      );
+    }
     if (attachmentPreviewOnly) {
       try {
         attachmentAnalysis = await analyzeSchedulerAttachments({
@@ -674,31 +690,74 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
 
     const dateContextInstructions = `\n\nDATE-CONTEXT, PLANNING, AND CONFIRMATION RULES\n- Whenever a date is clear, a complete scheduler snapshot for that date may be included with the user's prompt. Use that date-scoped evidence before answering factual questions.\n- Consider all relevant date information together: staff availability and call-outs, saved staff/client assignments, client required slots/attendance, breaks, nap/speech/fixed events, uncovered requirements, unplaced work, and scheduler readiness.\n- Keep an established conversation date when the next message merely corrects a time, person, client, or other detail. Do not ask for the date again unless the user actually changes or removes the date context.\n- NEVER pair a weekday with the wrong calendar date. The resolved ISO date is authoritative; derive any weekday wording from that date. For example, 2026-10-06 is Tuesday and 2026-10-07 is Wednesday.\n- Answer whatever scheduler question the user asks from that evidence and any tool results. Do not limit yourself to call-outs or schedule generation.\n- If the available scheduler evidence does not support a reliable answer, say: \"I couldn't generate a reliable answer from the available scheduler information. Please try again with a different date, person, client, time, or more detail.\" Never invent an answer.\n- If the schedule for the requested date is not generated, say that clearly and ask whether the user wants you to generate it. Do not present profile availability as if it were the completed schedule.\n\nDIRECT BREAK EDITS\n- If the user directly says to add or remove a break for a named staff member at a specific time/range, inspect that staff member's schedule and availability for the date first.\n- Translate ranges into the scheduler's 30-minute cells. Example: 10:30-11:00 is the 10:30 cell; 10:30-11:30 is the 10:30 and 11:00 cells. Do not collapse 11:00-11:30 into 11:00-11:00.\n- If the requested cell(s) can be changed safely, execute the edit immediately when writes are enabled. Do not ask an extra confirmation merely because it is a break.\n- If an existing client assignment would be displaced, preserve/report that client in Unplaced unless the requested operation moves that client somewhere else in the same atomic workflow. Protected/rule overrides still require the override confirmation below.\n\nBULK STAFF AND CLIENT REPLACEMENTS\n- The user may replace MANY blocks in one request. For wording such as \"replace all Anias blocks with Areyana\", \"move everything from Anias to Areyana\", or equivalent, call replace_schedule_blocks with entityType=STAFF. Omit startTime/endTime when the user says all/everything so the whole date is handled.\n- For wording such as \"replace CaMe with ZiBo\", \"replace all CaMe blocks with ZiBo\", or \"exchange CaMe and ZiBo\", call replace_schedule_blocks with entityType=CLIENT. It is designed to process all matching saved 1:1 blocks, swap same-time coverage when both clients are already assigned, and move genuinely displaced source coverage to Unplaced.\n- A direct replace/move instruction is already permission to perform the ordinary replacement. Do NOT require a separate generic \"Would you like to proceed?\" confirmation when the first safe attempt succeeds.\n- ALWAYS make the first replacement attempt with allowLockedOverride=false, allowRuleOverride=false, and allowOccupiedReplacement=false. If a STAFF replacement reports ordinary occupied destination blocks, explain the clashing times and ask whether the user still wants to proceed; this is a replacement-clash confirmation, not a scheduler-rule override. A later "yes/proceed" to that exact clash retries with allowOccupiedReplacement=true. If the tool instead returns protected cells or actual scheduler-rule conflicts, explain those separately and ask for the appropriate override permission.\n- After a successful bulk replacement, inspect/report unplacedCreated. If it is non-empty, clearly say which client/time blocks could not remain placed and were moved to Unplaced, then ask whether the user wants them moved somewhere specific. Do not hide leftover work.\n- If some non-client target activities were overwritten by an explicitly requested staff replacement, mention them from overwrittenActivities.\n\nUNPLACED FOLLOW-UPS\n- When the user tells you where to put a leftover/unassigned/unplaced client block, use place_unplaced_assignment. Prefer the exact unplacedId from the date context or prior tool result. If only the client is named and multiple unresolved records exist, use originalStartTime to disambiguate or ask which one.\n- place_unplaced_assignment must both save the target schedule block and resolve the original Unplaced record. If the target block displaces a different client, that displaced client is preserved as a new Unplaced record; report it.\n- Verify placement results before claiming the tray item was resolved.\n\nSINGLE CLIENT REPLACEMENT ANALYSIS\n- analyze_client_replacement remains useful when the user asks what CAN be replaced, wants a preview, or asks why a particular client replacement is blocked. For a direct whole-day replacement instruction, prefer replace_schedule_blocks so the actual multi-block change can be completed.\n\nAI SUGGESTIONS\n- When the user asks what you recommend, how to cover gaps, how to fit breaks, or asks for the best schedule change, call suggest_schedule_improvements.\n- Advisory suggestions may use broad scheduling judgment instead of following every soft clinic optimization preference exactly. Prefer practical coverage and breaks, and explain the reasoning in normal language.\n- Suggestions are NOT permission to edit. If the user only asked for recommendations, present them without making changes.\n- When the user asks to apply a suggestion, use the normal write tools. The write tools remain authoritative for actual edits and will enforce availability, attendance, hard restrictions, protected cells, and scheduler conflicts.\n- For a useful two-step recommendation, you may propose a handoff such as: move client Y at 12:00 from Staff A to free Staff B, then use Staff A to cover uncovered client X; or move Y to Staff B and give Staff A a break.\n\nOVERRIDE CONFIRMATION\n- NEVER set allowLockedOverride=true or allowRuleOverride=true on the first attempt merely because you think the change is best.\n- If any write tool reports protected cells, requiresConfirmation, a locked/manual conflict, staff unavailability, client double-booking, outside-attendance, or another overridable conflict, stop the write workflow for that change. Explain the exact staff/client/date/time changes and the conflict in plain language, then ask: \"Do you allow me to override this and proceed?\"\n- A later clear affirmative answer to that exact pending override question is explicit permission. On that follow-up turn, retry the SAME pending operation with only the required override flag(s) set to true, then verify the final schedule.\n- Non-overridable failures such as an invalid/inactive client must never be forced; explain the blocker instead.\n\nCONVERSATION COMPLETION\n- When the user's request is fully answered or a requested action is fully completed, finish naturally. The server may append a brief offer for additional help. Do not add that offer when you are already asking for a date, clarification, generation confirmation, Unplaced destination, or override permission.`;
 
-    const agent = new ToolLoopAgent({
-      model,
-      instructions:
-        buildSchedulerAiInstructions(context, {
-          autonomousWrites: writeToolsEnabled,
-        }) +
-        attachmentImportInstructions +
-        dateContextInstructions,
-      tools,
-      toolChoice: "auto",
-      stopWhen: stepCountIs(20),
-      maxOutputTokens: 2400,
-    });
+    const sharedInstructions =
+      buildSchedulerAiInstructions(context, {
+        autonomousWrites: writeToolsEnabled,
+      }) +
+      attachmentImportInstructions +
+      dateContextInstructions;
 
-    const result = await agent.generate({
-      prompt: buildConversationPrompt(history, normalizedMessage, dateContext),
-      timeout: {
-        totalMs: 260_000,
-        stepMs: 65_000,
-      },
-    });
+    let resultText = "";
+    let resultSteps: Array<{
+      toolCalls: Array<{ toolName: string; input: Record<string, unknown> }>;
+      toolResults: Array<{
+        toolName: string;
+        input: Record<string, unknown>;
+        output: unknown;
+      }>;
+    }> = [];
+
+    if (aiProvider === "native") {
+      const nativeResult = await runNativeSchedulerAi({
+        message: normalizedMessage,
+        history,
+        tools,
+        date: resolvedDate.date,
+        writeToolsEnabled,
+      });
+      resultText = nativeResult.text;
+      resultSteps = nativeResult.steps;
+    } else {
+      const agent = new ToolLoopAgent({
+        model,
+        instructions: sharedInstructions,
+        tools,
+        toolChoice: "auto",
+        stopWhen: stepCountIs(20),
+        maxOutputTokens: 2400,
+      });
+
+      const gatewayResult = await agent.generate({
+        prompt: buildConversationPrompt(history, normalizedMessage, dateContext),
+        timeout: {
+          totalMs: 260_000,
+          stepMs: 65_000,
+        },
+      });
+
+      resultText = gatewayResult.text;
+      resultSteps = gatewayResult.steps.map((step) => ({
+        toolCalls: step.toolCalls.map((toolCall) => ({
+          toolName: toolCall.toolName,
+          input:
+            toolCall.input && typeof toolCall.input === "object"
+              ? (toolCall.input as Record<string, unknown>)
+              : {},
+        })),
+        toolResults: step.toolResults.map((toolResult) => ({
+          toolName: toolResult.toolName,
+          input:
+            toolResult.input && typeof toolResult.input === "object"
+              ? (toolResult.input as Record<string, unknown>)
+              : {},
+          output: toolResult.output,
+        })),
+      }));
+    }
 
     const toolsUsed = [
       ...new Set(
-        result.steps.flatMap((step) =>
+        resultSteps.flatMap((step) =>
           step.toolCalls.map((toolCall) => toolCall.toolName)
         )
       ),
@@ -720,7 +779,7 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
             },
           ]
         : []),
-      ...result.steps.flatMap((step) =>
+      ...resultSteps.flatMap((step) =>
         step.toolResults.map((toolResult) => ({
           toolName: toolResult.toolName,
           input: toolResult.input,
@@ -755,9 +814,9 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
         return output.ok === true;
       });
 
-    let reply = result.text.trim();
+    let reply = resultText.trim();
 
-    if (!reply && toolEvidence.length > 0) {
+    if (!reply && toolEvidence.length > 0 && aiProvider !== "native") {
       try {
         const synthesis = await generateText({
           model,
