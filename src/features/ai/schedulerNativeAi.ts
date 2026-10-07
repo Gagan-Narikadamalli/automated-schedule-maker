@@ -729,32 +729,51 @@ export function planNativeSchedulerAction(args: {
     };
   }
 
-  if (/\b(?:breaks?|called\s+out|call[- ]?outs?|staff|employees?|technicians?|bts?)\b/i.test(raw)) {
+  if (
+    /\b(?:staff|employee|technician|bt|break|call[- ]?out)s?\s+(?:summary|status|overview)\b/i.test(raw) ||
+    /\b(?:show|list|view|summarize|check|what\s+are|how\s+many|which)\b[\s\S]*\b(?:breaks?|called\s+out|call[- ]?outs?|staff|employees?|technicians?|bts?)\b/i.test(raw)
+  ) {
     return {
       intent: "STAFF_SUMMARY",
       toolName: "get_staff",
       input: {},
-      confidence: 0.84,
+      confidence: 0.9,
       explanation: "Read selected-day staff state.",
     };
   }
 
-  if (/\b(?:clients?|nap|speech|support\s+level|attendance)\b/i.test(raw)) {
+  if (
+    /\b(?:client|nap|speech|attendance|support\s+level)s?\s+(?:summary|status|overview|requirements?)\b/i.test(raw) ||
+    /\b(?:show|list|view|summarize|check|what\s+are|how\s+many)\b[\s\S]*\b(?:clients?|nap|speech|support\s+level|attendance)\b/i.test(raw)
+  ) {
     return {
       intent: "CLIENT_SUMMARY",
       toolName: "get_clients",
       input: {},
-      confidence: 0.84,
+      confidence: 0.9,
       explanation: "Read selected-day client requirements.",
     };
   }
 
+  if (
+    /\b(?:schedule|day)\b/i.test(raw) &&
+    /\b(?:what(?:'s|\s+is)|show|view|summarize|summary|happening|overview)\b/i.test(raw)
+  ) {
+    return {
+      intent: "DAY_SUMMARY",
+      toolName: "get_day_schedule",
+      input: {},
+      confidence: 0.9,
+      explanation: "Read the selected day's saved schedule.",
+    };
+  }
+
   return {
-    intent: "DAY_SUMMARY",
-    toolName: "get_day_schedule",
-    input: {},
-    confidence: 0.68,
-    explanation: "Use the live day schedule as the safest scheduler-only fallback.",
+    intent: "CLARIFICATION",
+    toolName: "__native_clarification__",
+    input: { message: "I am unable to understand your request." },
+    confidence: 1,
+    explanation: "The request did not match a supported Scheduler AI intent.",
   };
 }
 
@@ -926,15 +945,23 @@ function summarizeNativeToolResult(
         output.message || "I need a more specific staff or client reference."
       );
     }
+    if (output.message && output.profileFound) {
+      return String(output.message);
+    }
     if (output.scheduleAvailable === false) {
-      return `The schedule for ${date} has not been generated yet.`;
+      return String(
+        output.message || `The schedule for ${date} has not been generated yet.`
+      );
     }
     const rows = summarizeSegments(output.segments);
-    return rows.length
-      ? `Schedule results for ${date}:\n${
-          rows.map((row) => `- ${row}`).join("\n")
-        }`
-      : `I found no matching scheduled blocks for ${date}.`;
+    if (rows.length) {
+      return `Schedule results for ${date}:\n${rows
+        .map((row) => `- ${row}`)
+        .join("\n")}`;
+    }
+    return String(
+      output.message || `I found no matching scheduled blocks for ${date}.`
+    );
   }
 
   if (plan.intent === "REPLACEMENT_ANALYSIS") {
