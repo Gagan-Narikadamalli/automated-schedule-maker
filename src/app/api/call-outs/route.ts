@@ -9,6 +9,9 @@ import {
 } from "@/lib/api/auth";
 import { writeAuditLog } from "@/lib/api/audit";
 import { connectToDatabase } from "@/lib/db";
+import {
+  getFullDayCallOutStaffIds,
+} from "@/features/scheduler/callOutVisibility";
 import { CallOut } from "@/models/CallOut";
 import { Staff } from "@/models/Staff";
 
@@ -102,9 +105,17 @@ export async function GET(request: Request) {
           .filter(Boolean)
       )
     );
+    const fullDayStaffIds = getFullDayCallOutStaffIds(
+      callOuts.map((callOut) => ({
+        staffId: referenceId(callOut.staffId),
+        startTime: String(callOut.startTime ?? ""),
+        endTime: String(callOut.endTime ?? ""),
+      }))
+    );
 
     return NextResponse.json({
       selectedStaffIds,
+      fullDayStaffIds,
       callOuts: callOuts.map((callOut) => ({
         ...serializeCallOut(callOut as unknown as Record<string, unknown>),
         staff:
@@ -240,6 +251,13 @@ export async function PUT(request: Request) {
     const afterStaffIds = Array.from(
       new Set(afterCallOuts.map((callOut) => String(callOut.staffId)))
     );
+    const fullDayStaffIds = getFullDayCallOutStaffIds(
+      afterCallOuts.map((callOut) => ({
+        staffId: String(callOut.staffId),
+        startTime: String(callOut.startTime ?? ""),
+        endTime: String(callOut.endTime ?? ""),
+      }))
+    );
     const afterStaffSet = new Set(afterStaffIds);
     const addedCount = afterStaffIds.filter(
       (staffId) => !beforeStaffIds.has(staffId)
@@ -262,6 +280,7 @@ export async function PUT(request: Request) {
     return NextResponse.json({
       success: true,
       selectedStaffIds: afterStaffIds,
+      fullDayStaffIds,
       addedCount,
       removedCount,
       callOuts: afterCallOuts.map((callOut) =>
