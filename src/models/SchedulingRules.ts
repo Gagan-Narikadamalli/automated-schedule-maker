@@ -58,10 +58,15 @@ const SchedulingRulesSchema = new Schema(
       type: Boolean,
       default: true,
     },
+    breakSchedulingEnabled: {
+      type: Boolean,
+      default: true,
+    },
     defaultBreakMinutes: {
       type: Number,
       default: 30,
       min: 0,
+      max: 240,
     },
     breakEligibilityHours: {
       type: Number,
@@ -253,7 +258,7 @@ const SchedulingRulesSchema = new Schema(
     },
     speechDurationRulesEnabled: {
       type: Boolean,
-      default: false,
+      default: true,
     },
     speechMinimumMinutes: {
       type: Number,
