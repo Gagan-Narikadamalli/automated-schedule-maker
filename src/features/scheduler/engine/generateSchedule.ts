@@ -458,6 +458,7 @@ function findCoverageFirstSingleSlotStaff(
         callOutStaffIds,
         rules: input.rules,
         allowSameDayPairRepeat: true,
+        allowCoverageLimitException: true,
       });
 
       if (!check.allowed) {
