@@ -236,6 +236,7 @@ export function createSchedulerAdvisoryTools(context: SchedulerAiContext) {
           };
         }
 
+        const staffNames = staffNameMap(dayData);
         const sourceAssignments = assignments.filter(
           (assignment) =>
             assignment.assignmentType === "CLIENT_1_TO_1" &&
@@ -322,7 +323,6 @@ export function createSchedulerAdvisoryTools(context: SchedulerAiContext) {
           loadAssignments(locationId, date),
         ]);
         const byCell = assignmentMap(assignments);
-        const staffNames = staffNameMap(dayData);
         const clientCodes = clientCodeMap(dayData);
         const uncovered = uncoveredRequirements(dayData, assignments, startTime, endTime);
         const coverageSuggestions: JsonRecord[] = [];
