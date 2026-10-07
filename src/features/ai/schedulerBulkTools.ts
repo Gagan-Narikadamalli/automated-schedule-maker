@@ -139,10 +139,6 @@ const placeUnplacedSchema = jsonSchema<PlaceUnplacedInput>({
   additionalProperties: false,
 });
 
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 function idFrom(value: unknown): string | null {
   if (!value) return null;
   if (typeof value === "object" && "_id" in (value as JsonRecord)) {
