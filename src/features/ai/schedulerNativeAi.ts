@@ -11,6 +11,7 @@ import {
   type NativePendingSnapshot,
 } from "./schedulerNativeConversation";
 import { buildNativeHistoricalKnowledge } from "./schedulerNativeKnowledge";
+import { expandNativeFollowUp } from "./schedulerNativeFollowUp";
 import { planNativeManagementAction } from "./schedulerNativeManagement";
 import type { SchedulerAiHistoryMessage } from "./types";
 
@@ -996,8 +997,9 @@ export async function runNativeSchedulerAi(args: {
     });
   }
 
+  const expandedMessage = expandNativeFollowUp(args.message, args.history);
   const plan = planNativeSchedulerAction({
-    message: args.message,
+    message: expandedMessage,
     history: args.history,
     writeToolsEnabled: args.writeToolsEnabled,
     date: args.date,
@@ -1011,7 +1013,7 @@ export async function runNativeSchedulerAi(args: {
     const knowledge = await buildNativeHistoricalKnowledge({
       locationId: args.locationId,
       date: args.date,
-      query: args.message,
+      query: expandedMessage,
     });
     return emptyNativeResult(knowledge);
   }
