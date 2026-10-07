@@ -118,14 +118,18 @@ export async function GET(request: Request) {
       date,
       locationId,
       recentSavedScheduleDates,
-      staff: plainStaffDocuments.map((staffMember) => ({
-        id: String(staffMember._id),
-        name: String(staffMember.fullName ?? ""),
-        role: String(staffMember.role ?? ""),
-        color: String(staffMember.color ?? "#DCE9F8"),
-        teamId: staffMember.teamId ? String(staffMember.teamId) : null,
-        availableSlots: availableSlotMap.get(String(staffMember._id)) ?? [],
-      })),
+      staff: plainStaffDocuments
+        .filter((staffMember) =>
+          availableSlotMap.has(String(staffMember._id))
+        )
+        .map((staffMember) => ({
+          id: String(staffMember._id),
+          name: String(staffMember.fullName ?? ""),
+          role: String(staffMember.role ?? ""),
+          color: String(staffMember.color ?? "#DCE9F8"),
+          teamId: staffMember.teamId ? String(staffMember.teamId) : null,
+          availableSlots: availableSlotMap.get(String(staffMember._id)) ?? [],
+        })),
       assignments: plainAssignments.map((assignment) =>
         serializeAssignment(assignment)
       ),
