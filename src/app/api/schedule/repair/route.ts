@@ -2,11 +2,16 @@ import { NextResponse } from "next/server";
 
 import { getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
 import { repairCoverageMinimally } from "@/features/scheduler/engine/generateSchedule";
+import { placeStaffBreaksAfterCoverage } from "@/features/scheduler/engine/placeStaffBreaks";
+import { enrichBreakAssignmentsWithFixedEvents } from "@/features/scheduler/engine/reserveBreaks";
 import {
   repairSchedule,
   type RepairAffectedSlot,
 } from "@/features/scheduler/engine/repairSchedule";
-import type { SchedulerAssignment } from "@/features/scheduler/engine/types";
+import type {
+  SchedulerAssignment,
+  SchedulerStaff,
+} from "@/features/scheduler/engine/types";
 import { applyHistoricalTraining } from "@/features/scheduler/server/applyHistoricalTraining";
 import { applyLivingstonWorkbookTrial } from "@/features/scheduler/server/applyLivingstonWorkbookTrial";
 import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySchedulerInput";
@@ -35,6 +40,109 @@ type CallOutRecord = {
   startTime: string;
   endTime: string;
 };
+
+function isBreakAssignment(
+  assignment: SchedulerAssignment
+): boolean {
+  return (
+    assignment.assignmentType === "BREAK" ||
+    assignment.assignmentType === "BREAK_NAP" ||
+    assignment.assignmentType === "BREAK_SPEECH"
+  );
+}
+
+function timeMinutes(time: string): number {
+  const [hourText, minuteText] = time.split(":");
+  return Number(hourText) * 60 + Number(minuteText);
+}
+
+function normalizeBreakAssignmentsForMinimalFix(
+  assignments: SchedulerAssignment[],
+  staff: SchedulerStaff[],
+  rules: {
+    breakWindowStart: string;
+    breakWindowEnd: string;
+    breakEligibilityHours: number;
+    slotLengthMinutes: number;
+  }
+): SchedulerAssignment[] {
+  const nonBreaks = assignments.filter(
+    (assignment) => !isBreakAssignment(assignment)
+  );
+  const breaksByStaff = new Map<string, SchedulerAssignment[]>();
+
+  for (const assignment of assignments.filter(isBreakAssignment)) {
+    const current = breaksByStaff.get(assignment.staffId) ?? [];
+    current.push(assignment);
+    breaksByStaff.set(assignment.staffId, current);
+  }
+
+  const normalizedBreaks: SchedulerAssignment[] = [];
+
+  for (const staffMember of staff) {
+    const availableHours =
+      (staffMember.availableSlots.length * rules.slotLengthMinutes) / 60;
+
+    if (availableHours < rules.breakEligibilityHours) {
+      continue;
+    }
+
+    const candidates = (breaksByStaff.get(staffMember.id) ?? [])
+      .filter((assignment) => {
+        const normalWindow =
+          assignment.startTime >= rules.breakWindowStart &&
+          assignment.startTime < rules.breakWindowEnd;
+        const napExtension =
+          assignment.assignmentType === "BREAK_NAP" &&
+          assignment.startTime >= rules.breakWindowStart &&
+          assignment.startTime < "14:00";
+
+        return normalWindow || napExtension;
+      })
+      .sort((left, right) => {
+        const leftManual =
+          left.source === "MANUAL" || left.locked ? 0 : 1;
+        const rightManual =
+          right.source === "MANUAL" || right.locked ? 0 : 1;
+
+        if (leftManual !== rightManual) {
+          return leftManual - rightManual;
+        }
+
+        const leftEvent =
+          left.assignmentType === "BREAK_NAP"
+            ? 0
+            : left.assignmentType === "BREAK_SPEECH"
+              ? 1
+              : 2;
+        const rightEvent =
+          right.assignmentType === "BREAK_NAP"
+            ? 0
+            : right.assignmentType === "BREAK_SPEECH"
+              ? 1
+              : 2;
+
+        if (leftEvent !== rightEvent) {
+          return leftEvent - rightEvent;
+        }
+
+        const leftDistance = Math.abs(timeMinutes(left.startTime) - 12 * 60);
+        const rightDistance = Math.abs(timeMinutes(right.startTime) - 12 * 60);
+
+        if (leftDistance !== rightDistance) {
+          return leftDistance - rightDistance;
+        }
+
+        return left.startTime.localeCompare(right.startTime);
+      });
+
+    if (candidates[0]) {
+      normalizedBreaks.push(candidates[0]);
+    }
+  }
+
+  return [...nonBreaks, ...normalizedBreaks];
+}
 
 function assignmentOverlapsCallOut(
   assignment: SchedulerAssignment,
@@ -122,7 +230,19 @@ export async function POST(request: Request) {
       workbookTraining.input
     );
 
-    const schedulerInput = historicalTraining.input;
+    const originalSchedulerInput = historicalTraining.input;
+    const schedulerInput =
+      repairMode === "COVERAGE"
+        ? {
+            ...originalSchedulerInput,
+            existingAssignments:
+              normalizeBreakAssignmentsForMinimalFix(
+                originalSchedulerInput.existingAssignments,
+                originalSchedulerInput.staff,
+                dayData.extendedRules
+              ),
+          }
+        : originalSchedulerInput;
     const affectedSlots: RepairAffectedSlot[] =
       repairMode === "CALL_OUT"
         ? schedulerInput.existingAssignments
@@ -163,17 +283,51 @@ export async function POST(request: Request) {
           /^\d{2}:\d{2}$/.test(record.startTime)
       );
 
-    const result =
+    const coverageResult =
       repairMode === "COVERAGE"
-        ? repairCoverageMinimally(schedulerInput, priorityRequirements)
+        ? repairCoverageMinimally(
+            schedulerInput,
+            priorityRequirements,
+            { allowAutomaticOverrides: true }
+          )
         : repairSchedule(
             schedulerInput,
             affectedStaffIds,
             affectedSlots
           );
 
+    const breakPlan =
+      repairMode === "COVERAGE"
+        ? placeStaffBreaksAfterCoverage({
+            staff: schedulerInput.staff,
+            clients: schedulerInput.clients,
+            assignments: coverageResult.assignments,
+            referenceAssignments: schedulerInput.referenceAssignments,
+            callOutStaffIds: schedulerInput.callOutStaffIds,
+            rules: {
+              ...dayData.extendedRules,
+              historicalBreakPriority:
+                schedulerInput.rules.historicalBreakPriority,
+            },
+            schedulerRules: schedulerInput.rules,
+            allowProtectedRelief: true,
+          })
+        : null;
+
+    const result =
+      repairMode === "COVERAGE" && breakPlan
+        ? {
+            ...coverageResult,
+            assignments: enrichBreakAssignmentsWithFixedEvents(
+              breakPlan.assignments,
+              schedulerInput.clients,
+              dayData.extendedRules.slotLengthMinutes
+            ),
+          }
+        : coverageResult;
+
     const originalAssignmentIds = new Set(
-      schedulerInput.existingAssignments.map(
+      originalSchedulerInput.existingAssignments.map(
         (assignment) => assignment.id
       )
     );
@@ -182,7 +336,7 @@ export async function POST(request: Request) {
     );
 
     const removedOriginalIds =
-      schedulerInput.existingAssignments
+      originalSchedulerInput.existingAssignments
         .filter(
           (assignment) => !resultAssignmentIds.has(assignment.id)
         )
@@ -199,9 +353,13 @@ export async function POST(request: Request) {
         },
         locationId,
         date,
-        manuallyOverridden: {
-          $ne: true,
-        },
+        ...(repairMode === "CALL_OUT"
+          ? {
+              manuallyOverridden: {
+                $ne: true,
+              },
+            }
+          : {}),
       });
     }
 
@@ -221,7 +379,7 @@ export async function POST(request: Request) {
           note:
             assignment.note ||
             (repairMode === "COVERAGE"
-              ? "Added by minimal uncovered coverage repair."
+              ? "Added by automatic minimal fix repair."
               : "Added by targeted call-out schedule repair."),
         }))
       );
@@ -233,6 +391,29 @@ export async function POST(request: Request) {
       result.uncoveredRequirements,
       result.assignments
     );
+
+    const totalBreakCount = result.assignments.filter(
+      isBreakAssignment
+    ).length;
+    const slotHours =
+      dayData.extendedRules.slotLengthMinutes / 60;
+    const breakHoursReserved = totalBreakCount * slotHours;
+    const finalMetrics = {
+      ...result.metrics,
+      breakHoursReserved,
+      netStaffCoverageHours: Math.max(
+        result.metrics.staffAvailableHours - breakHoursReserved,
+        0
+      ),
+      additionalLaborHoursNeeded: Math.max(
+        result.metrics.requiredClientHours -
+          Math.max(
+            result.metrics.staffAvailableHours - breakHoursReserved,
+            0
+          ),
+        0
+      ),
+    };
 
     const priorityUnplacedIds = priorityUnplaced
       .map((record) => record._id)
@@ -267,7 +448,7 @@ export async function POST(request: Request) {
       entityId: date,
       summary:
         repairMode === "COVERAGE"
-          ? `Minimally repaired uncovered client coverage on ${date}, preserving the existing schedule wherever possible.`
+          ? `Applied automatic Minimal Fix on ${date}: Unplaced/client coverage first, minimum necessary schedule overrides, then break repair.`
           : `Repaired only the schedule cells affected by ${affectedStaffIds.length} staff call-out(s) on ${date}.`,
       after: {
         repairMode,
@@ -279,7 +460,12 @@ export async function POST(request: Request) {
         removedAssignmentCount: removedOriginalIds.length,
         addedAssignmentCount: newAssignments.length,
         managerGapCount,
-        metrics: result.metrics,
+        automaticOverrideMode: repairMode === "COVERAGE",
+        reservedBreakCount: breakPlan?.reservedBreaks.length ?? 0,
+        breakReliefSwapCount: breakPlan?.reliefSwapCount ?? 0,
+        unplacedBreakStaffIds: breakPlan?.unplacedBreakStaffIds ?? [],
+        totalBreakCount,
+        metrics: finalMetrics,
         uncoveredRequirements: result.uncoveredRequirements,
         warningCount: result.warnings.length,
         workbookTrainingApplied: workbookTraining.applied,
@@ -301,7 +487,12 @@ export async function POST(request: Request) {
       removedAssignmentCount: removedOriginalIds.length,
       addedAssignmentCount: newAssignments.length,
       managerGapCount,
-      metrics: result.metrics,
+      automaticOverrideMode: repairMode === "COVERAGE",
+      reservedBreakCount: breakPlan?.reservedBreaks.length ?? 0,
+      breakReliefSwapCount: breakPlan?.reliefSwapCount ?? 0,
+      unplacedBreakStaffIds: breakPlan?.unplacedBreakStaffIds ?? [],
+      totalBreakCount,
+      metrics: finalMetrics,
       warnings: result.warnings,
       uncoveredRequirements: result.uncoveredRequirements,
     });

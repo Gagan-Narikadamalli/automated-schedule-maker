@@ -329,7 +329,7 @@ export function createSchedulerWriteTools(context: SchedulerAiContext) {
 
     repair_schedule: tool({
       description:
-        "Minimally repair uncovered client coverage on the selected date. Use for requests such as 'fix the schedule', 'cover the uncovered blocks', or 'make sure all clients are covered'. The repair preserves every working assignment when possible, fills gaps into free eligible staff first, and only then allows a one-step move of an unlocked AUTO 1:1 assignment when that is necessary to cover a gap. Manual/locked cells and reserved breaks/events remain protected. Staff call-out recording uses its own targeted repair path.",
+        "Run the autonomous Minimal Fix for the selected date. Use for requests such as 'fix the schedule', 'cover the uncovered blocks', or 'make sure all clients are covered'. Existing Unplaced assignments are first priority, then other uncovered client requirements. It preserves working assignments when possible, but the user's Minimal Fix request authorizes the smallest necessary automatic relocation/override of existing schedule blocks, including protected/manual client blocks, and then it recalculates eligible staff breaks. It does not ask for a separate override confirmation. Hard eligibility/attendance/restriction constraints still apply. Staff call-out recording uses its own targeted repair path.",
       inputSchema: noInputSchema,
       execute: async () =>
         invokeJson(repairScheduleDay, "POST", {

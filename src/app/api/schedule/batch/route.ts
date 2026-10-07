@@ -162,10 +162,10 @@ export async function PUT(request: Request) {
 
     const resolvedClientByChange = new Map<number, string | null>();
     const conflicts: Conflict[] = [];
-    const cellsClearedByBatch = new Set(
-      normalizedChanges
-        .filter((change) => change.assignmentType === "EMPTY")
-        .map((change) => cellKey(change.staffId, change.startTime))
+    const cellsChangedByBatch = new Set(
+      normalizedChanges.map((change) =>
+        cellKey(change.staffId, change.startTime)
+      )
     );
 
     for (let index = 0; index < normalizedChanges.length; index += 1) {
@@ -277,7 +277,7 @@ export async function PUT(request: Request) {
 
           if (
             otherAssignment &&
-            !cellsClearedByBatch.has(
+            !cellsChangedByBatch.has(
               cellKey(String(otherAssignment.staffId), change.startTime)
             )
           ) {

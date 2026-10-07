@@ -346,7 +346,8 @@ function findBestSwap(
   requirement: ClientRequirement,
   input: SchedulerInput,
   assignments: SchedulerAssignment[],
-  callOutStaffIds: Set<string>
+  callOutStaffIds: Set<string>,
+  allowProtectedAssignments = false
 ): SwapCandidate | null {
   const candidates: SwapCandidate[] = [];
 
@@ -354,8 +355,8 @@ function findBestSwap(
     if (
       currentAssignment.startTime !== requirement.startTime ||
       currentAssignment.assignmentType !== "CLIENT_1_TO_1" ||
-      currentAssignment.locked ||
-      currentAssignment.source !== "AUTO" ||
+      (!allowProtectedAssignments &&
+        (currentAssignment.locked || currentAssignment.source !== "AUTO")) ||
       !currentAssignment.clientId
     ) {
       return;
@@ -461,13 +462,15 @@ function attemptSingleSwapRepair(
   requirement: ClientRequirement,
   input: SchedulerInput,
   assignments: SchedulerAssignment[],
-  callOutStaffIds: Set<string>
+  callOutStaffIds: Set<string>,
+  allowProtectedAssignments = false
 ): boolean {
   const swap = findBestSwap(
     requirement,
     input,
     assignments,
-    callOutStaffIds
+    callOutStaffIds,
+    allowProtectedAssignments
   );
 
   if (!swap || !swap.displacedAssignment.clientId) {
@@ -497,6 +500,60 @@ function attemptSingleSwapRepair(
   return true;
 }
 
+function attemptBreakReleaseRepair(
+  requirement: ClientRequirement,
+  input: SchedulerInput,
+  assignments: SchedulerAssignment[],
+  callOutStaffIds: Set<string>
+): boolean {
+  const breakTypes = new Set(["BREAK", "BREAK_NAP", "BREAK_SPEECH"]);
+
+  for (
+    let assignmentIndex = 0;
+    assignmentIndex < assignments.length;
+    assignmentIndex += 1
+  ) {
+    const assignment = assignments[assignmentIndex];
+
+    if (
+      assignment.startTime !== requirement.startTime ||
+      !breakTypes.has(assignment.assignmentType)
+    ) {
+      continue;
+    }
+
+    const staffMember = input.staff.find(
+      (candidate) => candidate.id === assignment.staffId
+    );
+
+    if (!staffMember) {
+      continue;
+    }
+
+    const assignmentsWithoutBreak = assignments.filter(
+      (_, index) => index !== assignmentIndex
+    );
+    const check = canAssignStaffToClient({
+      staffMember,
+      client: requirement.client,
+      startTime: requirement.startTime,
+      assignments: assignmentsWithoutBreak,
+      callOutStaffIds,
+      rules: input.rules,
+    });
+
+    if (!check.allowed) {
+      continue;
+    }
+
+    assignments.splice(assignmentIndex, 1);
+    assignments.push(createAutoAssignment(staffMember, requirement));
+    return true;
+  }
+
+  return false;
+}
+
 /**
  * Fill uncovered client requirements while disturbing as little of the saved
  * schedule as possible.
@@ -506,8 +563,10 @@ function attemptSingleSwapRepair(
  * 2. Fill uncovered requirements into genuinely free eligible staff slots.
  * 3. Only when direct placement is impossible, allow one AUTO 1:1 assignment
  *    to move to another eligible staff member so the newly uncovered client can
- *    use that staff member. Manual/locked assignments and reserved activities
- *    are never selected as swap candidates.
+ *    use that staff member.
+ * 4. In aggressive mode, if coverage is still blocked, the repair may relocate
+ *    a protected/manual client assignment or temporarily release a break. The
+ *    caller must run break placement again so eligible staff end with a break.
  *
  * This is intentionally different from full generation: it is for manager/AI
  * requests such as "fix the uncovered blocks" where preserving the current day
@@ -515,9 +574,11 @@ function attemptSingleSwapRepair(
  */
 export function repairCoverageMinimally(
   input: SchedulerInput,
-  priorityRequirements: Array<{ clientId: string; startTime: string }> = []
+  priorityRequirements: Array<{ clientId: string; startTime: string }> = [],
+  options: { allowAutomaticOverrides?: boolean } = {}
 ): SchedulerResult {
   const callOutStaffIds = new Set(input.callOutStaffIds);
+  const allowAutomaticOverrides = options.allowAutomaticOverrides === true;
   const assignments: SchedulerAssignment[] = input.existingAssignments.map(
     (assignment) => ({ ...assignment })
   );
@@ -585,12 +646,54 @@ export function repairCoverageMinimally(
       continue;
     }
 
+    if (allowAutomaticOverrides) {
+      const repairedByProtectedSwap = attemptSingleSwapRepair(
+        requirement,
+        input,
+        assignments,
+        callOutStaffIds,
+        true
+      );
+
+      if (repairedByProtectedSwap) {
+        warnings.push({
+          code: "REPAIRED_BY_SWAP",
+          message:
+            requirement.client.displayCode +
+            " at " +
+            requirement.startTime +
+            " was covered by automatically relocating a protected/manual client block.",
+        });
+        continue;
+      }
+
+      const repairedByBreakRelease = attemptBreakReleaseRepair(
+        requirement,
+        input,
+        assignments,
+        callOutStaffIds
+      );
+
+      if (repairedByBreakRelease) {
+        warnings.push({
+          code: "REPAIRED_BY_SWAP",
+          message:
+            requirement.client.displayCode +
+            " at " +
+            requirement.startTime +
+            " was covered by temporarily releasing a staff break so break placement can be recalculated.",
+        });
+        continue;
+      }
+    }
+
     uncoveredRequirements.push({
       clientId: requirement.client.id,
       clientCode: requirement.client.displayCode,
       startTime: requirement.startTime,
-      reason:
-        "No eligible free staff member or one-step AUTO assignment swap can cover this requirement without changing protected/manual schedule cells.",
+      reason: allowAutomaticOverrides
+        ? "No eligible free staff member, one-step reassignment, protected-client relocation, or movable break can cover this requirement."
+        : "No eligible free staff member or one-step AUTO assignment swap can cover this requirement without changing protected/manual schedule cells.",
     });
     warnings.push({
       code: "NO_ELIGIBLE_STAFF",

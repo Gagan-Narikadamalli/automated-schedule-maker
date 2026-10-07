@@ -102,6 +102,15 @@ type GenerateResponse = {
   warnings?: unknown[];
   uncoveredRequirements?: unknown[];
   affectedStaffIds?: string[];
+  priorityUnplacedCount?: number;
+  resolvedUnplacedCount?: number;
+  unplacedRemainingCount?: number;
+  addedAssignmentCount?: number;
+  removedAssignmentCount?: number;
+  reservedBreakCount?: number;
+  breakReliefSwapCount?: number;
+  unplacedBreakStaffIds?: string[];
+  automaticOverrideMode?: boolean;
   error?: string;
 };
 
@@ -494,6 +503,7 @@ export function ScheduleWorkspaceV3() {
   async function saveDisplacedAssignments(mutations: ScheduleGridMutation[]) {
     if (demoMode) return;
     const displacedMutations = mutations.filter((mutation) => {
+      if (mutation.stagedInScratch) return false;
       const previousClientId = mutation.previousCell.clientId;
       if (mutation.previousCell.assignmentType !== "CLIENT_1_TO_1" || !previousClientId) return false;
       const sameClientRemains =
@@ -554,8 +564,14 @@ export function ScheduleWorkspaceV3() {
       if (response.status === 409 && data.requiresConfirmation && data.conflicts?.length && allowForce) {
         const onlyUnavailableConflicts = data.conflicts.every((conflict) => conflict.code === "STAFF_UNAVAILABLE");
         const boundaryAlreadyConfirmed = mutations.some((mutation) => mutation.managerConfirmedBoundaryOverride);
+        const sameTimeSwapAlreadyConfirmed = mutations.some(
+          (mutation) => mutation.managerConfirmedSameTimeSwap
+        );
 
-        if (onlyUnavailableConflicts && boundaryAlreadyConfirmed) {
+        if (
+          sameTimeSwapAlreadyConfirmed ||
+          (onlyUnavailableConflicts && boundaryAlreadyConfirmed)
+        ) {
           ({ response, data } = await sendBatchRequest(mutations, true));
         } else {
           const details = data.conflicts.map((conflict, index) => `${index + 1}. ${conflict.message}`).join("\n");
@@ -767,6 +783,52 @@ export function ScheduleWorkspaceV3() {
     }
   }
 
+  async function requestMinimalFix() {
+    if (demoMode) {
+      setStatusMessage("Minimal Fix is available only with live clinic data.");
+      return;
+    }
+
+    try {
+      setWorking(true);
+      setStatusMessage(
+        "Running Minimal Fix: Unplaced assignments first, then uncovered clients, automatic minimum-change overrides when needed, and final break repair..."
+      );
+      const response = await fetch("/api/schedule/repair", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          locationId,
+          date: selectedDate,
+          mode: "COVERAGE",
+        }),
+      });
+      const data = await readJson<GenerateResponse>(response);
+
+      if (!response.ok) {
+        throw new Error(
+          data.error || "Minimal Fix could not repair the schedule."
+        );
+      }
+
+      await loadSchedule();
+      const remaining = data.unplacedRemainingCount ?? 0;
+      const missingBreaks = data.unplacedBreakStaffIds?.length ?? 0;
+
+      setStatusMessage(
+        `Minimal Fix finished. ${data.resolvedUnplacedCount ?? 0}/${data.priorityUnplacedCount ?? 0} existing Unplaced block(s) resolved first; ${data.addedAssignmentCount ?? 0} block(s) added and ${data.removedAssignmentCount ?? 0} existing block(s) moved/replaced. ${formatMetrics(data.metrics)} ${remaining} Unplaced block(s) remain. ${missingBreaks === 0 ? "Required breaks are placed." : `${missingBreaks} eligible staff break(s) still need attention.`}`
+      );
+    } catch (error) {
+      setStatusMessage(
+        error instanceof Error
+          ? error.message
+          : "Minimal Fix could not repair the schedule."
+      );
+    } finally {
+      setWorking(false);
+    }
+  }
+
   async function copyDay() {
     if (demoMode) {
       setStatusMessage("Copy Day is disabled in preview mode.");
@@ -823,6 +885,15 @@ export function ScheduleWorkspaceV3() {
         <div className="toolbar-group">
           <button type="button" className="button button-secondary" disabled={working || loading || staff.length === 0} onClick={() => setShowCallOutPanel((open) => !open)}>Call Outs</button>
           <button type="button" className="button button-secondary" disabled={working || loading || staff.length === 0} onClick={() => void requestRepair()}>Repair Schedule</button>
+          <button
+            type="button"
+            className="button button-secondary"
+            disabled={working || loading || staff.length === 0}
+            onClick={() => void requestMinimalFix()}
+            title="Fix Unplaced and uncovered client blocks with the fewest schedule changes. This repair may automatically move/override existing blocks and then repairs staff breaks."
+          >
+            Minimal Fix
+          </button>
           <button type="button" className="button button-secondary" disabled={working || loading} onClick={() => setShowCopyPanel((open) => !open)}>Copy Day</button>
         </div>
         <div className="toolbar-group">

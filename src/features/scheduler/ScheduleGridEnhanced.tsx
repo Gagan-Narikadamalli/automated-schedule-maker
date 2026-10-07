@@ -31,6 +31,8 @@ export type ScheduleGridMutation = {
   previousCell: DemoGridCell;
   nextCell: DemoGridCell;
   managerConfirmedBoundaryOverride?: boolean;
+  managerConfirmedSameTimeSwap?: boolean;
+  stagedInScratch?: boolean;
 };
 
 type ScheduleGridProps = {
@@ -54,6 +56,19 @@ type Selection = {
 
 type HistoryEntry = {
   mutations: ScheduleGridMutation[];
+};
+
+type CutBuffer = {
+  text: string;
+  cells: Array<{
+    row: number;
+    column: number;
+    rowOffset: number;
+    columnOffset: number;
+    cell: DemoGridCell;
+  }>;
+  rowCount: number;
+  columnCount: number;
 };
 
 type GridColumn = StaffColumn & {
@@ -143,12 +158,14 @@ export function ScheduleGridEnhanced({
   });
   const [editingCell, setEditingCell] = useState<CellPosition | null>(null);
   const [draggedCell, setDraggedCell] = useState<CellPosition | null>(null);
+  const [draggedCells, setDraggedCells] = useState<CellPosition[]>([]);
   const [dragOverCell, setDragOverCell] = useState<CellPosition | null>(null);
   const [moveSource, setMoveSource] = useState<CellPosition | null>(null);
   const [dragSelecting, setDragSelecting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [undoStack, setUndoStack] = useState<HistoryEntry[]>([]);
   const [redoStack, setRedoStack] = useState<HistoryEntry[]>([]);
+  const [cutBuffer, setCutBuffer] = useState<CutBuffer | null>(null);
   const scheduleAreaRef = useRef<HTMLDivElement | null>(null);
   const gridWrapperRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<HTMLInputElement | null>(null);
@@ -537,24 +554,136 @@ export function ScheduleGridEnhanced({
     }
   }
 
-  function handleCopy(event: ClipboardEvent<HTMLDivElement>) {
+  function selectedMovablePositions(): CellPosition[] {
+    const positions: CellPosition[] = [];
+
+    for (
+      let row = normalizedSelection.firstRow;
+      row <= normalizedSelection.lastRow;
+      row += 1
+    ) {
+      for (
+        let column = normalizedSelection.firstColumn;
+        column <= normalizedSelection.lastColumn;
+        column += 1
+      ) {
+        const cell = grid[row][column];
+
+        if (!["EMPTY", "OPEN", "UNAVAILABLE"].includes(cell.assignmentType)) {
+          positions.push({ row, column });
+        }
+      }
+    }
+
+    return positions;
+  }
+
+  function selectionClipboardText(): string {
     const copiedRows: string[] = [];
-    for (let row = normalizedSelection.firstRow; row <= normalizedSelection.lastRow; row += 1) {
+
+    for (
+      let row = normalizedSelection.firstRow;
+      row <= normalizedSelection.lastRow;
+      row += 1
+    ) {
       const values: string[] = [];
-      for (let column = normalizedSelection.firstColumn; column <= normalizedSelection.lastColumn; column += 1) {
+
+      for (
+        let column = normalizedSelection.firstColumn;
+        column <= normalizedSelection.lastColumn;
+        column += 1
+      ) {
         values.push(grid[row][column].text);
       }
+
       copiedRows.push(values.join("\t"));
     }
-    event.clipboardData.setData("text/plain", copiedRows.join("\n"));
+
+    return copiedRows.join("\n");
+  }
+
+  function handleCopy(event: ClipboardEvent<HTMLDivElement>) {
+    const text = selectionClipboardText();
+    event.clipboardData.setData("text/plain", text);
+    setCutBuffer(null);
+    event.preventDefault();
+  }
+
+  function handleCut(event: ClipboardEvent<HTMLDivElement>) {
+    if (saving) return;
+
+    const movable = selectedMovablePositions();
+
+    if (movable.length === 0) {
+      event.preventDefault();
+      return;
+    }
+
+    const hasPersistentSource = movable.some(
+      (position) => !isScratchColumn(position.column)
+    );
+
+    if (hasPersistentSource && !manualMode) {
+      onConflict("Turn on Manual Mode before cutting scheduled blocks.");
+      event.preventDefault();
+      return;
+    }
+
+    const text = selectionClipboardText();
+    const cells: CutBuffer["cells"] = [];
+
+    for (
+      let row = normalizedSelection.firstRow;
+      row <= normalizedSelection.lastRow;
+      row += 1
+    ) {
+      for (
+        let column = normalizedSelection.firstColumn;
+        column <= normalizedSelection.lastColumn;
+        column += 1
+      ) {
+        const currentCell = grid[row][column];
+        const movableCell = !["EMPTY", "OPEN", "UNAVAILABLE"].includes(
+          currentCell.assignmentType
+        );
+
+        cells.push({
+          row,
+          column,
+          rowOffset: row - normalizedSelection.firstRow,
+          columnOffset: column - normalizedSelection.firstColumn,
+          cell: movableCell
+            ? { ...currentCell }
+            : createEmptyScheduleCell(),
+        });
+      }
+    }
+
+    event.clipboardData.setData("text/plain", text);
+    setCutBuffer({
+      text,
+      cells,
+      rowCount:
+        normalizedSelection.lastRow - normalizedSelection.firstRow + 1,
+      columnCount:
+        normalizedSelection.lastColumn -
+        normalizedSelection.firstColumn +
+        1,
+    });
+
+    onConflict(
+      `Cut ${movable.length} block${movable.length === 1 ? "" : "s"}. Select the destination and press Ctrl+V to move them.`
+    );
     event.preventDefault();
   }
 
   async function handlePaste(event: ClipboardEvent<HTMLDivElement>) {
     const clipboardText = event.clipboardData.getData("text/plain");
+
     if (!clipboardText || saving) return;
 
-    const rows = clipboardText.replace(/\r/g, "").replace(/\n+$/, "").split("\n").map((row) => row.split("\t"));
+    const internalCut =
+      cutBuffer?.text === clipboardText ? cutBuffer : null;
     const nextGrid = cloneGrid(grid);
     const mutations: ScheduleGridMutation[] = [];
     const displaced: string[] = [];
@@ -562,49 +691,242 @@ export function ScheduleGridEnhanced({
     let unavailableOverrides = 0;
     let protectedCells = 0;
 
-    rows.forEach((values, rowOffset) => {
-      values.forEach((value, columnOffset) => {
-        const row = normalizedSelection.firstRow + rowOffset;
-        const column = normalizedSelection.firstColumn + columnOffset;
-        if (row >= nextGrid.length || column >= columns.length) return;
+    const targetStartRow = normalizedSelection.firstRow;
+    const targetStartColumn = normalizedSelection.firstColumn;
+    const sourceKeys = new Set(
+      internalCut?.cells.map((item) => `${item.row}:${item.column}`) ?? []
+    );
+    const targetKeys = new Set<string>();
+    const placements: Array<{
+      row: number;
+      column: number;
+      nextCell: DemoGridCell;
+    }> = [];
 
-        const currentCell = nextGrid[row][column];
-        let nextCell = createScheduleCellFromText(value, currentCell);
-        const unavailable = currentCell.assignmentType === "UNAVAILABLE";
-        const replacing = isOccupied(currentCell) && currentCell.text !== nextCell.text;
+    if (internalCut) {
+      for (const item of internalCut.cells) {
+        const row = targetStartRow + item.rowOffset;
+        const column = targetStartColumn + item.columnOffset;
 
-        if (!manualMode && (unavailable || replacing)) {
-          protectedCells += 1;
+        if (
+          row < 0 ||
+          row >= nextGrid.length ||
+          column < 0 ||
+          column >= columns.length
+        ) {
+          onConflict("The cut selection does not fit at that destination.");
+          event.preventDefault();
           return;
         }
 
-        if (manualMode && unavailable && nextCell.assignmentType === "EMPTY" && !isScratchColumn(column)) {
-          nextCell = createOpenOverrideCell();
-        }
-        if (manualMode && unavailable) unavailableOverrides += 1;
-        if (manualMode && replacing) occupiedOverrides += 1;
-        if (manualMode && replacing && isClientAssignment(currentCell) && !isScratchColumn(column)) {
-          displaced.push(currentCell.text);
+        placements.push({
+          row,
+          column,
+          nextCell: {
+            ...item.cell,
+            source:
+              item.cell.assignmentType === "EMPTY"
+                ? item.cell.source
+                : "MANUAL",
+            locked:
+              item.cell.assignmentType === "EMPTY"
+                ? item.cell.locked
+                : !isScratchColumn(column),
+          },
+        });
+        targetKeys.add(`${row}:${column}`);
+      }
+    } else {
+      const rows = clipboardText
+        .replace(/\r/g, "")
+        .replace(/\n+$/, "")
+        .split("\n")
+        .map((row) => row.split("\t"));
+
+      rows.forEach((values, rowOffset) => {
+        values.forEach((value, columnOffset) => {
+          const row = targetStartRow + rowOffset;
+          const column = targetStartColumn + columnOffset;
+
+          if (row >= nextGrid.length || column >= columns.length) return;
+
+          placements.push({
+            row,
+            column,
+            nextCell: createScheduleCellFromText(
+              value,
+              nextGrid[row][column]
+            ),
+          });
+          targetKeys.add(`${row}:${column}`);
+        });
+      });
+    }
+
+    const movingEntireCutIntoScratch =
+      Boolean(internalCut) &&
+      placements.some(
+        (placement) => placement.nextCell.assignmentType !== "EMPTY"
+      ) &&
+      placements
+        .filter((placement) => placement.nextCell.assignmentType !== "EMPTY")
+        .every((placement) => isScratchColumn(placement.column));
+
+    for (const placement of placements) {
+      const { row, column } = placement;
+      const currentCell = nextGrid[row][column];
+      let nextCell = { ...placement.nextCell };
+      const scratch = isScratchColumn(column);
+      const unavailable =
+        currentCell.assignmentType === "UNAVAILABLE";
+      const replacing =
+        isOccupied(currentCell) &&
+        (currentCell.text !== nextCell.text ||
+          currentCell.clientId !== nextCell.clientId);
+
+      if (
+        internalCut &&
+        scratch &&
+        nextCell.assignmentType !== "EMPTY" &&
+        replacing &&
+        !sourceKeys.has(`${row}:${column}`)
+      ) {
+        onConflict(
+          "That Scratch destination is already occupied. Choose an empty Scratch area so nothing temporary is lost."
+        );
+        event.preventDefault();
+        return;
+      }
+
+      if (!manualMode && !scratch && (unavailable || replacing)) {
+        protectedCells += 1;
+        continue;
+      }
+
+      if (
+        manualMode &&
+        unavailable &&
+        nextCell.assignmentType === "EMPTY" &&
+        !scratch
+      ) {
+        nextCell = createOpenOverrideCell();
+      }
+
+      if (manualMode && !scratch && unavailable) {
+        unavailableOverrides += 1;
+      }
+
+      if (manualMode && !scratch && replacing) {
+        occupiedOverrides += 1;
+      }
+
+      if (
+        manualMode &&
+        !scratch &&
+        replacing &&
+        isClientAssignment(currentCell) &&
+        !sourceKeys.has(`${row}:${column}`)
+      ) {
+        displaced.push(currentCell.text);
+      }
+
+      nextGrid[row][column] = nextCell;
+      mutations.push(
+        mutationForCell(
+          row,
+          column,
+          grid[row][column],
+          nextCell,
+          unavailable
+        )
+      );
+    }
+
+    if (internalCut) {
+      for (const item of internalCut.cells) {
+        if (item.cell.assignmentType === "EMPTY") continue;
+
+        const key = `${item.row}:${item.column}`;
+
+        if (targetKeys.has(key)) continue;
+
+        const sourceCurrent = nextGrid[item.row][item.column];
+
+        if (
+          ["EMPTY", "OPEN", "UNAVAILABLE"].includes(
+            sourceCurrent.assignmentType
+          )
+        ) {
+          continue;
         }
 
-        nextGrid[row][column] = nextCell;
-        mutations.push(mutationForCell(row, column, currentCell, nextCell, unavailable));
-      });
-    });
+        const empty = createEmptyScheduleCell();
+        nextGrid[item.row][item.column] = empty;
+        mutations.push({
+          ...mutationForCell(
+            item.row,
+            item.column,
+            grid[item.row][item.column],
+            empty
+          ),
+          stagedInScratch:
+            movingEntireCutIntoScratch &&
+            !isScratchColumn(item.column),
+        });
+      }
+    }
 
     if (
       manualMode &&
-      !(await confirmManualOverride(occupiedOverrides, unavailableOverrides, "replaced"))
+      !(await confirmManualOverride(
+        occupiedOverrides,
+        unavailableOverrides,
+        internalCut
+          ? "replaced by the moved selection"
+          : "replaced"
+      ))
     ) {
       event.preventDefault();
       return;
     }
 
     displaced.forEach(onDisplacedAssignment);
-    await commitMutations(nextGrid, mutations, manualMode);
-    if (protectedCells > 0) {
-      onConflict("Some pasted cells were skipped because Auto-safe mode protects occupied assignments and unavailable boundaries.");
+    const saved = await commitMutations(
+      nextGrid,
+      mutations,
+      manualMode
+    );
+
+    if (saved && internalCut) {
+      setCutBuffer(null);
+      setSelection({
+        anchor: {
+          row: targetStartRow,
+          column: targetStartColumn,
+        },
+        focus: {
+          row: Math.min(
+            DAILY_TIME_SLOTS.length - 1,
+            targetStartRow + internalCut.rowCount - 1
+          ),
+          column: Math.min(
+            columns.length - 1,
+            targetStartColumn + internalCut.columnCount - 1
+          ),
+        },
+      });
+
+      onConflict(
+        movingEntireCutIntoScratch
+          ? "Cut selection moved into temporary Scratch space. The original schedule cells were cleared; finish the move before refreshing the page."
+          : "Cut selection moved to the new destination."
+      );
+    } else if (protectedCells > 0) {
+      onConflict(
+        "Some pasted cells were skipped because Auto-safe mode protects occupied assignments and unavailable boundaries."
+      );
     }
+
     event.preventDefault();
   }
 
@@ -651,13 +973,20 @@ export function ScheduleGridEnhanced({
     );
   }
 
-  async function moveAssignment(source: CellPosition, target: CellPosition) {
+  async function moveAssignment(
+    source: CellPosition,
+    target: CellPosition
+  ) {
     if (!manualMode) {
       onConflict("Turn on Manual Mode before moving assignments.");
       setMoveSource(null);
       return;
     }
-    if (source.row === target.row && source.column === target.column) {
+
+    if (
+      source.row === target.row &&
+      source.column === target.column
+    ) {
       setMoveSource(null);
       return;
     }
@@ -667,35 +996,150 @@ export function ScheduleGridEnhanced({
     const sourceIsScratch = isScratchColumn(source.column);
     const targetIsScratch = isScratchColumn(target.column);
 
-    if (["EMPTY", "OPEN", "UNAVAILABLE"].includes(sourceCell.assignmentType)) {
-      onConflict("Select a scheduled assignment before choosing Move Selected.");
+    if (
+      ["EMPTY", "OPEN", "UNAVAILABLE"].includes(
+        sourceCell.assignmentType
+      )
+    ) {
+      onConflict("Select a scheduled assignment before moving it.");
       setMoveSource(null);
       return;
     }
 
-    if (targetIsScratch && !sourceIsScratch) {
+    // Manual drag within the same time row is an Excel-like swap. No client
+    // coverage disappears and nothing is sent to Unplaced.
+    if (
+      source.row === target.row &&
+      !sourceIsScratch &&
+      !targetIsScratch &&
+      isOccupied(targetCell)
+    ) {
       const nextGrid = cloneGrid(grid);
-      const nextCell: DemoGridCell = { ...sourceCell, source: "MANUAL", locked: false };
-      nextGrid[target.row][target.column] = nextCell;
-      await commitMutations(
+      const sourceNext: DemoGridCell = {
+        ...targetCell,
+        source: "MANUAL",
+        locked: true,
+      };
+      const targetNext: DemoGridCell = {
+        ...sourceCell,
+        source: "MANUAL",
+        locked: true,
+      };
+
+      nextGrid[source.row][source.column] = sourceNext;
+      nextGrid[target.row][target.column] = targetNext;
+
+      const saved = await commitMutations(
         nextGrid,
-        [mutationForCell(target.row, target.column, targetCell, nextCell)],
-        false
+        [
+          {
+            ...mutationForCell(
+              source.row,
+              source.column,
+              sourceCell,
+              sourceNext
+            ),
+            managerConfirmedSameTimeSwap: true,
+          },
+          {
+            ...mutationForCell(
+              target.row,
+              target.column,
+              targetCell,
+              targetNext
+            ),
+            managerConfirmedSameTimeSwap: true,
+          },
+        ],
+        true
       );
-      selectSingleCell(target.row, target.column);
+
+      if (saved) {
+        selectSingleCell(target.row, target.column);
+        onConflict(
+          "Same-time manual move completed as a swap. Both assignments stayed scheduled and no client block was sent to Unplaced."
+        );
+      }
+
       setMoveSource(null);
-      onConflict("Copied to temporary Scratch space. The original scheduled assignment was left unchanged.");
       return;
     }
 
-    const unavailable = targetCell.assignmentType === "UNAVAILABLE";
+    // Scratch is a temporary browser workspace. Moving into it clears the live
+    // source cell instead of copying it, but does not create an Unplaced record.
+    if (targetIsScratch && !sourceIsScratch) {
+      if (isOccupied(targetCell)) {
+        onConflict(
+          "That Scratch cell is already occupied. Choose an empty Scratch cell."
+        );
+        setMoveSource(null);
+        return;
+      }
+
+      const nextGrid = cloneGrid(grid);
+      const stagedCell: DemoGridCell = {
+        ...sourceCell,
+        source: "MANUAL",
+        locked: false,
+      };
+      const emptySource = createEmptyScheduleCell();
+
+      nextGrid[target.row][target.column] = stagedCell;
+      nextGrid[source.row][source.column] = emptySource;
+
+      const saved = await commitMutations(
+        nextGrid,
+        [
+          {
+            ...mutationForCell(
+              source.row,
+              source.column,
+              sourceCell,
+              emptySource
+            ),
+            stagedInScratch: true,
+          },
+          mutationForCell(
+            target.row,
+            target.column,
+            targetCell,
+            stagedCell
+          ),
+        ],
+        true
+      );
+
+      if (saved) {
+        selectSingleCell(target.row, target.column);
+        onConflict(
+          "Moved to temporary Scratch space. The original schedule cell was cleared; Scratch is browser-only, so finish placing it before refreshing."
+        );
+      }
+
+      setMoveSource(null);
+      return;
+    }
+
+    const unavailable =
+      targetCell.assignmentType === "UNAVAILABLE";
     const occupied = isOccupied(targetCell);
-    if (!(await confirmManualOverride(occupied ? 1 : 0, unavailable ? 1 : 0, "replaced"))) {
+
+    if (
+      !(await confirmManualOverride(
+        occupied ? 1 : 0,
+        unavailable ? 1 : 0,
+        "replaced"
+      ))
+    ) {
       setMoveSource(null);
       return;
     }
 
-    if (occupied && isClientAssignment(targetCell) && !targetIsScratch) {
+    if (
+      occupied &&
+      isClientAssignment(targetCell) &&
+      !targetIsScratch
+    ) {
       onDisplacedAssignment(targetCell.text);
     }
 
@@ -716,16 +1160,150 @@ export function ScheduleGridEnhanced({
       ),
     ];
 
-    if (!sourceIsScratch) {
-      nextGrid[source.row][source.column] = createEmptyScheduleCell();
-      mutations.unshift(
-        mutationForCell(source.row, source.column, sourceCell, nextGrid[source.row][source.column])
-      );
+    nextGrid[source.row][source.column] =
+      createEmptyScheduleCell();
+    mutations.unshift(
+      mutationForCell(
+        source.row,
+        source.column,
+        sourceCell,
+        nextGrid[source.row][source.column]
+      )
+    );
+
+    const saved = await commitMutations(
+      nextGrid,
+      mutations,
+      true
+    );
+
+    if (saved) {
+      selectSingleCell(target.row, target.column);
+
+      if (occupied && !targetIsScratch) {
+        onConflict(
+          "Manual move completed. The replaced destination client block was moved to Unplaced Assignments."
+        );
+      }
     }
 
-    await commitMutations(nextGrid, mutations, true);
-    selectSingleCell(target.row, target.column);
     setMoveSource(null);
+  }
+
+  async function moveSelectedAssignmentsToScratch(
+    sources: CellPosition[],
+    target: CellPosition
+  ) {
+    if (!manualMode || sources.length === 0) return;
+
+    if (!isScratchColumn(target.column)) {
+      onConflict(
+        "For a multi-block drag, drop the selection into Scratch space. Use Ctrl+X and Ctrl+V to move a selected block range directly to another schedule area."
+      );
+      return;
+    }
+
+    const firstRow = Math.min(
+      ...sources.map((position) => position.row)
+    );
+    const firstColumn = Math.min(
+      ...sources.map((position) => position.column)
+    );
+    const destinations = sources.map((source) => ({
+      source,
+      target: {
+        row: target.row + (source.row - firstRow),
+        column:
+          target.column + (source.column - firstColumn),
+      },
+    }));
+
+    if (
+      destinations.some(
+        ({ target: destination }) =>
+          destination.row < 0 ||
+          destination.row >= DAILY_TIME_SLOTS.length ||
+          destination.column < 0 ||
+          destination.column >= columns.length ||
+          !isScratchColumn(destination.column)
+      )
+    ) {
+      onConflict(
+        "The selected blocks do not fit in the remaining Scratch columns/rows. Drop them closer to the top-left of Scratch space."
+      );
+      return;
+    }
+
+    if (
+      destinations.some(({ target: destination }) =>
+        isOccupied(
+          grid[destination.row][destination.column]
+        )
+      )
+    ) {
+      onConflict(
+        "One or more Scratch destination cells are occupied. Choose an empty Scratch area."
+      );
+      return;
+    }
+
+    const nextGrid = cloneGrid(grid);
+    const mutations: ScheduleGridMutation[] = [];
+
+    for (const item of destinations) {
+      const sourceCell =
+        grid[item.source.row][item.source.column];
+      const targetCell =
+        grid[item.target.row][item.target.column];
+      const stagedCell: DemoGridCell = {
+        ...sourceCell,
+        source: "MANUAL",
+        locked: false,
+      };
+      const empty = createEmptyScheduleCell();
+
+      nextGrid[item.target.row][item.target.column] =
+        stagedCell;
+      nextGrid[item.source.row][item.source.column] =
+        empty;
+
+      mutations.push(
+        mutationForCell(
+          item.target.row,
+          item.target.column,
+          targetCell,
+          stagedCell
+        )
+      );
+      mutations.push({
+        ...mutationForCell(
+          item.source.row,
+          item.source.column,
+          sourceCell,
+          empty
+        ),
+        stagedInScratch:
+          !isScratchColumn(item.source.column),
+      });
+    }
+
+    const saved = await commitMutations(
+      nextGrid,
+      mutations,
+      true
+    );
+
+    if (saved) {
+      const lastDestination =
+        destinations[destinations.length - 1].target;
+      setSelection({
+        anchor: { ...target },
+        focus: { ...lastDestination },
+      });
+      onConflict(
+        `${sources.length} selected block${sources.length === 1 ? "" : "s"} moved into temporary Scratch space. Their original schedule cells were cleared.`
+      );
+    }
   }
 
   function handleGridKeyDown(event: KeyboardEvent<HTMLDivElement>) {
@@ -771,26 +1349,67 @@ export function ScheduleGridEnhanced({
     }
   }
 
-  function handleDragStart(event: DragEvent<HTMLTableCellElement>, row: number, column: number) {
+  function handleDragStart(
+    event: DragEvent<HTMLTableCellElement>,
+    row: number,
+    column: number
+  ) {
     const cell = grid[row][column];
-    if (!manualMode || placementCell || saving || ["EMPTY", "OPEN", "UNAVAILABLE"].includes(cell.assignmentType)) {
+
+    if (
+      !manualMode ||
+      placementCell ||
+      saving ||
+      ["EMPTY", "OPEN", "UNAVAILABLE"].includes(
+        cell.assignmentType
+      )
+    ) {
       event.preventDefault();
       return;
     }
+
+    const sources = isCellSelected(row, column)
+      ? selectedMovablePositions()
+      : [{ row, column }];
+
     setDraggedCell({ row, column });
-    event.dataTransfer.effectAllowed = "copyMove";
+    setDraggedCells(
+      sources.length > 0 ? sources : [{ row, column }]
+    );
+    event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", cell.text);
   }
 
-  function handleDrop(event: DragEvent<HTMLTableCellElement>, row: number, column: number) {
+  function handleDrop(
+    event: DragEvent<HTMLTableCellElement>,
+    row: number,
+    column: number
+  ) {
     event.preventDefault();
+
     if (placementCell) {
       void placeExternalAssignment(row, column);
       return;
     }
+
     if (!manualMode || !draggedCell || saving) return;
-    void moveAssignment(draggedCell, { row, column });
+
+    const sources =
+      draggedCells.length > 0
+        ? draggedCells
+        : [draggedCell];
+
+    if (sources.length > 1) {
+      void moveSelectedAssignmentsToScratch(
+        sources,
+        { row, column }
+      );
+    } else {
+      void moveAssignment(sources[0], { row, column });
+    }
+
     setDraggedCell(null);
+    setDraggedCells([]);
     setDragOverCell(null);
   }
 
@@ -828,7 +1447,7 @@ export function ScheduleGridEnhanced({
           <span>
             {placementCell
               ? "Drop or click an available destination cell. In Manual Mode, gray boundaries can be overridden after confirmation."
-              : "Select one cell or a range. Delete works for both single-cell and multi-cell selections."}
+              : "Select one cell or a range. Ctrl+C copies, Ctrl+X cuts for moving, and dragging a selected range into Scratch moves it out of the live schedule."}
             {saving ? " Saving changes..." : ""}
           </span>
         </div>
@@ -906,6 +1525,7 @@ export function ScheduleGridEnhanced({
         tabIndex={0}
         onKeyDown={handleGridKeyDown}
         onCopy={handleCopy}
+        onCut={handleCut}
         onPaste={(event) => void handlePaste(event)}
         onMouseUp={() => setDragSelecting(false)}
         onMouseLeave={() => setDragSelecting(false)}
@@ -971,6 +1591,7 @@ export function ScheduleGridEnhanced({
                       onDragStart={(event) => handleDragStart(event, rowIndex, columnIndex)}
                       onDragEnd={() => {
                         setDraggedCell(null);
+                        setDraggedCells([]);
                         setDragOverCell(null);
                       }}
                       onDragEnter={() => {
@@ -981,7 +1602,7 @@ export function ScheduleGridEnhanced({
                       onDragOver={(event) => {
                         if ((manualMode && draggedCell) || placementCell) {
                           event.preventDefault();
-                          event.dataTransfer.dropEffect = scratchColumn ? "copy" : "move";
+                          event.dataTransfer.dropEffect = "move";
                         }
                       }}
                       onDrop={(event) => handleDrop(event, rowIndex, columnIndex)}

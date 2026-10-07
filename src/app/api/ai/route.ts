@@ -401,7 +401,7 @@ async function runMinimalRepairFallback(
       ". ";
   }
   reply +=
-    "Then I filled the remaining coverage gaps while preserving the working schedule wherever possible. " +
+    "Then I filled the remaining coverage gaps with the minimum necessary changes, automatically relocating/overriding blocks when required, and repaired eligible staff breaks. " +
     covered +
     "/" +
     required +
@@ -414,7 +414,7 @@ async function runMinimalRepairFallback(
     (added === 1 ? "" : "s") +
     " and moved/removed " +
     removed +
-    " existing AUTO assignment" +
+    " existing schedule assignment" +
     (removed === 1 ? "" : "s") +
     ". " +
     remainingUnplaced +
