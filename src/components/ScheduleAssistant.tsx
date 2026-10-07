@@ -54,50 +54,89 @@ type SavedPromptGroup = {
 
 const SAVED_PROMPT_GROUPS: SavedPromptGroup[] = [
   {
-    title: "Generate & repair",
+    title: "Check & understand",
     prompts: [
-      "Check this day and fix anything safely fixable, then verify coverage and breaks.",
-      "Generate this day using the automatic scheduler and verify there are no uncovered or unplaced assignments.",
-      "Generate the work week and tell me what could not be scheduled.",
-      "Repair the current schedule after all saved call-outs and verify the result.",
+      "Check [day/date] and tell me about uncovered clients, Unplaced assignments, missing or duplicate breaks, and any schedule conflicts.",
+      "Show [staff name]'s schedule on [day/date], including client blocks, breaks, and free time.",
+      "Who is free between [start time] and [end time] on [day/date]?",
+      "What changes would you recommend for [day/date] to improve coverage while making as few moves as possible?",
     ],
   },
   {
-    title: "Schedule changes",
+    title: "Generate, copy & minimal fix",
     prompts: [
-      "Move [client code] at [time] to [staff name] and keep coverage valid.",
-      "Replace all blocks for [staff name] with [staff name] on this day and keep any displaced client work in Unplaced.",
-      "Replace all [client code] blocks with [client code] on this day and report anything left in Unplaced.",
-      "Delete the block for [staff name] at [time]. If client coverage is displaced, keep it in Unplaced.",
-      "Fix duplicate or missing breaks without overriding locked/manual cells.",
-      "Review the Unplaced tray and place anything that can be scheduled safely.",
+      "Minimal Fix [day/date]. Resolve Unplaced first, cover every client, fix required breaks, and make only the minimum necessary changes.",
+      "Generate [day/date] with the automatic scheduler and tell me what could not be scheduled.",
+      "Generate the work week starting [date] and summarize any incomplete days, uncovered blocks, or Unplaced work.",
+      "Copy the schedule from [source date] to [target date], revalidate it, and tell me what had to change.",
     ],
   },
   {
-    title: "Staff & clients",
+    title: "Move, replace & Unplaced",
     prompts: [
-      "Mark [staff name] called out today and repair the schedule.",
-      "Update [staff name]'s weekly target hours to [hours].",
-      "Change [client code]'s attendance pattern to [days/times] and update the schedule if needed.",
-      "Set [client code] to prefer [staff name] and regenerate the selected day if needed.",
+      "Move [client code] at [time] on [day/date] to [staff name] and keep client coverage valid.",
+      "Replace [staff name] with [replacement staff] from [start time] to [end time] on [day/date]. Tell me about occupied clashes before replacing them.",
+      "Replace all [source client code] blocks with [replacement client code] on [day/date] and report anything that ends up in Unplaced.",
+      "Place the Unplaced [client code] block at [time] with [staff name]. If another client is displaced, preserve that work in Unplaced.",
+      "Delete [staff name]'s block at [time] on [day/date]. If client coverage is displaced, keep it in Unplaced and tell me what remains.",
     ],
   },
   {
-    title: "Events & attendance",
+    title: "Call-outs & attendance",
     prompts: [
-      "Change [client code]'s nap today to [start]-[end] and update the schedule.",
-      "Add speech for [client code] at [start]-[end] today and repair the schedule.",
-      "Create a recurring nap for [client code] on [weekdays] from [start]-[end] between [start date] and [end date].",
-      "Mark [client code] called out from [start]-[end] today and repair coverage.",
+      "Mark [staff name] called out from [start time] to [end time] on [day/date] and repair the schedule.",
+      "Remove [staff name]'s call-out on [day/date] and rebuild coverage while preserving manual or locked work.",
+      "Mark [client code] called out from [start time] to [end time] on [day/date], then repair the affected coverage.",
+      "Mark [client code] called in from [start time] to [end time] on [day/date] and update the schedule if coverage changes.",
     ],
   },
   {
-    title: "Rules & planning",
+    title: "Staff profiles",
     prompts: [
-      "Show me the current scheduling rules and explain the break settings.",
-      "Change the break window to [start]-[end] and regenerate the selected day if needed.",
-      "Increase rotation priority to [value] and tell me what that changes.",
-      "Review this month's supervision plan and show who is still below target.",
+      "Create staff member [full name], role [role], employee type [type], start date [date], and team [team name]. Ask me for anything required that I did not provide.",
+      "Change [staff name]'s target weekly hours to [hours] and maximum weekly hours to [hours].",
+      "Update [staff name]'s shift pattern to [weekdays] from [start time] to [end time].",
+      "Move [staff name] to team [team name] and show me the updated staff profile.",
+      "Archive [staff name] after confirming I selected the correct person.",
+    ],
+  },
+  {
+    title: "Client profiles",
+    prompts: [
+      "Create client [full name] with code [client code], start date [date], and team [team name]. Ask me for anything required that I did not provide.",
+      "Set [client code]'s support level to [level], maximum consecutive blocks with the same staff to [number], and desired different staff per day to [number].",
+      "Update [client code]'s regular attendance pattern to [weekdays] from [start time] to [end time].",
+      "Set [client code] to prefer [staff name] and avoid [staff name], then show me the saved relationships.",
+      "Assign [BCBA name] as [client code]'s BCBA and [intern names] as assigned interns.",
+    ],
+  },
+  {
+    title: "Nap, speech & recurring events",
+    prompts: [
+      "Add a nap for [client code] on [day/date] from [start time] to [end time] and repair the schedule if needed.",
+      "Add speech for [client code] on [day/date] from [start time] to [end time] and repair the schedule if needed.",
+      "Create a recurring nap for [client code] every [weekdays] from [start time] to [end time] between [start date] and [end date].",
+      "Create recurring speech for [client code] every [weekdays] from [start time] to [end time] between [start date] and [end date].",
+      "Remove [client code]'s [nap/speech] at [time] on [day/date]. If it belongs to a recurring series, ask whether I mean one occurrence or the series.",
+    ],
+  },
+  {
+    title: "Teams & scheduler rules",
+    prompts: [
+      "Create a team named [team name] with color [color].",
+      "Rename team [current team name] to [new team name] and change its color to [color].",
+      "Show me the current scheduling rules and explain which settings affect coverage, breaks, continuity, and rotation.",
+      "Change the break window to [start time]-[end time] and break eligibility to [hours] hours, then tell me what the change means.",
+      "Change the scheduler's rotation or continuity priority to [value] and explain how that will affect future automatic schedules.",
+    ],
+  },
+  {
+    title: "Supervision",
+    prompts: [
+      "Show me the supervision plan for [month] and identify staff who are below target or missing records.",
+      "Record [staff name]'s [month] supervision with [service hours] service hours and [supervision hours] supervision hours under [BCBA name].",
+      "Update [staff name]'s supervision record for [month] to [service hours] service hours and [supervision hours] supervision hours.",
+      "Summarize supervision status for all BT/RBT staff for [month] and tell me who needs attention first.",
     ],
   },
 ];
@@ -488,7 +527,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
 
           <div className={styles.promptHint}>
             <span>
-              Ask naturally — assignments, availability, clients, breaks, coverage, call-outs, naps/speech, rules, changes, or generation. Dates are handled through the conversation and scheduler calendar.
+              Ask naturally — schedule checks, generation, Minimal Fix, moves/replacements, Unplaced work, staff/client profiles, call-outs, attendance, naps/speech, teams, rules, supervision, or planning. Use Saved prompts for realistic examples.
             </span>
             <button
               type="button"
@@ -503,7 +542,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
             <div className={styles.helpPanel}>
               <div className={styles.helpIntro}>
                 <strong>Saved prompts</strong>
-                <span>These are optional examples. Click one to load it, then edit the bracketed details before running it.</span>
+                <span>These are realistic examples for the main AI capabilities. Click one to load it, replace the [bracketed] details, and edit the wording however you want before running it.</span>
               </div>
               {SAVED_PROMPT_GROUPS.map((group) => (
                 <div key={group.title} className={styles.promptGroup}>
