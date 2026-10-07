@@ -919,8 +919,7 @@ export function repairCoverageMinimally(
         input,
         assignments,
         callOutStaffIds,
-        true,
-        input.rules.allowSameStaffClientRepeatForCoverageException
+        true
       );
 
       if (exceptionStaff) {
