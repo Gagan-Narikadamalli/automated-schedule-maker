@@ -29,6 +29,7 @@ type SupervisionRow = {
   supervisorStaffId: string | null;
   supervisorName: string | null;
   note: string;
+  hasSavedRecord: boolean;
   status: "NEEDS_SUPERVISION" | "ON_TARGET";
 };
 
@@ -194,8 +195,8 @@ export function SupervisionCardDashboard() {
     setModalOpen(true);
   }
 
-  function closeModal() {
-    if (saving) {
+  function closeModal(force = false) {
+    if (saving && !force) {
       return;
     }
     setModalOpen(false);
@@ -246,11 +247,57 @@ export function SupervisionCardDashboard() {
         throw new Error(body.error || "Supervision record could not be saved.");
       }
 
+      closeModal(true);
       await loadSupervision(locationId, month);
-      closeModal();
       setMessage("Supervision record saved. The staff card now reflects the updated monthly progress.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Supervision record could not be saved.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+
+  async function deleteRecord(row: SupervisionRow) {
+    if (!row.hasSavedRecord) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Delete the saved ${month} supervision record for ${row.staffName}? This does not delete the staff member.`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setSaving(true);
+      const response = await fetch("/api/supervision", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          locationId,
+          month,
+          staffId: row.staffId,
+        }),
+      });
+      const body = (await response.json()) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(body.error || "Supervision record could not be deleted.");
+      }
+
+      await loadSupervision(locationId, month);
+      setMessage(
+        `The ${month} supervision record for ${row.staffName} was deleted.`
+      );
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Supervision record could not be deleted."
+      );
     } finally {
       setSaving(false);
     }
@@ -370,9 +417,24 @@ export function SupervisionCardDashboard() {
                   </div>
 
                   <div className={cardStyles.cardActions}>
-                    <button type="button" className="button button-secondary button-small" onClick={() => openEditRecord(row)}>
-                      Update Record
+                    <button
+                      type="button"
+                      className={`button button-small ${cardStyles.editButton}`}
+                      disabled={saving}
+                      onClick={() => openEditRecord(row)}
+                    >
+                      {row.hasSavedRecord ? "Edit" : "Add Record"}
                     </button>
+                    {row.hasSavedRecord ? (
+                      <button
+                        type="button"
+                        className={`button button-small ${cardStyles.dangerButton}`}
+                        disabled={saving}
+                        onClick={() => void deleteRecord(row)}
+                      >
+                        Delete
+                      </button>
+                    ) : null}
                   </div>
                 </article>
               );
@@ -392,7 +454,7 @@ export function SupervisionCardDashboard() {
         onClose={closeModal}
         footer={
           <>
-            <button type="button" className="button button-secondary" disabled={saving} onClick={closeModal}>Cancel</button>
+            <button type="button" className="button button-secondary" disabled={saving} onClick={() => closeModal()}>Cancel</button>
             <button type="button" className="button button-primary" disabled={saving || !form.staffId} onClick={() => void saveRecord()}>
               {saving ? "Saving..." : "Save Supervision"}
             </button>
