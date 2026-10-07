@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { auditFinalCoverage } from "@/features/scheduler/engine/auditFinalCoverage";
 import { generateSchedule } from "@/features/scheduler/engine/generateSchedule";
 import { placeStaffBreaksAfterCoverage } from "@/features/scheduler/engine/placeStaffBreaks";
 import { calculateSchedulerReadiness } from "@/features/scheduler/engine/preflight";
@@ -117,7 +118,14 @@ export async function POST(request: Request) {
       schedulerInput.clients,
       dayData.extendedRules.slotLengthMinutes
     );
-    const completeCoverage = coverageResult.metrics.uncoveredClientSlots === 0;
+    const finalCoverage = auditFinalCoverage(
+      schedulerInput.clients,
+      proposedAssignments,
+      coverageResult.metrics,
+      dayData.extendedRules.slotLengthMinutes
+    );
+    const completeCoverage =
+      finalCoverage.metrics.uncoveredClientSlots === 0;
     const coverageByRole = buildCoverageByRole(
       proposedAssignments,
       schedulerInput.staff,
@@ -132,9 +140,9 @@ export async function POST(request: Request) {
       completeCoverage,
       partialBuild: !completeCoverage,
       readiness,
-      metrics: coverageResult.metrics,
+      metrics: finalCoverage.metrics,
       warnings: coverageResult.warnings,
-      uncoveredRequirements: coverageResult.uncoveredRequirements,
+      uncoveredRequirements: finalCoverage.uncoveredRequirements,
       reservedBreakCount: breakPlan.reservedBreaks.length,
       reliefSwapCount: breakPlan.reliefSwapCount,
       unplacedBreakStaffIds: breakPlan.unplacedBreakStaffIds,
