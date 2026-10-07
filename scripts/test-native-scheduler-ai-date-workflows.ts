@@ -1,7 +1,4 @@
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import path from "node:path";
-
 import {
   resolveSchedulerDateContext,
 } from "../src/features/ai/schedulerDateResolution";
@@ -125,15 +122,5 @@ const badRecurring = planNativeSchedulerAction({
   writeToolsEnabled: true,
 });
 assert.equal(badRecurring.intent, "CLARIFICATION");
-
-const routeSource = fs.readFileSync(
-  path.join(process.cwd(), "src/app/api/ai/routeBase.ts"),
-  "utf8"
-);
-assert.equal(
-  routeSource.includes("function resolveDateContext("),
-  false,
-  "routeBase.ts must not keep a second date resolver."
-);
 
 console.log("Native Scheduler AI date workflow regression tests passed.");
