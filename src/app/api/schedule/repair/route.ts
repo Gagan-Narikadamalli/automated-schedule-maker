@@ -288,7 +288,13 @@ export async function POST(request: Request) {
         ? repairCoverageMinimally(
             schedulerInput,
             priorityRequirements,
-            { allowAutomaticOverrides: true }
+            {
+              allowAutomaticOverrides: true,
+              allowProtectedRelocation:
+                schedulerInput.rules.minimalFixAllowProtectedRelocation,
+              allowBreakRelocation:
+                schedulerInput.rules.minimalFixAllowBreakRelocation,
+            }
           )
         : repairSchedule(
             schedulerInput,
@@ -310,7 +316,9 @@ export async function POST(request: Request) {
                 schedulerInput.rules.historicalBreakPriority,
             },
             schedulerRules: schedulerInput.rules,
-            allowProtectedRelief: true,
+            allowProtectedRelief:
+              schedulerInput.rules.minimalFixAllowProtectedRelocation &&
+              schedulerInput.rules.minimalFixAllowBreakRelocation,
           })
         : null;
 
