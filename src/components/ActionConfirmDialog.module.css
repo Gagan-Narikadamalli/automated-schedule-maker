@@ -1,0 +1,69 @@
+.confirmCard {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid #f0d2bb;
+  border-radius: 16px;
+  background: #fffaf5;
+}
+
+.icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 999px;
+  background: #fff0df;
+  color: #a95021;
+  font-size: 1.1rem;
+  font-weight: 900;
+}
+
+.copy {
+  min-width: 0;
+}
+
+.copy strong {
+  display: block;
+  color: #553321;
+  font-size: 0.92rem;
+}
+
+.copy p {
+  margin: 5px 0 0;
+  color: #735643;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.detail {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #efdccc;
+  color: #664936;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.dangerAction {
+  min-height: 42px;
+  padding: 0 18px;
+  border: 1px solid #bc4949;
+  border-radius: 12px;
+  background: #b63f3f;
+  color: #ffffff;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.dangerAction:hover {
+  background: #9f3333;
+}
+
+.dangerAction:focus-visible {
+  outline: 3px solid rgba(182, 63, 63, 0.24);
+  outline-offset: 2px;
+}
