@@ -308,35 +308,30 @@ export function TeamCardManager() {
     }
   }
 
-  async function archiveTeam(team: TeamRecord) {
-    if (!window.confirm(`Archive ${team.name}? Team members will be moved to No team.`)) {
+  async function deleteTeam(team: TeamRecord) {
+    const confirmed = window.confirm(
+      `Permanently delete ${team.name}? Staff and clients in this team will be moved to No team. Their profiles and schedules will remain.`
+    );
+
+    if (!confirmed) {
       return;
     }
 
     try {
       setSaving(true);
-      const affectedStaff = activeStaff.filter((item) => item.teamId === team.id);
-      const affectedClients = activeClients.filter((item) => item.teamId === team.id);
-
-      await Promise.all([
-        ...affectedStaff.map((item) => updateStaffTeam(item.id, null)),
-        ...affectedClients.map((item) => updateClientTeam(item.id, null)),
-      ]);
-
       const response = await fetch(`/api/teams/${team.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ active: false }),
+        method: "DELETE",
       });
       const data = (await response.json()) as TeamsResponse;
+
       if (!response.ok) {
-        throw new Error(data.error || "Team could not be archived.");
+        throw new Error(data.error || "Team could not be deleted.");
       }
 
       await loadLocationData(selectedLocationId);
-      setMessage(`${team.name} was archived.`);
+      setMessage(`${team.name} was permanently deleted.`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Team could not be archived.");
+      setMessage(error instanceof Error ? error.message : "Team could not be deleted.");
     } finally {
       setSaving(false);
     }
@@ -423,11 +418,21 @@ export function TeamCardManager() {
                   </div>
 
                   <div className={cardStyles.cardActions}>
-                    <button type="button" className="button button-secondary button-small" disabled={saving} onClick={() => openEditTeam(team)}>
+                    <button
+                      type="button"
+                      className={`button button-small ${cardStyles.editButton}`}
+                      disabled={saving}
+                      onClick={() => openEditTeam(team)}
+                    >
                       Edit
                     </button>
-                    <button type="button" className="button button-secondary button-small" disabled={saving} onClick={() => void archiveTeam(team)}>
-                      Archive
+                    <button
+                      type="button"
+                      className={`button button-small ${cardStyles.dangerButton}`}
+                      disabled={saving}
+                      onClick={() => void deleteTeam(team)}
+                    >
+                      Delete
                     </button>
                   </div>
                 </article>
