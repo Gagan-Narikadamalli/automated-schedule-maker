@@ -171,6 +171,37 @@ function formatPattern(pattern: TimePattern): string {
   return `${days} · ${pattern.startTime}-${pattern.endTime}`;
 }
 
+function patternTimeToMinutes(value: string): number {
+  const [hours, minutes] = value.split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
+function patternHours(pattern: TimePattern): number {
+  return Math.max(
+    (patternTimeToMinutes(pattern.endTime) -
+      patternTimeToMinutes(pattern.startTime)) /
+      60,
+    0
+  );
+}
+
+function attendanceHoursForDay(client: ClientRecord, day: string): number {
+  return (client.attendancePatterns ?? [])
+    .filter((pattern) => pattern.days.includes(day))
+    .reduce((total, pattern) => total + patternHours(pattern), 0);
+}
+
+function weeklyAttendanceHours(client: ClientRecord): number {
+  return WEEKDAYS.reduce(
+    (total, [day]) => total + attendanceHoursForDay(client, day),
+    0
+  );
+}
+
+function formatHours(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
 export function ClientCardManager() {
   const [locations, setLocations] = useState<LocationOption[]>([]);
   const [selectedLocationId, setSelectedLocationId] = useState("");
@@ -178,7 +209,6 @@ export function ClientCardManager() {
   const [staff, setStaff] = useState<StaffOption[]>([]);
   const [clients, setClients] = useState<ClientRecord[]>([]);
   const [query, setQuery] = useState("");
-  const [showArchived, setShowArchived] = useState(false);
   const [form, setForm] = useState<ClientForm>(emptyClientForm);
   const [attendanceDraft, setAttendanceDraft] = useState<TimePattern>(emptyAttendance);
   const [napDraft, setNapDraft] = useState<TimePattern>(emptyNap);
@@ -222,10 +252,6 @@ export function ClientCardManager() {
     const normalizedQuery = query.trim().toLowerCase();
 
     return clients.filter((client) => {
-      if (!showArchived && !client.active) {
-        return false;
-      }
-
       if (!normalizedQuery) {
         return true;
       }
@@ -235,7 +261,7 @@ export function ClientCardManager() {
         (value) => value.toLowerCase().includes(normalizedQuery)
       );
     });
-  }, [clients, query, showArchived, teamNameById]);
+  }, [clients, query, teamNameById]);
 
   useEffect(() => {
     void loadLocations();
@@ -272,7 +298,7 @@ export function ClientCardManager() {
       setLoading(true);
       const [clientResponse, teamResponse, staffResponse] = await Promise.all([
         fetch(
-          `/api/clients?locationId=${encodeURIComponent(locationId)}&includeArchived=true`,
+          `/api/clients?locationId=${encodeURIComponent(locationId)}`,
           { cache: "no-store" }
         ),
         fetch(`/api/teams?locationId=${encodeURIComponent(locationId)}`, {
@@ -482,24 +508,32 @@ export function ClientCardManager() {
     }
   }
 
-  async function toggleActive(client: ClientRecord) {
+  async function deleteClient(client: ClientRecord) {
+    const confirmed = window.confirm(
+      `Permanently delete ${client.displayCode} (${client.fullName})? This removes the client profile and its linked live schedule, nap, speech, attendance, unplaced, and template references. Imported historical-learning text is preserved.`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
     try {
       setSaving(true);
       const response = await fetch(`/api/clients/${client.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ active: !client.active }),
+        method: "DELETE",
       });
       const data = (await response.json()) as ClientsResponse;
 
       if (!response.ok) {
-        throw new Error(data.error || "Client status could not be changed.");
+        throw new Error(data.error || "Client could not be deleted.");
       }
 
       await loadLocationData(selectedLocationId);
-      setMessage(client.active ? `${client.displayCode} was archived.` : `${client.displayCode} was restored.`);
+      setMessage(`${client.displayCode} was permanently deleted.`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Client status could not be changed.");
+      setMessage(
+        error instanceof Error ? error.message : "Client could not be deleted."
+      );
     } finally {
       setSaving(false);
     }
@@ -624,14 +658,6 @@ export function ClientCardManager() {
               />
             </label>
 
-            <label className="checkbox-card">
-              <input
-                type="checkbox"
-                checked={showArchived}
-                onChange={(event) => setShowArchived(event.target.checked)}
-              />
-              <span>Show archived</span>
-            </label>
           </div>
 
           <button
@@ -716,6 +742,29 @@ export function ClientCardManager() {
                     </div>
                   </div>
 
+                  <div className={cardStyles.metricHeader}>
+                    <span>Weekly attendance</span>
+                    <strong>{formatHours(weeklyAttendanceHours(client))} h</strong>
+                  </div>
+                  <div className={cardStyles.weekdayGrid}>
+                    {WEEKDAYS.map(([day, label]) => {
+                      const hours = attendanceHoursForDay(client, day);
+                      return (
+                        <div
+                          key={day}
+                          className={`${cardStyles.weekdayCell} ${
+                            hours > 0 ? cardStyles.weekdayCellActive : ""
+                          }`}
+                        >
+                          <span className={cardStyles.weekdayLabel}>{label}</span>
+                          <span className={cardStyles.weekdayHours}>
+                            {hours > 0 ? `${formatHours(hours)}h` : "—"}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+
                   <div className={cardStyles.chips}>
                     {client.attendancePatterns.length === 0 && client.active ? (
                       <span className={cardStyles.chip}>
@@ -737,7 +786,7 @@ export function ClientCardManager() {
                   <div className={cardStyles.cardActions}>
                     <button
                       type="button"
-                      className="button button-secondary button-small"
+                      className={`button button-small ${cardStyles.editButton}`}
                       disabled={saving}
                       onClick={() => openEditClient(client)}
                     >
@@ -745,11 +794,11 @@ export function ClientCardManager() {
                     </button>
                     <button
                       type="button"
-                      className="button button-secondary button-small"
+                      className={`button button-small ${cardStyles.dangerButton}`}
                       disabled={saving}
-                      onClick={() => void toggleActive(client)}
+                      onClick={() => void deleteClient(client)}
                     >
-                      {client.active ? "Archive" : "Restore"}
+                      Delete
                     </button>
                   </div>
                 </article>
