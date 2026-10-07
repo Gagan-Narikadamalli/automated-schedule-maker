@@ -10,6 +10,37 @@ function clean(value: string): string {
   return value.replace(/^[\s"']+|[\s"',.!?]+$/g, "").replace(/\s+/g, " ").trim();
 }
 
+export function suggestClientDisplayCode(fullName: string): string {
+  const words = fullName
+    .replace(/[^A-Za-z0-9\s'-]+/g, " ")
+    .split(/\s+/)
+    .map((word) => word.replace(/[^A-Za-z0-9]/g, ""))
+    .filter(Boolean);
+
+  const piece = (word: string, length: number) => {
+    const raw = word.slice(0, length);
+    return raw
+      ? raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase()
+      : "";
+  };
+
+  if (words.length >= 2) {
+    return piece(words[0], 2) + piece(words[words.length - 1], 2);
+  }
+
+  if (words.length === 1) {
+    return piece(words[0], 4);
+  }
+
+  return "Clnt";
+}
+
+function autoDisplayCodeRequested(message: string): boolean {
+  return /\b(?:code|display\s+code)\s+(?:anything(?:\s+you\s+like)?|whatever(?:\s+you\s+like)?|any\s+code|your\s+choice|you\s+(?:choose|pick|decide)|choose\s+(?:one|it|a\s+code)|pick\s+(?:one|it|a\s+code))\b/i.test(
+    message
+  );
+}
+
 function clarification(message: string): NativeSchedulerPlan {
   return { intent: "CLARIFICATION", toolName: "__native_clarification__", input: { message }, confidence: 1, explanation: message };
 }
@@ -56,8 +87,12 @@ function creationDate(message: string, resolvedDate?: string): string | undefine
   if (iso) return iso;
   if (
     resolvedDate &&
-    /\b(?:starting|starts?|start\s+date|from)\s+(?:today|tomorrow|yesterday|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(message)
-  ) return resolvedDate;
+    /\b(?:today|tomorrow|yesterday|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(
+      message
+    )
+  ) {
+    return resolvedDate;
+  }
   return undefined;
 }
 
@@ -214,12 +249,23 @@ export function planNativeManagementAction(args: {
   };
 
   if (/\b(?:create|add)\s+(?:a\s+)?(?:new\s+)?client\b/i.test(raw)) {
-    const match = raw.match(/\b(?:create|add)\s+(?:a\s+)?(?:new\s+)?client\s+(.+?)\s+(?:with\s+)?(?:code|display\s+code)\s+([A-Za-z0-9_-]+)\b/i);
-    const fullName = match?.[1] ? clean(match[1]) : "";
-    const displayCode = match?.[2] ? clean(match[2]) : "";
+    const nameMatch = raw.match(
+      /\b(?:create|add)\s+(?:a\s+)?(?:new\s+)?client(?:\s+named)?\s+(.+?)(?=\s+(?:with\s+)?(?:code|display\s+code)\b|\s+(?:starting|start\s+date|from)\b|\s+(?:today|tomorrow|yesterday|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b|[,.!?]|$)/i
+    );
+    const fullName = nameMatch?.[1] ? clean(nameMatch[1]) : "";
+    const explicitCode = raw.match(
+      /\b(?:code|display\s+code)\s+(?!anything\b|whatever\b|your\b|you\b|choose\b|pick\b|any\b)([A-Za-z0-9_-]+)\b/i
+    )?.[1];
+    const displayCode = explicitCode
+      ? clean(explicitCode)
+      : fullName && autoDisplayCodeRequested(raw)
+        ? suggestClientDisplayCode(fullName)
+        : "";
     const startDate = creationDate(raw, args.date);
     if (!fullName || !displayCode || !startDate) {
-      return clarification("Creating a client requires the full name, display code, and start date.");
+      return clarification(
+        "Creating a client requires the full name, display code (the short label shown in schedule blocks, for example CaCr), and start date. You can also say \"choose the display code\" and I will derive one from the client's name."
+      );
     }
     return {
       intent: "CLIENT_MANAGEMENT", toolName: "manage_client",
@@ -438,6 +484,42 @@ export function planNativeManagementAction(args: {
       input: { staff: clean(staffMatch[1]), serviceHours, supervisionHours, ...(supervisor ? { supervisor: clean(supervisor) } : {}), ...(month ? { month } : {}) },
       confidence: 0.94, explanation: "Save monthly supervision planning data.",
     };
+  }
+
+  if (/\b(?:create|add)\s+(?:a\s+)?(?:new\s+)?team\b/i.test(raw)) {
+    return clarification(
+      "Creating a team requires a team name. A color is optional."
+    );
+  }
+
+  if (/\b(?:create|save)\s+(?:a\s+)?(?:schedule\s+)?template\b/i.test(raw)) {
+    return clarification(
+      "Creating a schedule template requires a template name. If you do not specify a source day, I will use the currently selected schedule date."
+    );
+  }
+
+  if (
+    /\b(?:place|put|assign)\b[\s\S]*\b(?:unplaced|unassigned)\b/i.test(raw)
+  ) {
+    return clarification(
+      "Placing an Unplaced assignment requires the client, staff member, and start time."
+    );
+  }
+
+  if (
+    /\b(?:set|move|change|add|remove|delete|clear)\b[\s\S]*\bbreak\b/i.test(raw)
+  ) {
+    return clarification(
+      "A break change requires the staff member and start time."
+    );
+  }
+
+  if (
+    /\b(?:record|add|remove|delete)\b[\s\S]*\bclient\s+(?:call[- ]?out|call[- ]?in|attendance)\b/i.test(raw)
+  ) {
+    return clarification(
+      "A client attendance change requires the client reference and whether it is a call-out or call-in. A time range is optional for a full-day change."
+    );
   }
 
   if (/\b(?:create|add|update|change|archive|deactivate)\b[\s\S]*\b(?:staff|client|team)\b/i.test(raw)) {
