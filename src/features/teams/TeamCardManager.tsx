@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import cardStyles from "@/components/ManagementCards.module.css";
+import { useActionConfirmDialog } from "@/components/ActionConfirmDialog";
 import { ManagementModal } from "@/components/ManagementModal";
 
 type LocationOption = {
@@ -79,6 +80,7 @@ export function TeamCardManager() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("Loading teams...");
+  const { requestActionDialog, actionDialog } = useActionConfirmDialog();
 
   const activeStaff = useMemo(
     () => staff.filter((staffMember) => staffMember.active),
@@ -309,11 +311,21 @@ export function TeamCardManager() {
   }
 
   async function deleteTeam(team: TeamRecord) {
-    const confirmed = window.confirm(
-      `Permanently delete ${team.name}? Staff and clients in this team will be moved to No team. Their profiles and schedules will remain.`
-    );
+    const choice = await requestActionDialog({
+      eyebrow: "DELETE TEAM",
+      title: `Permanently delete ${team.name}?`,
+      description:
+        "Staff and clients in this team will be moved to No team. Their profiles and schedules will remain.",
+      actions: [
+        {
+          id: "delete",
+          label: "Delete team",
+          tone: "danger",
+        },
+      ],
+    });
 
-    if (!confirmed) {
+    if (choice !== "delete") {
       return;
     }
 
@@ -339,6 +351,7 @@ export function TeamCardManager() {
 
   return (
     <div className="management-layout">
+      {actionDialog}
       <section className="section-card">
         <div className={cardStyles.toolbar}>
           <div className={cardStyles.toolbarLeft}>
