@@ -163,14 +163,6 @@ const editCellsSchema = jsonSchema<EditCellsInput>({
   additionalProperties: false,
 });
 
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function isObjectId(value: string): boolean {
-  return /^[a-f0-9]{24}$/i.test(value);
-}
-
 function formatLocalDate(date: Date): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
