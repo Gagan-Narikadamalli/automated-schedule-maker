@@ -133,7 +133,8 @@ function buildMinimumPairingPlan(
   staffMember: SchedulerStaff,
   input: SchedulerInput,
   assignments: SchedulerAssignment[],
-  callOutStaffIds: Set<string>
+  callOutStaffIds: Set<string>,
+  allowSameDayPairRepeat = false
 ): SchedulerAssignment[] | null {
   const minimumBlocks = Math.max(
     Math.ceil(
@@ -199,6 +200,7 @@ function buildMinimumPairingPlan(
       assignments: simulated,
       callOutStaffIds,
       rules: input.rules,
+      allowSameDayPairRepeat,
     });
 
     if (!check.allowed) {
@@ -395,7 +397,8 @@ function findBestStaffMember(
   requirement: ClientRequirement,
   input: SchedulerInput,
   assignments: SchedulerAssignment[],
-  callOutStaffIds: Set<string>
+  callOutStaffIds: Set<string>,
+  allowSameDayPairRepeat = false
 ): SchedulerStaff | null {
   const candidates = input.staff
     .map((staffMember) => {
@@ -406,6 +409,7 @@ function findBestStaffMember(
         assignments,
         callOutStaffIds,
         rules: input.rules,
+        allowSameDayPairRepeat,
       });
 
       if (!constraintCheck.allowed) {
@@ -417,7 +421,8 @@ function findBestStaffMember(
         staffMember,
         input,
         assignments,
-        callOutStaffIds
+        callOutStaffIds,
+        allowSameDayPairRepeat
       );
 
       if (!minimumPlan) {
@@ -571,7 +576,8 @@ function findBestSwap(
   input: SchedulerInput,
   assignments: SchedulerAssignment[],
   callOutStaffIds: Set<string>,
-  allowProtectedAssignments = false
+  allowProtectedAssignments = false,
+  allowSameDayPairRepeat = false
 ): SwapCandidate | null {
   const candidates: SwapCandidate[] = [];
 
@@ -608,6 +614,7 @@ function findBestSwap(
       assignments: assignmentsWithoutCurrent,
       callOutStaffIds,
       rules: input.rules,
+      allowSameDayPairRepeat,
     });
 
     if (!uncoveredCheck.allowed) {
@@ -624,6 +631,7 @@ function findBestSwap(
           assignments: assignmentsWithoutCurrent,
           callOutStaffIds,
           rules: input.rules,
+          allowSameDayPairRepeat,
         });
 
         if (!check.allowed) {
@@ -706,14 +714,16 @@ function attemptSingleSwapRepair(
   input: SchedulerInput,
   assignments: SchedulerAssignment[],
   callOutStaffIds: Set<string>,
-  allowProtectedAssignments = false
+  allowProtectedAssignments = false,
+  allowSameDayPairRepeat = false
 ): boolean {
   const swap = findBestSwap(
     requirement,
     input,
     assignments,
     callOutStaffIds,
-    allowProtectedAssignments
+    allowProtectedAssignments,
+    allowSameDayPairRepeat
   );
 
   if (!swap || !swap.displacedAssignment.clientId) {
@@ -747,7 +757,8 @@ function attemptBreakReleaseRepair(
   requirement: ClientRequirement,
   input: SchedulerInput,
   assignments: SchedulerAssignment[],
-  callOutStaffIds: Set<string>
+  callOutStaffIds: Set<string>,
+  allowSameDayPairRepeat = false
 ): boolean {
   const breakTypes = new Set(["BREAK", "BREAK_NAP", "BREAK_SPEECH"]);
 
@@ -783,6 +794,7 @@ function attemptBreakReleaseRepair(
       assignments: assignmentsWithoutBreak,
       callOutStaffIds,
       rules: input.rules,
+      allowSameDayPairRepeat,
     });
 
     if (!check.allowed) {
@@ -794,7 +806,8 @@ function attemptBreakReleaseRepair(
       staffMember,
       input,
       assignmentsWithoutBreak,
-      callOutStaffIds
+      callOutStaffIds,
+      allowSameDayPairRepeat
     );
 
     if (!minimumPlan) {
@@ -900,6 +913,38 @@ export function repairCoverageMinimally(
       }
     }
 
+    if (input.rules.allowSameStaffClientRepeatForCoverageException) {
+      const exceptionStaff = findBestStaffMember(
+        requirement,
+        input,
+        assignments,
+        callOutStaffIds,
+        true,
+        input.rules.allowSameStaffClientRepeatForCoverageException
+      );
+
+      if (exceptionStaff) {
+        const exceptionPlan = buildMinimumPairingPlan(
+          requirement,
+          exceptionStaff,
+          input,
+          assignments,
+          callOutStaffIds,
+          true
+        );
+
+        if (exceptionPlan) {
+          assignments.push(...exceptionPlan);
+          warnings.push({
+            code: "PAIR_REUSE_EXCEPTION",
+            message:
+              `${requirement.client.displayCode} at ${requirement.startTime} used a last-resort same-day staff/client repeat to avoid uncovered coverage.`,
+          });
+          continue;
+        }
+      }
+    }
+
     const repairedBySwap = attemptSingleSwapRepair(
       requirement,
       input,
@@ -913,6 +958,26 @@ export function repairCoverageMinimally(
         message: `${requirement.client.displayCode} at ${requirement.startTime} was covered by one minimal staff swap.`,
       });
       continue;
+    }
+
+    if (input.rules.allowSameStaffClientRepeatForCoverageException) {
+      const repairedByRepeatSwap = attemptSingleSwapRepair(
+        requirement,
+        input,
+        assignments,
+        callOutStaffIds,
+        false,
+        true
+      );
+
+      if (repairedByRepeatSwap) {
+        warnings.push({
+          code: "PAIR_REUSE_EXCEPTION",
+          message:
+            `${requirement.client.displayCode} at ${requirement.startTime} was covered by a last-resort swap that reused a staff/client pair later in the day.`,
+        });
+        continue;
+      }
     }
 
     if (allowAutomaticOverrides) {
@@ -940,7 +1005,8 @@ export function repairCoverageMinimally(
         requirement,
         input,
         assignments,
-        callOutStaffIds
+        callOutStaffIds,
+        input.rules.allowSameStaffClientRepeatForCoverageException
       );
 
       if (repairedByBreakRelease) {
@@ -1061,6 +1127,63 @@ export function generateSchedule(input: SchedulerInput): SchedulerResult {
   const uncoveredRequirements: UncoveredRequirement[] = [];
 
   for (const requirement of initiallyUncovered) {
+    if (requirementIsAlreadyCovered(requirement, assignments)) {
+      continue;
+    }
+
+    const retryStaff = findBestStaffMember(
+      requirement,
+      input,
+      assignments,
+      callOutStaffIds
+    );
+
+    if (retryStaff) {
+      const retryPlan = buildMinimumPairingPlan(
+        requirement,
+        retryStaff,
+        input,
+        assignments,
+        callOutStaffIds
+      );
+
+      if (retryPlan) {
+        assignments.push(...retryPlan);
+        continue;
+      }
+    }
+
+    if (input.rules.allowSameStaffClientRepeatForCoverageException) {
+      const exceptionStaff = findBestStaffMember(
+        requirement,
+        input,
+        assignments,
+        callOutStaffIds,
+        true
+      );
+
+      if (exceptionStaff) {
+        const exceptionPlan = buildMinimumPairingPlan(
+          requirement,
+          exceptionStaff,
+          input,
+          assignments,
+          callOutStaffIds,
+          true
+        );
+
+        if (exceptionPlan) {
+          assignments.push(...exceptionPlan);
+          warnings.push({
+            code: "PAIR_REUSE_EXCEPTION",
+            message:
+              `${requirement.client.displayCode} at ${requirement.startTime} reused a staff/client pair later in the day as a last-resort coverage exception.`,
+          });
+          continue;
+        }
+      }
+    }
+
     const repaired = attemptSingleSwapRepair(
       requirement,
       input,
@@ -1074,6 +1197,26 @@ export function generateSchedule(input: SchedulerInput): SchedulerResult {
         message: `${requirement.client.displayCode} at ${requirement.startTime} was covered by a one-step staff swap.`,
       });
       continue;
+    }
+
+    if (input.rules.allowSameStaffClientRepeatForCoverageException) {
+      const repairedByRepeatSwap = attemptSingleSwapRepair(
+        requirement,
+        input,
+        assignments,
+        callOutStaffIds,
+        false,
+        true
+      );
+
+      if (repairedByRepeatSwap) {
+        warnings.push({
+          code: "PAIR_REUSE_EXCEPTION",
+          message:
+            `${requirement.client.displayCode} at ${requirement.startTime} used a last-resort same-day pair reuse during swap repair.`,
+        });
+        continue;
+      }
     }
 
     uncoveredRequirements.push({
