@@ -27,6 +27,8 @@ type LocationsResponse = {
 };
 
 type SchedulerAiMode = "READ_ONLY" | "AUTONOMOUS";
+type SchedulerAiProviderMode = "native" | "gateway";
+type SchedulerAiThinkingLevel = "low" | "high";
 
 type SchedulerAiResponse = {
   reply?: string;
@@ -35,6 +37,8 @@ type SchedulerAiResponse = {
   writeToolsUsed?: string[];
   changed?: boolean;
   mode?: SchedulerAiMode;
+  provider?: SchedulerAiProviderMode;
+  thinkingLevel?: SchedulerAiThinkingLevel;
   effectiveDate?: string;
   attachmentAnalysis?: string;
   attachmentNames?: string[];
@@ -256,6 +260,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
   const [working, setWorking] = useState(false);
   const [status, setStatus] = useState("Connected to the Automatic Scheduler website");
   const [mode, setMode] = useState<SchedulerAiMode | null>(null);
+  const [provider, setProvider] = useState<SchedulerAiProviderMode>("native");
   const [correctionFor, setCorrectionFor] = useState<string | null>(null);
   const [correction, setCorrection] = useState("");
 
@@ -263,6 +268,13 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     () => locations.find((location) => location.id === locationId)?.name ?? "Clinic",
     [locations, locationId]
   );
+
+  useEffect(() => {
+    const savedProvider = window.localStorage.getItem("scheduler-ai-provider");
+    if (savedProvider === "native" || savedProvider === "gateway") {
+      setProvider(savedProvider);
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -344,7 +356,59 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     setCorrectionFor(null);
     setCorrection("");
     setWorking(false);
-    setStatus("New Scheduler AI conversation ready.");
+    setStatus(
+      provider === "native"
+        ? "New Free AI conversation ready."
+        : "New Paid AI conversation ready with high reasoning."
+    );
+  }
+
+  async function clearPendingAiState(conversationLocationId: string) {
+    if (!conversationLocationId || conversationLocationId.startsWith("demo-")) {
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/ai/session/reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ locationId: conversationLocationId }),
+      });
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        console.error(
+          "Scheduler AI session reset warning:",
+          data.error || "Server reset request failed."
+        );
+      }
+    } catch (error) {
+      console.error("Scheduler AI session reset warning:", error);
+    }
+  }
+
+  async function changeProvider(nextProvider: SchedulerAiProviderMode) {
+    if (working || nextProvider === provider) return;
+
+    const requestContext = getRequestContext();
+    setProvider(nextProvider);
+    window.localStorage.setItem("scheduler-ai-provider", nextProvider);
+    setMessages([]);
+    setInput("");
+    setAttachments([]);
+    setShowHelp(false);
+    setMode(null);
+    setCorrectionFor(null);
+    setCorrection("");
+
+    await clearPendingAiState(requestContext.locationId);
+
+    setStatus(
+      nextProvider === "native"
+        ? "Free AI selected — Native Scheduler AI uses local deterministic reasoning and no paid model tokens."
+        : "Paid AI selected — Gateway AI uses high reasoning and may consume paid AI credits."
+    );
   }
 
   async function completeConversation(
@@ -368,25 +432,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     setShowHelp(false);
     setStatus("Conversation complete. Clearing chat and pending Native AI state...");
 
-    try {
-      const response = await fetch("/api/ai/session/reset", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ locationId: conversationLocationId }),
-      });
-      if (!response.ok) {
-        const data = (await response.json().catch(() => ({}))) as {
-          error?: string;
-        };
-        console.error(
-          "Scheduler AI session reset warning:",
-          data.error || "Server reset request failed."
-        );
-      }
-    } catch (error) {
-      console.error("Scheduler AI session reset warning:", error);
-    }
-
+    await clearPendingAiState(conversationLocationId);
     window.setTimeout(resetConversation, 500);
   }
 
@@ -400,6 +446,13 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     const files = Array.from(event.currentTarget.files ?? []);
     event.currentTarget.value = "";
     if (files.length === 0) return;
+
+    if (provider === "native") {
+      setStatus(
+        "Free AI does not send screenshots to an external model. Switch to Paid AI to analyze screenshots."
+      );
+      return;
+    }
 
     if (attachments.length + files.length > MAX_SCREENSHOT_ATTACHMENTS) {
       setStatus(`Attach no more than ${MAX_SCREENSHOT_ATTACHMENTS} screenshots at once.`);
@@ -487,8 +540,10 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     setWorking(true);
     setStatus(
       selectedAttachments.length > 0
-        ? "Scheduler AI is reading the screenshot, comparing it with the live scheduler, and preparing a preview. No changes will be made on this upload turn."
-        : "Scheduler AI is resolving the date and loading the relevant staff, client, availability, break, coverage, event, and unplaced information..."
+        ? "Paid AI is reading the screenshot, comparing it with the live scheduler, and preparing a preview. No changes will be made on this upload turn."
+        : provider === "native"
+          ? "Free AI is resolving the date and analyzing scheduler rules, staff, clients, coverage, breaks, events, and Unplaced work..."
+          : "Paid AI is using high reasoning with the live scheduler context..."
     );
 
     try {
@@ -501,6 +556,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
           locationName: requestContext.locationName,
           date: requestContext.date,
           dateSelectionExplicit: requestContext.dateSelectionExplicit,
+          provider,
           history,
           attachments: selectedAttachments.map((attachment) => ({
             name: attachment.name,
@@ -513,6 +569,10 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
       if (!response.ok) throw new Error(data.error || "Scheduler AI could not complete the request.");
 
       setMode(data.mode ?? null);
+      if (data.provider) {
+        setProvider(data.provider);
+        window.localStorage.setItem("scheduler-ai-provider", data.provider);
+      }
       setMessages((current) => [
         ...current.map((entry) =>
           entry.id === userMessage.id && data.attachmentAnalysis
@@ -551,8 +611,8 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
           data.attachmentPreviewOnly
             ? "Screenshot analysis complete. Review the proposed import and confirm it in chat before Scheduler AI makes any changes."
             : data.toolsUsed?.length
-              ? `${data.mode === "AUTONOMOUS" ? "Autonomous" : "Read-only"} scheduler analysis used: ${data.toolsUsed.join(", ")}`
-              : "Scheduler AI response complete. Continue naturally if it asked for a date, clarification, or confirmation."
+              ? `${data.provider === "native" ? "Free AI" : "Paid AI"} · ${data.thinkingLevel === "high" ? "high thinking" : "low compute"} · ${data.mode === "AUTONOMOUS" ? "Autonomous" : "Read-only"} · tools: ${data.toolsUsed.join(", ")}`
+              : `${data.provider === "native" ? "Free AI" : "Paid AI"} response complete. Continue naturally if it asked for a date, clarification, or confirmation.`
         );
       }
     } catch (error) {
@@ -678,9 +738,45 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
             </label>
           </div>
 
+          <div className={styles.providerSection}>
+            <div
+              className={styles.providerToggle}
+              role="group"
+              aria-label="Scheduler AI mode"
+            >
+              <button
+                type="button"
+                className={provider === "native" ? styles.providerActive : ""}
+                aria-pressed={provider === "native"}
+                disabled={working}
+                onClick={() => void changeProvider("native")}
+              >
+                <strong>Free AI</strong>
+                <small>Native · Low compute</small>
+              </button>
+              <button
+                type="button"
+                className={provider === "gateway" ? styles.providerActive : ""}
+                aria-pressed={provider === "gateway"}
+                disabled={working}
+                onClick={() => void changeProvider("gateway")}
+              >
+                <strong>Paid AI</strong>
+                <small>Gateway · High thinking</small>
+              </button>
+            </div>
+            <span className={styles.providerNote}>
+              {provider === "native"
+                ? "Runs the built-in Scheduler AI without paid model tokens. Text scheduling only."
+                : "Uses the paid AI Gateway with high reasoning. Screenshot analysis is available in this mode."}
+            </span>
+          </div>
+
           <div className={styles.promptHint}>
             <span>
-              Ask naturally — capitalization does not matter. You can also attach a schedule/Excel screenshot for the AI to read, compare with live staff/clients, and preview as staff information or a day template before you confirm any changes. Use Saved prompts for more examples.
+              Ask naturally — capitalization and normal typos are okay. {provider === "gateway"
+                ? "Paid AI can also analyze schedule screenshots before you confirm changes."
+                : "Free AI handles text scheduling locally; switch to Paid AI for screenshots."} Use Saved prompts for more examples.
             </span>
             <button
               type="button"
@@ -720,7 +816,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
           <div className={styles.messages} aria-live="polite">
             {messages.length === 0 ? (
               <div className={styles.emptyState}>
-                Ask a question or request a change in normal language. You can also create or update staff, clients, teams, templates, attendance, events, rules, and supervision through conversation. For a clear date, Scheduler AI loads that day's staff availability, client requirements, saved assignments, breaks, events, call-outs, unplaced work, and coverage before answering. If a day is unclear, it will ask which day. If the requested day has no generated schedule, it will offer to generate it.
+                {provider === "native" ? "Free AI" : "Paid AI"} is ready. Ask a question or request a change in normal language. You can create or update staff, clients, teams, templates, attendance, events, rules, and supervision through conversation. The assistant resolves the exact date before acting and asks for clarification instead of guessing.
               </div>
             ) : (
               messages.map((message) => (
@@ -812,7 +908,9 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
             )}
             {working && (
               <div className={styles.thinking}>
-                Loading the relevant date context and working through the scheduler…
+                {provider === "native"
+                  ? "Free AI is working through the scheduler…"
+                  : "Paid AI is using high reasoning on the scheduler context…"}
               </div>
             )}
           </div>
@@ -851,6 +949,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
                 multiple
                 disabled={
                   working ||
+                  provider === "native" ||
                   !locationId ||
                   attachments.length >= MAX_SCREENSHOT_ATTACHMENTS
                 }
@@ -859,8 +958,16 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
               <label
                 className={styles.attachButton}
                 htmlFor="scheduler-ai-screenshot-input"
-                title="Attach schedule screenshot"
-                aria-label="Attach schedule screenshot"
+                title={
+                  provider === "native"
+                    ? "Switch to Paid AI to analyze screenshots"
+                    : "Attach schedule screenshot"
+                }
+                aria-label={
+                  provider === "native"
+                    ? "Screenshot analysis requires Paid AI"
+                    : "Attach schedule screenshot"
+                }
               >
                 +
               </label>
@@ -879,7 +986,11 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
                     void askScheduler();
                   }
                 }}
-                placeholder="Ask about the schedule, or attach a screenshot to import/analyze..."
+                placeholder={
+                  provider === "native"
+                    ? "Ask the Free AI about the schedule..."
+                    : "Ask the Paid AI, or attach a screenshot to analyze..."
+                }
                 aria-keyshortcuts="Enter"
               />
               <button
@@ -895,7 +1006,9 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
               </button>
             </div>
             <small className={styles.attachmentHint}>
-              Screenshots: PNG/JPG/WebP, up to 3 images and 3 MB total. Uploads are preview-only until you confirm the import.
+              {provider === "native"
+                ? "Free AI: text-only, no paid model tokens. Switch to Paid AI for screenshots."
+                : "Paid AI: high reasoning. Screenshots support PNG/JPG/WebP, up to 3 images and 3 MB total; uploads stay preview-only until you confirm."}
             </small>
           </form>
 
