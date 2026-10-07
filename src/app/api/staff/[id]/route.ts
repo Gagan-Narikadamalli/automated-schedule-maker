@@ -9,6 +9,14 @@ import {
 } from "@/lib/api/auth";
 import { writeAuditLog } from "@/lib/api/audit";
 import { connectToDatabase } from "@/lib/db";
+import { CallOut } from "@/models/CallOut";
+import { Client } from "@/models/Client";
+import { HistoricalScheduleAssignment } from "@/models/HistoricalScheduleAssignment";
+import { ScheduleAssignment } from "@/models/ScheduleAssignment";
+import { ScheduleTemplate } from "@/models/ScheduleTemplate";
+import { SupervisionRecord } from "@/models/SupervisionRecord";
+import { TrialDataset } from "@/models/TrialDataset";
+import { UnplacedAssignment } from "@/models/UnplacedAssignment";
 import { Staff } from "@/models/Staff";
 
 type StaffUpdateRequest = {
@@ -170,6 +178,108 @@ export async function PATCH(request: Request, context: RouteContext) {
 
     return NextResponse.json(
       { error: "Staff member could not be updated." },
+      { status: 500 }
+    );
+  }
+}
+
+
+export async function DELETE(_request: Request, context: RouteContext) {
+  const auth = await requireApiSession();
+
+  if (auth.error) {
+    return auth.error;
+  }
+
+  if (!sessionHasAnyRole(auth.session, PEOPLE_WRITE_ROLES)) {
+    return forbiddenResponse();
+  }
+
+  try {
+    const { id } = await context.params;
+
+    await connectToDatabase();
+
+    const staffMember = await Staff.findById(id);
+
+    if (!staffMember) {
+      return NextResponse.json(
+        { error: "Staff member was not found." },
+        { status: 404 }
+      );
+    }
+
+    const locationId = String(staffMember.locationId);
+
+    if (!sessionCanAccessLocation(auth.session, locationId)) {
+      return forbiddenResponse("You do not have access to this location.");
+    }
+
+    const before = staffMember.toObject();
+
+    await Promise.all([
+      ScheduleAssignment.deleteMany({ locationId, staffId: staffMember._id }),
+      CallOut.deleteMany({ locationId, staffId: staffMember._id }),
+      SupervisionRecord.deleteMany({
+        locationId,
+        $or: [
+          { staffId: staffMember._id },
+          { supervisorStaffId: staffMember._id },
+        ],
+      }),
+      UnplacedAssignment.updateMany(
+        { locationId, originalStaffId: staffMember._id },
+        { $set: { originalStaffId: null } }
+      ),
+      HistoricalScheduleAssignment.updateMany(
+        { locationId, staffId: staffMember._id },
+        { $set: { staffId: null } }
+      ),
+      Client.updateMany(
+        { locationId },
+        {
+          $pull: {
+            assignedInternIds: staffMember._id,
+            staffRelationships: { staffId: staffMember._id },
+          },
+        }
+      ),
+      Client.updateMany(
+        { locationId, assignedBcbaId: staffMember._id },
+        { $set: { assignedBcbaId: null } }
+      ),
+      ScheduleTemplate.updateMany(
+        { locationId, "assignments.staffId": staffMember._id },
+        { $pull: { assignments: { staffId: staffMember._id } } }
+      ),
+      TrialDataset.updateMany(
+        { locationId },
+        { $pull: { staffIds: staffMember._id } }
+      ),
+    ]);
+
+    await Staff.deleteOne({ _id: staffMember._id });
+
+    await writeAuditLog({
+      locationId,
+      userId: auth.session.userId,
+      action: "DELETE",
+      entityType: "STAFF",
+      entityId: String(staffMember._id),
+      summary: `Deleted staff member ${staffMember.fullName} and cleaned scheduler references.`,
+      before,
+      after: null,
+    });
+
+    return NextResponse.json({
+      success: true,
+      deletedId: String(staffMember._id),
+    });
+  } catch (error) {
+    console.error("Failed to delete staff member:", error);
+
+    return NextResponse.json(
+      { error: "Staff member could not be deleted." },
       { status: 500 }
     );
   }
