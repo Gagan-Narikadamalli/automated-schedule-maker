@@ -408,10 +408,6 @@ const configurationSchema = jsonSchema<ConfigurationInput>({
   additionalProperties: false,
 });
 
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 function isObjectId(value: string): boolean {
   return /^[a-f0-9]{24}$/i.test(value);
 }
