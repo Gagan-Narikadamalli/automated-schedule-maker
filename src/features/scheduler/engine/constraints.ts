@@ -91,6 +91,52 @@ function timeToMinutes(time: string): number | null {
   return hours * 60 + minutes;
 }
 
+function getPairAssignmentMinutes(
+  staffId: string,
+  clientId: string,
+  assignments: SchedulerAssignment[]
+): number[] {
+  return assignments
+    .filter(
+      (assignment) =>
+        assignment.staffId === staffId &&
+        assignment.clientId === clientId &&
+        assignment.assignmentType === "CLIENT_1_TO_1"
+    )
+    .map((assignment) => timeToMinutes(assignment.startTime))
+    .filter((value): value is number => value !== null)
+    .sort((left, right) => left - right);
+}
+
+function isSameDayPairContinuation(
+  staffId: string,
+  clientId: string,
+  startTime: string,
+  assignments: SchedulerAssignment[],
+  slotLengthMinutes: number
+): boolean {
+  const targetMinutes = timeToMinutes(startTime);
+
+  if (targetMinutes === null) {
+    return true;
+  }
+
+  const pairMinutes = getPairAssignmentMinutes(
+    staffId,
+    clientId,
+    assignments
+  );
+
+  if (pairMinutes.length === 0) {
+    return true;
+  }
+
+  return pairMinutes.some(
+    (minute) =>
+      Math.abs(minute - targetMinutes) === slotLengthMinutes
+  );
+}
+
 function countConsecutiveClientBlocksWithStaff(
   staffId: string,
   clientId: string,
@@ -233,24 +279,52 @@ export function canAssignStaffToClient({
   }
 
   if (
-    client.maxConsecutiveBlocksWithSameStaff !== undefined &&
-    client.maxConsecutiveBlocksWithSameStaff > 0
-  ) {
-    const consecutiveBlocks = countConsecutiveClientBlocksWithStaff(
+    rules.preventSameStaffClientRepeatSameDay &&
+    !isSameDayPairContinuation(
       staffMember.id,
       client.id,
       startTime,
       assignments,
       rules.slotLengthMinutes
-    );
+    )
+  ) {
+    return {
+      allowed: false,
+      reason:
+        "This staff/client pair already worked together earlier today and cannot restart after a gap.",
+    };
+  }
 
-    if (consecutiveBlocks > client.maxConsecutiveBlocksWithSameStaff) {
-      return {
-        allowed: false,
-        reason:
-          "The client rotation rule prevents another consecutive block with this staff member.",
-      };
-    }
+  const globalMaxConsecutiveBlocks = Math.max(
+    Math.floor(
+      (rules.maximumClientStaffConsecutiveHours * 60) /
+        rules.slotLengthMinutes
+    ),
+    1
+  );
+  const clientSpecificMax =
+    client.maxConsecutiveBlocksWithSameStaff !== undefined &&
+    client.maxConsecutiveBlocksWithSameStaff > 0
+      ? client.maxConsecutiveBlocksWithSameStaff
+      : Number.POSITIVE_INFINITY;
+  const effectiveMaxConsecutiveBlocks = Math.min(
+    globalMaxConsecutiveBlocks,
+    clientSpecificMax
+  );
+  const consecutiveBlocks = countConsecutiveClientBlocksWithStaff(
+    staffMember.id,
+    client.id,
+    startTime,
+    assignments,
+    rules.slotLengthMinutes
+  );
+
+  if (consecutiveBlocks > effectiveMaxConsecutiveBlocks) {
+    return {
+      allowed: false,
+      reason:
+        "The client/staff maximum continuous assignment rule requires a staff rotation.",
+    };
   }
 
   const assignedSlotCount = getStaffAssignedSlotCount(
