@@ -767,7 +767,7 @@ export function createSchedulerWebsiteTools(context: SchedulerAiContext) {
             return {
               ok: false,
               error:
-                "Creating a client requires fullName, displayCode, startDate, and at least one regular attendance pattern.",
+                "Creating a client requires the client's name and start date. Attendance hours are optional; without them the profile is saved but is not scheduled until hours are added.",
             };
           }
           return invokeJson(createClient, "POST", {
