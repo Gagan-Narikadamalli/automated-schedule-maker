@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import cardStyles from "@/components/ManagementCards.module.css";
@@ -145,12 +146,20 @@ export function FixedEventsManager() {
 
       const nextClients = clientsData.clients ?? [];
       setClients(nextClients);
-      if (!clientId && nextClients.length > 0) setClientId(nextClients[0].id);
+      setClientId((currentClientId) =>
+        nextClients.some((client) => client.id === currentClientId)
+          ? currentClientId
+          : nextClients[0]?.id ?? ""
+      );
 
       const speechEvents: ClientEvent[] = (speechData.speechSessions ?? []).map((event) => ({ ...event, eventType: "SPEECH" }));
       const napEvents: ClientEvent[] = (napData.napSessions ?? []).map((event) => ({ ...event, eventType: "NAP" }));
       setEvents([...speechEvents, ...napEvents]);
-      setMessage(`${speechEvents.length + napEvents.length} fixed event(s) loaded for ${requestedMonth}.`);
+      setMessage(
+        nextClients.length === 0
+          ? `No active clients are available in this location. Add a client before creating Speech or Nap events.`
+          : `${speechEvents.length + napEvents.length} fixed event(s) loaded for ${requestedMonth}.`
+      );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Fixed events could not be loaded.");
     } finally {
@@ -316,7 +325,7 @@ export function FixedEventsManager() {
             </label>
           </div>
           <div className={cardStyles.toolbarRight}>
-            <button type="button" className={cardStyles.addButton} disabled={working || clients.length === 0} onClick={() => openAddEvent("SPEECH")}>
+            <button type="button" className={cardStyles.addButton} disabled={working} onClick={() => openAddEvent("SPEECH")}>
               <span className={cardStyles.addIcon}>+</span> Add Event
             </button>
           </div>
@@ -376,7 +385,13 @@ export function FixedEventsManager() {
         footer={
           <>
             <button type="button" className="button button-secondary" disabled={working} onClick={() => setModalOpen(false)}>Cancel</button>
-            <button type="button" className="button button-primary" disabled={working || !clientId} onClick={() => void saveEvent()}>{working ? "Saving..." : "Save Event"}</button>
+            {clients.length === 0 ? (
+              <Link href="/clients" className="button button-primary">
+                Add Client
+              </Link>
+            ) : (
+              <button type="button" className="button button-primary" disabled={working || !clientId} onClick={() => void saveEvent()}>{working ? "Saving..." : "Save Event"}</button>
+            )}
           </>
         }
       >
@@ -397,8 +412,37 @@ export function FixedEventsManager() {
 
         <div className={cardStyles.formSection}>
           <h3>Client and schedule</h3>
+          {clients.length === 0 ? (
+            <div className={cardStyles.emptyState}>
+              <strong>No clients are available in this location.</strong>
+              <p>
+                Speech and Nap events must belong to a client. Add a client
+                first, then return here to create the event.
+              </p>
+              <Link href="/clients" className="button button-primary">
+                Go to Clients
+              </Link>
+            </div>
+          ) : null}
           <div className="form-grid">
-            <label className="form-field form-field-wide"><span>Client / kid</span><select value={clientId} onChange={(event) => setClientId(event.target.value)}>{clients.map((client) => <option key={client.id} value={client.id}>{client.displayCode} — {client.fullName}</option>)}</select></label>
+            <label className="form-field form-field-wide">
+              <span>Client / kid</span>
+              <select
+                value={clientId}
+                disabled={clients.length === 0}
+                onChange={(event) => setClientId(event.target.value)}
+              >
+                {clients.length === 0 ? (
+                  <option value="">No active clients available</option>
+                ) : (
+                  clients.map((client) => (
+                    <option key={client.id} value={client.id}>
+                      {client.displayCode} — {client.fullName}
+                    </option>
+                  ))
+                )}
+              </select>
+            </label>
             <label className="form-field"><span>Schedule type</span><select value={mode} onChange={(event) => setMode(event.target.value as ScheduleMode)}><option value="ONE_TIME">One-time date</option><option value="WEEKLY">Recurring weekly</option></select></label>
             <label className="form-field"><span>Starts</span><input type="time" min={eventType === "NAP" ? "11:00" : undefined} max={eventType === "NAP" ? "13:30" : undefined} step="1800" value={startTime} onChange={(event) => setStartTime(event.target.value)} /></label>
             <label className="form-field"><span>Ends</span><input type="time" min={eventType === "NAP" ? "11:30" : undefined} max={eventType === "NAP" ? "14:00" : undefined} step="1800" value={endTime} onChange={(event) => setEndTime(event.target.value)} /></label>
