@@ -442,6 +442,54 @@ function sortRequirementsForClinicFlow(
   });
 }
 
+function findCoverageFirstSingleSlotStaff(
+  requirement: ClientRequirement,
+  input: SchedulerInput,
+  assignments: SchedulerAssignment[],
+  callOutStaffIds: Set<string>
+): SchedulerStaff | null {
+  const candidates = input.staff
+    .map((staffMember) => {
+      const check = canAssignStaffToClient({
+        staffMember,
+        client: requirement.client,
+        startTime: requirement.startTime,
+        assignments,
+        callOutStaffIds,
+        rules: input.rules,
+        allowSameDayPairRepeat: true,
+      });
+
+      if (!check.allowed) {
+        return null;
+      }
+
+      return {
+        staffMember,
+        score: scoreCandidate({
+          staffMember,
+          client: requirement.client,
+          startTime: requirement.startTime,
+          assignments,
+          referenceAssignments: input.referenceAssignments,
+          historicalPatterns: input.historicalPatterns,
+          rules: input.rules,
+        }),
+      };
+    })
+    .filter(
+      (
+        candidate
+      ): candidate is {
+        staffMember: SchedulerStaff;
+        score: number;
+      } => candidate !== null
+    )
+    .sort(compareStaffCandidates);
+
+  return candidates[0]?.staffMember ?? null;
+}
+
 function findBestStaffMember(
   requirement: ClientRequirement,
   input: SchedulerInput,
@@ -1139,6 +1187,31 @@ export function repairCoverageMinimally(
       continue;
     }
 
+    // Coverage is the final priority. If the normal contiguous-pairing rules
+    // cannot build the preferred minimum block, use one valid 30-minute client
+    // block rather than leaving a client uncovered while an eligible staff
+    // member is idle. This may scatter staff assignments, but it never
+    // double-books staff/clients and still respects availability, service
+    // setting, hard restrictions, and configured hour limits.
+    const singleSlotStaff = findCoverageFirstSingleSlotStaff(
+      requirement,
+      input,
+      assignments,
+      callOutStaffIds
+    );
+
+    if (singleSlotStaff) {
+      assignments.push(
+        createAutoAssignment(singleSlotStaff, requirement)
+      );
+      warnings.push({
+        code: "COVERAGE_FIRST_SINGLE_SLOT",
+        message:
+          `${requirement.client.displayCode} at ${requirement.startTime} was covered with a single-slot fallback after normal continuity/grouping options were exhausted.`,
+      });
+      continue;
+    }
+
     uncoveredRequirements.push({
       clientId: requirement.client.id,
       clientCode: requirement.client.displayCode,
@@ -1358,6 +1431,31 @@ export function generateSchedule(input: SchedulerInput): SchedulerResult {
     }
 
     if (coveredByRepeatException) {
+      continue;
+    }
+
+    // Coverage is the final priority. If the normal contiguous-pairing rules
+    // cannot build the preferred minimum block, use one valid 30-minute client
+    // block rather than leaving a client uncovered while an eligible staff
+    // member is idle. This may scatter staff assignments, but it never
+    // double-books staff/clients and still respects availability, service
+    // setting, hard restrictions, and configured hour limits.
+    const singleSlotStaff = findCoverageFirstSingleSlotStaff(
+      requirement,
+      input,
+      assignments,
+      callOutStaffIds
+    );
+
+    if (singleSlotStaff) {
+      assignments.push(
+        createAutoAssignment(singleSlotStaff, requirement)
+      );
+      warnings.push({
+        code: "COVERAGE_FIRST_SINGLE_SLOT",
+        message:
+          `${requirement.client.displayCode} at ${requirement.startTime} was covered with a single-slot fallback after normal continuity/grouping options were exhausted.`,
+      });
       continue;
     }
 
