@@ -2,31 +2,135 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 
-import { resolveSchedulerAiProvider } from "../src/features/ai/schedulerNativeAi";
+const root = process.cwd();
 
-assert.equal(resolveSchedulerAiProvider("native"), "native");
-assert.equal(resolveSchedulerAiProvider("NATIVE"), "native");
-assert.equal(resolveSchedulerAiProvider("gateway"), "gateway");
-assert.equal(resolveSchedulerAiProvider("unknown"), "gateway");
+function source(relativePath: string): string {
+  return fs.readFileSync(path.join(root, relativePath), "utf8");
+}
 
-const route = fs.readFileSync(
-  path.join(process.cwd(), "src/app/api/ai/routeBase.ts"),
-  "utf8"
+function resolveProjectImport(
+  importer: string,
+  specifier: string
+): string | null {
+  let base: string;
+  if (specifier.startsWith("@/")) {
+    base = path.join(root, "src", specifier.slice(2));
+  } else if (specifier.startsWith(".")) {
+    base = path.resolve(path.dirname(path.join(root, importer)), specifier);
+  } else {
+    return null;
+  }
+
+  for (const candidate of [
+    base,
+    `${base}.ts`,
+    `${base}.tsx`,
+    path.join(base, "index.ts"),
+    path.join(base, "index.tsx"),
+  ]) {
+    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+      return path.relative(root, candidate).replaceAll("\\", "/");
+    }
+  }
+  return null;
+}
+
+function transitiveImports(entry: string): {
+  files: Set<string>;
+  packages: Set<string>;
+} {
+  const files = new Set<string>();
+  const packages = new Set<string>();
+  const pending = [entry];
+  const pattern =
+    /(?:import|export)\s+(?:type\s+)?(?:[^"'\n]*?\s+from\s+)?["']([^"']+)["']|import\(\s*["']([^"']+)["']\s*\)/g;
+
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    if (files.has(current)) continue;
+    files.add(current);
+
+    const text = source(current);
+    for (const match of text.matchAll(pattern)) {
+      const specifier = match[1] || match[2];
+      const resolved = resolveProjectImport(current, specifier);
+      if (resolved) {
+        pending.push(resolved);
+      } else if (!specifier.startsWith("node:")) {
+        packages.add(specifier);
+      }
+    }
+  }
+
+  return { files, packages };
+}
+
+const nativeEntry = "src/app/api/ai/native/route.ts";
+const paidEntry = "src/app/api/ai/paid/route.ts";
+assert.equal(fs.existsSync(path.join(root, nativeEntry)), true);
+assert.equal(fs.existsSync(path.join(root, paidEntry)), true);
+
+const nativeGraph = transitiveImports(nativeEntry);
+assert.equal(
+  nativeGraph.packages.has("ai"),
+  false,
+  "Native Scheduler AI must not import the paid AI SDK."
 );
-assert.match(route, /body\.provider \?\? process\.env\.SCHEDULER_AI_PROVIDER/);
-assert.match(route, /DEFAULT_SCHEDULER_AI_PAID_MODEL = "openai\/gpt-5\.6-sol"/);
-assert.match(route, /reasoning: "high"/);
-assert.match(route, /thinkingLevel = aiProvider === "native" \? "low" : "high"/);
+for (const forbidden of [
+  "src/app/api/ai/routeBase.ts",
+  "src/app/api/ai/paid/route.ts",
+  "src/features/ai/schedulerPaidToolAdapter.ts",
+  "src/features/ai/schedulerPrompt.ts",
+]) {
+  assert.equal(
+    nativeGraph.files.has(forbidden),
+    false,
+    `Native Scheduler AI must stay independent of ${forbidden}.`
+  );
+}
 
-const assistant = fs.readFileSync(
-  path.join(process.cwd(), "src/components/ScheduleAssistant.tsx"),
-  "utf8"
+for (const sharedToolFile of [
+  "src/features/ai/schedulerTools.ts",
+  "src/features/ai/schedulerWriteTools.ts",
+  "src/features/ai/schedulerBulkTools.ts",
+  "src/features/ai/schedulerWebsiteTools.ts",
+  "src/features/ai/schedulerAdvisoryTools.ts",
+]) {
+  const text = source(sharedToolFile);
+  assert.doesNotMatch(
+    text,
+    /from\s+["']ai["']/,
+    `${sharedToolFile} must remain provider-neutral.`
+  );
+  assert.match(text, /schedulerToolDefinition/);
+}
+
+const paidBase = source("src/app/api/ai/routeBase.ts");
+assert.match(
+  paidBase,
+  /DEFAULT_SCHEDULER_AI_PAID_MODEL = "openai\/gpt-5\.6-sol"/
 );
-assert.match(assistant, /Free AI/);
-assert.match(assistant, /Paid AI/);
-assert.match(assistant, /provider,/);
+assert.match(paidBase, /reasoning: "high"/);
+assert.match(paidBase, /adaptSchedulerToolsForPaid/);
+assert.doesNotMatch(paidBase, /schedulerNativeAi/);
+assert.doesNotMatch(paidBase, /schedulerNativeEvaluation/);
+assert.doesNotMatch(paidBase, /schedulerNativeFollowUp/);
+
+const assistant = source("src/components/ScheduleAssistant.tsx");
+assert.match(
+  assistant,
+  /provider === "native" \? "\/api\/ai\/native" : "\/api\/ai\/paid"/
+);
 assert.match(assistant, /changeProvider\("native"\)/);
 assert.match(assistant, /changeProvider\("gateway"\)/);
-assert.match(assistant, /provider === "native"/);
+assert.match(assistant, /Free AI/);
+assert.match(assistant, /Paid AI/);
 
-console.log("Scheduler AI Free/Paid provider mode tests passed.");
+const nativeRoute = source(nativeEntry);
+assert.match(nativeRoute, /provider: "native"/);
+assert.match(nativeRoute, /thinkingLevel: "low"/);
+assert.doesNotMatch(nativeRoute, /ToolLoopAgent|generateText|AI_GATEWAY|openai\//i);
+
+console.log(
+  `Scheduler AI isolation tests passed (Native graph: ${nativeGraph.files.size} project files, no paid AI SDK dependency).`
+);
