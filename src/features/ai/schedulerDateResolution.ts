@@ -176,13 +176,21 @@ function isShortDateContinuation(message: string): boolean {
     .replace(/[?.!]+$/g, "")
     .replace(/\s+/g, " ");
 
+  const dayToken =
+    "(?:today|tomorrow|yesterday|the next day|next day|the day after|monday|mon|tuesday|tue|tues|wednesday|wed|thursday|thu|thur|thurs|friday|fri|saturday|sat|sunday|sun)";
+
   return (
-    /^(?:what about|how about|same(?: thing)?(?: for)?|and|then)\s+(?:today|tomorrow|yesterday|the next day|next day|the day after|monday|mon|tuesday|tue|tues|wednesday|wed|thursday|thu|thur|thurs|friday|fri|saturday|sat|sunday|sun)$/.test(
-      value
-    ) ||
-    /^(?:today|tomorrow|yesterday|the next day|next day|the day after|monday|mon|tuesday|tue|tues|wednesday|wed|thursday|thu|thur|thurs|friday|fri|saturday|sat|sunday|sun)(?: instead)?$/.test(
-      value
-    )
+    new RegExp(
+      "^(?:what about|how about|same(?: thing)?(?: for)?|and|then)\\s+" +
+        dayToken +
+        "$"
+    ).test(value) ||
+    new RegExp("^" + dayToken + "(?: instead)?$").test(value) ||
+    new RegExp(
+      "^(?:actually|instead|rather|make it|move it|do it|change it(?: to)?)\\s+" +
+        dayToken +
+        "(?: instead)?$"
+    ).test(value)
   );
 }
 
