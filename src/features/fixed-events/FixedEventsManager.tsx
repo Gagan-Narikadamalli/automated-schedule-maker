@@ -350,7 +350,6 @@ export function FixedEventsManager() {
                     </div>
                     <div className={cardStyles.identityCopy}>
                       <h3>{event.client?.displayCode ?? "Client"} · {formatEventType(event.eventType)}</h3>
-                      <p>{event.client?.fullName ?? ""}</p>
                     </div>
                   </div>
                   <span className={cardStyles.pill}>{formatEventType(event.eventType)}</span>
@@ -437,7 +436,7 @@ export function FixedEventsManager() {
                 ) : (
                   clients.map((client) => (
                     <option key={client.id} value={client.id}>
-                      {client.displayCode} — {client.fullName}
+                      {client.displayCode}
                     </option>
                   ))
                 )}
