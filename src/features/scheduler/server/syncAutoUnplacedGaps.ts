@@ -130,6 +130,7 @@ export async function syncAutoUnplacedGaps(
       originalStaffId: null,
       originalStartTime: requirement.startTime,
       reason:
+        requirement.reason ||
         "Automatic scheduler could not safely cover this required client block. Manager placement is required.",
       origin: "AUTO_UNCOVERED",
       status: "UNPLACED",
