@@ -160,6 +160,7 @@ function getDefaultRules(): ExtendedSchedulerRules {
     minimumClientStaffAssignmentMinutes: 30,
     maximumClientStaffConsecutiveHours: 4,
     preventSameStaffClientRepeatSameDay: true,
+    allowSameStaffClientRepeatForCoverageException: true,
     preferSameTeam: true,
     preferStaffContinuity: true,
     slotLengthMinutes: 30,
@@ -218,6 +219,10 @@ function mapRules(document: DatabaseRecord | null): ExtendedSchedulerRules {
     preventSameStaffClientRepeatSameDay: Boolean(
       document.preventSameStaffClientRepeatSameDay ??
         defaults.preventSameStaffClientRepeatSameDay
+    ),
+    allowSameStaffClientRepeatForCoverageException: Boolean(
+      document.allowSameStaffClientRepeatForCoverageException ??
+        defaults.allowSameStaffClientRepeatForCoverageException
     ),
     preferSameTeam: Boolean(
       document.preferSameTeam ?? defaults.preferSameTeam
@@ -853,6 +858,8 @@ export async function buildDaySchedulerInput(
         extendedRules.maximumClientStaffConsecutiveHours,
       preventSameStaffClientRepeatSameDay:
         extendedRules.preventSameStaffClientRepeatSameDay,
+      allowSameStaffClientRepeatForCoverageException:
+        extendedRules.allowSameStaffClientRepeatForCoverageException,
       preferSameTeam:
         extendedRules.preferSameTeam,
       preferStaffContinuity:
