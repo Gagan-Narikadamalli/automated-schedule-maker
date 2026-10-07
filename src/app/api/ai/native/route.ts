@@ -17,7 +17,7 @@ import { runNativeSchedulerAi } from "@/features/ai/schedulerNativeAi";
 import { createSchedulerReadOnlyTools } from "@/features/ai/schedulerTools";
 import {
   createSchedulerWebsiteTools,
-  SCHEDULER_WEBSITE_WRITE_TOOL_NAMES,
+  isSchedulerWebsiteWriteInvocation,
 } from "@/features/ai/schedulerWebsiteTools";
 import {
   createSchedulerWriteTools,
@@ -238,6 +238,8 @@ export async function POST(request: Request) {
           ...advisoryTools,
           get_scheduler_configuration:
             websiteTools.get_scheduler_configuration,
+          manage_schedule_template:
+            websiteTools.manage_schedule_template,
         };
 
     const nativeResult = await runNativeSchedulerAi({
@@ -257,12 +259,23 @@ export async function POST(request: Request) {
         )
       ),
     ];
-    const writeToolsUsed = toolsUsed.filter(
-      (toolName) =>
-        SCHEDULER_WRITE_TOOL_NAMES.has(toolName) ||
-        SCHEDULER_WEBSITE_WRITE_TOOL_NAMES.has(toolName) ||
-        SCHEDULER_BULK_WRITE_TOOL_NAMES.has(toolName)
-    );
+    const writeToolsUsed = [
+      ...new Set(
+        nativeResult.steps.flatMap((step) =>
+          step.toolCalls
+            .filter(
+              (toolCall) =>
+                SCHEDULER_WRITE_TOOL_NAMES.has(toolCall.toolName) ||
+                isSchedulerWebsiteWriteInvocation(
+                  toolCall.toolName,
+                  toolCall.input
+                ) ||
+                SCHEDULER_BULK_WRITE_TOOL_NAMES.has(toolCall.toolName)
+            )
+            .map((toolCall) => toolCall.toolName)
+        )
+      ),
+    ];
     const writeOutputs = nativeResult.steps.flatMap((step) =>
       step.toolResults
         .filter((result) => writeToolsUsed.includes(result.toolName))
