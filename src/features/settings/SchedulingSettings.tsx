@@ -17,6 +17,9 @@ type RulesForm = {
   partTimeMaximumWeeklyHours: number;
   maximumClientsPerTechPerDay: number;
   maximumTechsPerClientPerDay: number;
+  minimumClientStaffAssignmentMinutes: number;
+  maximumClientStaffConsecutiveHours: number;
+  preventSameStaffClientRepeatSameDay: boolean;
   defaultBreakMinutes: number;
   breakEligibilityHours: number;
   breakWindowStart: string;
@@ -50,6 +53,8 @@ type NumericRuleField =
   | "partTimeMaximumWeeklyHours"
   | "maximumClientsPerTechPerDay"
   | "maximumTechsPerClientPerDay"
+  | "minimumClientStaffAssignmentMinutes"
+  | "maximumClientStaffConsecutiveHours"
   | "defaultBreakMinutes"
   | "breakEligibilityHours"
   | "preferredStaffPriority"
@@ -87,6 +92,9 @@ const DEFAULT_RULES: RulesForm = {
   partTimeMaximumWeeklyHours: 29,
   maximumClientsPerTechPerDay: 6,
   maximumTechsPerClientPerDay: 4,
+  minimumClientStaffAssignmentMinutes: 30,
+  maximumClientStaffConsecutiveHours: 4,
+  preventSameStaffClientRepeatSameDay: true,
   defaultBreakMinutes: 30,
   breakEligibilityHours: 6,
   breakWindowStart: "11:00",
@@ -254,6 +262,7 @@ export function SchedulingSettings() {
       | "preferSameTeam"
       | "preferStaffContinuity"
       | "preserveManualOverrides"
+      | "preventSameStaffClientRepeatSameDay"
       | "autoUseWeekdayTemplate"
       | "autoUsePreviousWeekdaySchedule",
     value: boolean
@@ -299,6 +308,37 @@ export function SchedulingSettings() {
     if (rules.slotLengthMinutes !== 30) {
       setMessage(
         "The Excel-style scheduler currently requires 30-minute blocks."
+      );
+      return;
+    }
+
+    if (
+      rules.minimumClientStaffAssignmentMinutes < 30 ||
+      rules.minimumClientStaffAssignmentMinutes % 30 !== 0
+    ) {
+      setMessage(
+        "Minimum client/staff assignment must be at least 30 minutes and use 30-minute increments."
+      );
+      return;
+    }
+
+    if (
+      ![3, 3.5, 4].includes(
+        rules.maximumClientStaffConsecutiveHours
+      )
+    ) {
+      setMessage(
+        "Maximum continuous client/staff time must be 3, 3.5, or 4 hours."
+      );
+      return;
+    }
+
+    if (
+      rules.minimumClientStaffAssignmentMinutes >
+      rules.maximumClientStaffConsecutiveHours * 60
+    ) {
+      setMessage(
+        "Minimum client/staff assignment cannot be longer than the maximum continuous pairing time."
       );
       return;
     }
@@ -962,8 +1002,75 @@ export function SchedulingSettings() {
 
       <section className="section-card">
         <h2>Automatic Scheduling Limits</h2>
+        <p>
+          These limits control client/staff rotation. Each automatic pairing must
+          last at least the configured minimum, cannot run longer than the
+          configured maximum, and can be prevented from restarting later in the
+          same day after a gap. Client-specific rotation limits can still be
+          stricter than these clinic-wide limits.
+        </p>
 
         <div className="form-grid">
+          <label className="form-field">
+            <span>Minimum client/staff assignment</span>
+            <select
+              value={rules.minimumClientStaffAssignmentMinutes}
+              onChange={(event) =>
+                updateNumberField(
+                  "minimumClientStaffAssignmentMinutes",
+                  event.target.value
+                )
+              }
+            >
+              <option value={30}>30 minutes</option>
+              <option value={60}>1 hour</option>
+              <option value={90}>1.5 hours</option>
+              <option value={120}>2 hours</option>
+            </select>
+            <small>
+              Automatic assignments will not start a new pairing unless this
+              minimum continuous duration can be scheduled.
+            </small>
+          </label>
+
+          <label className="form-field">
+            <span>Maximum continuous client/staff time</span>
+            <select
+              value={rules.maximumClientStaffConsecutiveHours}
+              onChange={(event) =>
+                updateNumberField(
+                  "maximumClientStaffConsecutiveHours",
+                  event.target.value
+                )
+              }
+            >
+              <option value={3}>3 hours</option>
+              <option value={3.5}>3.5 hours</option>
+              <option value={4}>4 hours</option>
+            </select>
+            <small>
+              The automatic scheduler rotates to another eligible staff member
+              when this continuous limit is reached.
+            </small>
+          </label>
+
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={rules.preventSameStaffClientRepeatSameDay}
+              onChange={(event) =>
+                updateBooleanField(
+                  "preventSameStaffClientRepeatSameDay",
+                  event.target.checked
+                )
+              }
+            />
+            <span>
+              Do not pair the same client and staff member again later that day
+              after their continuous block has ended. Manual manager changes can
+              still handle approved special cases.
+            </span>
+          </label>
           <label className="form-field">
             <span>Max clients per technician per day</span>
             <input
