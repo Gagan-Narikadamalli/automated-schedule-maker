@@ -72,6 +72,19 @@ function readOptionalPositiveInteger(
   return value;
 }
 
+function calendarCodePart(value: string): string {
+  const letters = value.trim().replace(/[^A-Za-z]/g, "");
+  if (!letters) return "";
+  return letters.charAt(0).toUpperCase() + letters.charAt(1).toLowerCase();
+}
+
+function displayCodeFromFullName(fullName: string): string {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  return `${calendarCodePart(parts[0] ?? "")}${calendarCodePart(
+    parts.slice(1).join(" ")
+  )}`;
+}
+
 export async function PATCH(request: Request, context: RouteContext) {
   const auth = await requireApiSession();
 
@@ -107,11 +120,27 @@ export async function PATCH(request: Request, context: RouteContext) {
     const before = client.toObject();
 
     if (body.fullName !== undefined) {
-      client.fullName = body.fullName.trim();
-    }
+      const fullName = body.fullName.trim();
+      const nameParts = fullName.split(/\s+/).filter(Boolean);
 
-    if (body.displayCode !== undefined) {
-      const displayCode = body.displayCode.trim();
+      if (nameParts.length < 2) {
+        return NextResponse.json(
+          { error: "Enter both the client's first name and last name." },
+          { status: 400 }
+        );
+      }
+
+      const displayCode = displayCodeFromFullName(fullName);
+
+      if (displayCode.length < 4) {
+        return NextResponse.json(
+          {
+            error:
+              "Client first and last names must each contain at least two letters so the calendar code can be generated.",
+          },
+          { status: 400 }
+        );
+      }
 
       const duplicate = await Client.findOne({
         _id: { $ne: client._id },
@@ -130,7 +159,12 @@ export async function PATCH(request: Request, context: RouteContext) {
         );
       }
 
+      client.fullName = fullName;
       client.displayCode = displayCode;
+    } else if (body.displayCode !== undefined) {
+      // Display codes are derived from names. Ignore standalone display-code
+      // edits so API clients cannot drift away from the clinic naming rule.
+      client.displayCode = displayCodeFromFullName(client.fullName);
     }
 
     if (body.startDate !== undefined) {
