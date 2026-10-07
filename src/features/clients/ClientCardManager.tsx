@@ -4,6 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 
 import cardStyles from "@/components/ManagementCards.module.css";
 import { ManagementModal } from "@/components/ManagementModal";
+import {
+  createWeeklySchedule,
+  patternsFromWeeklySchedule,
+  validateWeeklySchedule,
+  weeklyScheduleFromPatterns,
+  type WeeklySchedule,
+} from "@/features/shared/weeklySchedule";
 
 type ServiceSetting = "IN_CENTER" | "IN_HOME" | "BOTH";
 type SupportLevel = "STANDARD" | "ONE_TO_ONE" | "ROTATION" | "HIGH_SUPPORT";
@@ -211,6 +218,10 @@ export function ClientCardManager() {
   const [query, setQuery] = useState("");
   const [form, setForm] = useState<ClientForm>(emptyClientForm);
   const [attendanceDraft, setAttendanceDraft] = useState<TimePattern>(emptyAttendance);
+  const [weeklyAttendanceSchedule, setWeeklyAttendanceSchedule] =
+    useState<WeeklySchedule>(() =>
+      createWeeklySchedule("08:00", "16:00", true)
+    );
   const [napDraft, setNapDraft] = useState<TimePattern>(emptyNap);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -339,6 +350,9 @@ export function ClientCardManager() {
     setEditingId(null);
     setForm(emptyClientForm());
     setAttendanceDraft(emptyAttendance());
+    setWeeklyAttendanceSchedule(
+      createWeeklySchedule("08:00", "16:00", true)
+    );
     setNapDraft(emptyNap());
     setModalOpen(true);
   }
@@ -376,6 +390,13 @@ export function ClientCardManager() {
       restrictedStaffIds,
     });
     setAttendanceDraft(emptyAttendance());
+    setWeeklyAttendanceSchedule(
+      weeklyScheduleFromPatterns(
+        client.attendancePatterns ?? [],
+        "08:00",
+        "16:00"
+      )
+    );
     setNapDraft(emptyNap());
     setModalOpen(true);
   }
@@ -387,6 +408,11 @@ export function ClientCardManager() {
     setModalOpen(false);
     setEditingId(null);
     setForm(emptyClientForm());
+    setAttendanceDraft(emptyAttendance());
+    setWeeklyAttendanceSchedule(
+      createWeeklySchedule("08:00", "16:00", true)
+    );
+    setNapDraft(emptyNap());
   }
 
   function toggleDraftDay(
@@ -400,6 +426,59 @@ export function ClientCardManager() {
         ? draft.days.filter((value) => value !== day)
         : [...draft.days, day],
     });
+  }
+
+  function applyAttendanceToSelectedDays() {
+    if (attendanceDraft.days.length === 0) {
+      setMessage("Choose at least one weekday to apply attendance hours.");
+      return;
+    }
+
+    if (attendanceDraft.endTime <= attendanceDraft.startTime) {
+      setMessage("Attendance end time must be later than the start time.");
+      return;
+    }
+
+    setWeeklyAttendanceSchedule((current) => {
+      const next = { ...current };
+
+      for (const day of attendanceDraft.days) {
+        next[day] = {
+          enabled: true,
+          startTime: attendanceDraft.startTime,
+          endTime: attendanceDraft.endTime,
+        };
+      }
+
+      return next;
+    });
+    setMessage(
+      `Applied ${attendanceDraft.startTime}-${attendanceDraft.endTime} attendance to the selected weekdays.`
+    );
+  }
+
+  function toggleWeeklyAttendanceDay(day: string) {
+    setWeeklyAttendanceSchedule((current) => ({
+      ...current,
+      [day]: {
+        ...current[day],
+        enabled: !current[day]?.enabled,
+      },
+    }));
+  }
+
+  function updateWeeklyAttendanceTime(
+    day: string,
+    field: "startTime" | "endTime",
+    value: string
+  ) {
+    setWeeklyAttendanceSchedule((current) => ({
+      ...current,
+      [day]: {
+        ...current[day],
+        [field]: value,
+      },
+    }));
   }
 
   function addPattern(kind: "attendance" | "nap") {
@@ -449,10 +528,20 @@ export function ClientCardManager() {
       return;
     }
 
-    if (form.attendancePatterns.length === 0) {
-      setMessage("Add at least one attendance pattern before saving the client.");
+    const attendanceScheduleError = validateWeeklySchedule(
+      weeklyAttendanceSchedule,
+      "attendance"
+    );
+
+    if (attendanceScheduleError) {
+      setMessage(attendanceScheduleError);
       return;
     }
+
+    const attendancePatterns = patternsFromWeeklySchedule(
+      weeklyAttendanceSchedule,
+      "Regular attendance"
+    );
 
     const staffRelationships = pairingStaff.map((staffMember) => {
       let relationship: Relationship = "ALLOWED";
@@ -485,7 +574,7 @@ export function ClientCardManager() {
             insurancePlan: form.insurancePlan.trim(),
             assignedBcbaId: form.assignedBcbaId || null,
             assignedInternIds: form.assignedInternIds,
-            attendancePatterns: form.attendancePatterns,
+            attendancePatterns,
             napPatterns: form.napPatterns,
             staffRelationships,
           }),
@@ -893,7 +982,136 @@ export function ClientCardManager() {
           </div>
         </div>
 
-        {patternEditor("Attendance / required coverage", attendanceDraft, setAttendanceDraft, "attendance", form.attendancePatterns)}
+        <div className={cardStyles.formSection}>
+          <h3>Weekly attendance / required coverage</h3>
+          <p>
+            Enter the client's normal attendance hours directly by weekday.
+            Quick Apply is useful when several days have the same hours; each
+            individual day can still be changed below.
+          </p>
+
+          <div className={cardStyles.quickSchedule}>
+            <strong>Quick Apply</strong>
+            <span>
+              Example: apply 09:00-17:00 to Mon, Tue, Wed, then apply
+              08:00-16:00 to Thu and Fri.
+            </span>
+
+            <div className="form-grid">
+              <label className="form-field">
+                <span>Starts</span>
+                <input
+                  type="time"
+                  value={attendanceDraft.startTime}
+                  onChange={(event) =>
+                    setAttendanceDraft({
+                      ...attendanceDraft,
+                      startTime: event.target.value,
+                    })
+                  }
+                />
+              </label>
+              <label className="form-field">
+                <span>Ends</span>
+                <input
+                  type="time"
+                  value={attendanceDraft.endTime}
+                  onChange={(event) =>
+                    setAttendanceDraft({
+                      ...attendanceDraft,
+                      endTime: event.target.value,
+                    })
+                  }
+                />
+              </label>
+            </div>
+
+            <div className="day-selector">
+              {WEEKDAYS.map(([value, label]) => (
+                <label key={value} className="checkbox-card">
+                  <input
+                    type="checkbox"
+                    checked={attendanceDraft.days.includes(value)}
+                    onChange={() =>
+                      toggleDraftDay(
+                        attendanceDraft,
+                        setAttendanceDraft,
+                        value
+                      )
+                    }
+                  />
+                  <span>{label}</span>
+                </label>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              className="button button-secondary button-small"
+              onClick={applyAttendanceToSelectedDays}
+            >
+              Apply to selected days
+            </button>
+          </div>
+
+          <div className={cardStyles.weeklyEditor}>
+            {WEEKDAYS.map(([value, label]) => {
+              const daySchedule = weeklyAttendanceSchedule[value];
+
+              return (
+                <div key={value} className={cardStyles.weeklyEditorRow}>
+                  <label className={cardStyles.weeklyDayToggle}>
+                    <input
+                      type="checkbox"
+                      checked={daySchedule?.enabled ?? false}
+                      onChange={() => toggleWeeklyAttendanceDay(value)}
+                    />
+                    <strong>{label}</strong>
+                  </label>
+
+                  <label className="form-field">
+                    <span>Arrival</span>
+                    <input
+                      type="time"
+                      disabled={!daySchedule?.enabled}
+                      value={daySchedule?.startTime ?? "08:00"}
+                      onChange={(event) =>
+                        updateWeeklyAttendanceTime(
+                          value,
+                          "startTime",
+                          event.target.value
+                        )
+                      }
+                    />
+                  </label>
+
+                  <label className="form-field">
+                    <span>Departure</span>
+                    <input
+                      type="time"
+                      disabled={!daySchedule?.enabled}
+                      value={daySchedule?.endTime ?? "16:00"}
+                      onChange={(event) =>
+                        updateWeeklyAttendanceTime(
+                          value,
+                          "endTime",
+                          event.target.value
+                        )
+                      }
+                    />
+                  </label>
+                </div>
+              );
+            })}
+          </div>
+
+          <p className="helper-text">
+            Uncheck a weekday when the client normally does not attend. These
+            daily hours become the required coverage window used by Auto
+            Generate.
+          </p>
+        </div>
+
         {patternEditor("Nap / Break + Nap windows", napDraft, setNapDraft, "nap", form.napPatterns)}
 
         <div className={cardStyles.formSection}>
