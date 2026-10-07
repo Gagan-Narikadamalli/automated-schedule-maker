@@ -315,7 +315,7 @@ function ClientScheduleView({
       byId.set(id, {
         id,
         code: existing?.code || code,
-        name: existing?.name || client?.fullName || code,
+        name: existing?.name || code,
         color: client?.color || existing?.color || "#D9F4EE",
       });
     }
