@@ -67,7 +67,6 @@ function serializeNapSession(session: PlainRecord) {
       ? {
           id: String(client._id ?? client.id ?? ""),
           displayCode: String(client.displayCode ?? ""),
-          fullName: String(client.fullName ?? ""),
           color: String(client.color ?? "#D9F4EE"),
         }
       : null,
@@ -159,7 +158,7 @@ export async function GET(request: Request) {
       locationId,
       ...dateQuery,
     })
-      .populate("clientId", "displayCode color fullName")
+      .populate("clientId", "displayCode color")
       .sort({ date: 1, priorityCategory: 1, startTime: 1 })
       .lean();
 
