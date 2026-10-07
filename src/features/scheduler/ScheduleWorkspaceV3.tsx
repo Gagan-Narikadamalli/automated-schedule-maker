@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type DragEvent } from "react";
 
 import { ManagementModal } from "@/components/ManagementModal";
 import { DAILY_TIME_SLOTS } from "./constants";
+import { getVisibleStaffIndexes } from "./callOutVisibility";
 import {
   createDemoGrid,
   DEMO_STAFF,
@@ -85,6 +86,7 @@ type UnplacedResponse = {
 type CallOutResponse = {
   success?: boolean;
   selectedStaffIds?: string[];
+  fullDayStaffIds?: string[];
   addedCount?: number;
   removedCount?: number;
   error?: string;
@@ -325,6 +327,7 @@ export function ScheduleWorkspaceV3() {
   const [showCallOutPanel, setShowCallOutPanel] = useState(false);
   const [callOutStaffIds, setCallOutStaffIds] = useState<string[]>([]);
   const [savedCallOutStaffIds, setSavedCallOutStaffIds] = useState<string[]>([]);
+  const [fullDayCallOutStaffIds, setFullDayCallOutStaffIds] = useState<string[]>([]);
   const [showCopyPanel, setShowCopyPanel] = useState(false);
   const [copySourceDate, setCopySourceDate] = useState(() => addDays(getTodayForDateInput(), -1));
   const confirmation = useSchedulerConfirm();
@@ -334,6 +337,32 @@ export function ScheduleWorkspaceV3() {
     () => locations.find((location) => location.id === locationId)?.name ?? "Clinic",
     [locations, locationId]
   );
+
+  const visibleStaffIndexes = useMemo(
+    () =>
+      getVisibleStaffIndexes(
+        staff.map((staffMember) => staffMember.id),
+        fullDayCallOutStaffIds
+      ),
+    [staff, fullDayCallOutStaffIds]
+  );
+  const visibleStaff = useMemo(
+    () => visibleStaffIndexes.map((index) => staff[index]).filter(Boolean),
+    [staff, visibleStaffIndexes]
+  );
+  const visibleGrid = useMemo(
+    () =>
+      initialGrid.map((row) =>
+        visibleStaffIndexes.map((index) => row[index] ?? createEmptyCell())
+      ),
+    [initialGrid, visibleStaffIndexes]
+  );
+  const hiddenCallOutStaffNames = useMemo(() => {
+    const hidden = new Set(fullDayCallOutStaffIds);
+    return staff
+      .filter((staffMember) => hidden.has(staffMember.id))
+      .map((staffMember) => staffMember.name);
+  }, [staff, fullDayCallOutStaffIds]);
 
   const placementCell = useMemo<DemoGridCell | null>(() => {
     if (!placementRecord) return null;
@@ -378,6 +407,7 @@ export function ScheduleWorkspaceV3() {
     setShowCallOutPanel(false);
     setCallOutStaffIds([]);
     setSavedCallOutStaffIds([]);
+    setFullDayCallOutStaffIds([]);
     if (!locationId || !selectedDate) return;
     void loadSchedule(locationId, selectedDate);
   }, [locationId, selectedDate]);
@@ -390,6 +420,7 @@ export function ScheduleWorkspaceV3() {
     setUnplacedAssignments([]);
     setCallOutStaffIds([]);
     setSavedCallOutStaffIds([]);
+    setFullDayCallOutStaffIds([]);
     setGridVersion((current) => current + 1);
     setLoading(false);
   }
@@ -413,6 +444,7 @@ export function ScheduleWorkspaceV3() {
     if (!requestedLocationId || requestedLocationId.startsWith("demo-")) {
       setCallOutStaffIds([]);
       setSavedCallOutStaffIds([]);
+      setFullDayCallOutStaffIds([]);
       return;
     }
 
@@ -425,6 +457,7 @@ export function ScheduleWorkspaceV3() {
     const ids = data.selectedStaffIds ?? [];
     setCallOutStaffIds(ids);
     setSavedCallOutStaffIds(ids);
+    setFullDayCallOutStaffIds(data.fullDayStaffIds ?? []);
   }
 
   async function loadSchedule(requestedLocationId = locationId, requestedDate = selectedDate) {
@@ -666,6 +699,7 @@ export function ScheduleWorkspaceV3() {
       setShowCallOutPanel(false);
       setCallOutStaffIds([]);
       setSavedCallOutStaffIds([]);
+      setFullDayCallOutStaffIds([]);
       setStatusMessage("Call-outs are not persisted in preview mode.");
       return;
     }
@@ -690,15 +724,48 @@ export function ScheduleWorkspaceV3() {
       if (!response.ok) throw new Error(data.error || "Call-outs could not be saved.");
 
       const selectedIds = data.selectedStaffIds ?? callOutStaffIds;
+      const fullDayIds = data.fullDayStaffIds ?? selectedIds;
       setCallOutStaffIds(selectedIds);
       setSavedCallOutStaffIds(selectedIds);
+      setFullDayCallOutStaffIds(fullDayIds);
       setShowCallOutPanel(false);
-      await loadSchedule();
 
       const added = data.addedCount ?? 0;
       const removed = data.removedCount ?? 0;
+      let scheduleSyncMessage = "";
+
+      if (removed > 0) {
+        const regenerateResponse = await fetch("/api/schedule/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ locationId, date: selectedDate }),
+        });
+        const regenerateData = await readJson<GenerateResponse>(
+          regenerateResponse
+        );
+        scheduleSyncMessage = regenerateResponse.ok
+          ? " Returning staff were restored to the visible grid and the day was regenerated."
+          : ` The call-out was removed, but schedule regeneration needs review: ${regenerateData.error || "unknown regeneration error"}`;
+      } else if (added > 0) {
+        const repairResponse = await fetch("/api/schedule/repair", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            locationId,
+            date: selectedDate,
+            mode: "CALL_OUT",
+          }),
+        });
+        const repairData = await readJson<GenerateResponse>(repairResponse);
+        scheduleSyncMessage = repairResponse.ok
+          ? " Coverage was repaired around the new call-out."
+          : ` The call-out was saved, but automatic repair needs review: ${repairData.error || "unknown repair error"}`;
+      }
+
+      await loadSchedule();
+
       setStatusMessage(
-        `${selectedIds.length} staff call-out${selectedIds.length === 1 ? "" : "s"} saved for ${selectedDate}. ${added} added, ${removed} removed. The grid now reflects the saved call-out boundaries.`
+        `${selectedIds.length} staff call-out${selectedIds.length === 1 ? "" : "s"} saved for ${selectedDate}. ${added} added, ${removed} removed. ${fullDayIds.length} full-day call-out column${fullDayIds.length === 1 ? "" : "s"} hidden from the staff grid.${scheduleSyncMessage}`
       );
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "Call-outs could not be saved.");
@@ -929,7 +996,12 @@ export function ScheduleWorkspaceV3() {
             {staff.map((staffMember) => (
               <label key={staffMember.id} className="checkbox-card">
                 <input type="checkbox" disabled={working} checked={callOutStaffIds.includes(staffMember.id)} onChange={() => toggleCallOutStaff(staffMember.id)} />
-                <span>{staffMember.name}</span>
+                <span>
+                  {staffMember.name}
+                  {fullDayCallOutStaffIds.includes(staffMember.id) && (
+                    <small>Hidden from the daily grid</small>
+                  )}
+                </span>
               </label>
             ))}
           </div>
@@ -942,6 +1014,12 @@ export function ScheduleWorkspaceV3() {
         <span>{selectedDate}</span>
         <span>{requiredClientSlots} client blocks required</span>
         <span>{manualMode ? "Manual override enabled" : "Auto-safe enabled"}</span>
+        {fullDayCallOutStaffIds.length > 0 && (
+          <span>
+            {fullDayCallOutStaffIds.length} full-day call-out
+            {fullDayCallOutStaffIds.length === 1 ? "" : "s"} hidden
+          </span>
+        )}
         <span>{statusMessage}</span>
       </section>
 
@@ -951,11 +1029,26 @@ export function ScheduleWorkspaceV3() {
             <div className="empty-state">Loading schedule...</div>
           ) : staff.length === 0 ? (
             <div className="empty-state">No active staff are available for this date.</div>
+          ) : visibleStaff.length === 0 ? (
+            <div className="empty-state">
+              All active staff are marked as full-day call-outs for this date.
+            </div>
           ) : (
-            <ScheduleGridEnhanced
-              key={`${locationId}-${selectedDate}-${gridVersion}`}
-              staff={staff}
-              initialGrid={initialGrid}
+            <>
+              {hiddenCallOutStaffNames.length > 0 && (
+                <div className="notice warning-notice">
+                  <strong>
+                    Hidden full-day call-out{hiddenCallOutStaffNames.length === 1 ? "" : "s"}:
+                  </strong>{" "}
+                  {hiddenCallOutStaffNames.join(", ")}. They remain in Staff and will
+                  automatically return to this grid on other dates or when the
+                  call-out is removed.
+                </div>
+              )}
+              <ScheduleGridEnhanced
+              key={`${locationId}-${selectedDate}-${gridVersion}-${fullDayCallOutStaffIds.join("-")}`}
+              staff={visibleStaff}
+              initialGrid={visibleGrid}
               manualMode={manualMode}
               placementCell={placementCell}
               onPlacementComplete={completePlacement}
@@ -963,6 +1056,7 @@ export function ScheduleWorkspaceV3() {
               onDisplacedAssignment={handleDisplacedAssignment}
               onMutations={persistGridMutations}
             />
+            </>
           )}
         </section>
 
