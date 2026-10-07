@@ -59,6 +59,218 @@ function buildRequirements(clients: SchedulerClient[]): ClientRequirement[] {
   );
 }
 
+function timeToMinutes(time: string): number | null {
+  const [hoursText, minutesText] = time.split(":");
+  const hours = Number(hoursText);
+  const minutes = Number(minutesText);
+
+  if (
+    Number.isNaN(hours) ||
+    Number.isNaN(minutes) ||
+    hours < 0 ||
+    hours > 23 ||
+    minutes < 0 ||
+    minutes > 59
+  ) {
+    return null;
+  }
+
+  return hours * 60 + minutes;
+}
+
+function minutesToTime(totalMinutes: number): string {
+  const normalized = ((totalMinutes % (24 * 60)) + 24 * 60) % (24 * 60);
+  const hours = Math.floor(normalized / 60);
+  const minutes = normalized % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+function samePairAtSlot(
+  staffId: string,
+  clientId: string,
+  startTime: string,
+  assignments: SchedulerAssignment[]
+): boolean {
+  return assignments.some(
+    (assignment) =>
+      assignment.staffId === staffId &&
+      assignment.clientId === clientId &&
+      assignment.startTime === startTime &&
+      assignment.assignmentType === "CLIENT_1_TO_1"
+  );
+}
+
+function priorContiguousPairBlocks(
+  staffId: string,
+  clientId: string,
+  startTime: string,
+  assignments: SchedulerAssignment[],
+  slotLengthMinutes: number
+): number {
+  const targetMinutes = timeToMinutes(startTime);
+  if (targetMinutes === null) return 0;
+
+  let count = 0;
+  for (
+    let minute = targetMinutes - slotLengthMinutes;
+    minute >= 0 &&
+    samePairAtSlot(
+      staffId,
+      clientId,
+      minutesToTime(minute),
+      assignments
+    );
+    minute -= slotLengthMinutes
+  ) {
+    count += 1;
+  }
+
+  return count;
+}
+
+function buildMinimumPairingPlan(
+  requirement: ClientRequirement,
+  staffMember: SchedulerStaff,
+  input: SchedulerInput,
+  assignments: SchedulerAssignment[],
+  callOutStaffIds: Set<string>
+): SchedulerAssignment[] | null {
+  const minimumBlocks = Math.max(
+    Math.ceil(
+      input.rules.minimumClientStaffAssignmentMinutes /
+        input.rules.slotLengthMinutes
+    ),
+    1
+  );
+
+  const priorBlocks = priorContiguousPairBlocks(
+    staffMember.id,
+    requirement.client.id,
+    requirement.startTime,
+    assignments,
+    input.rules.slotLengthMinutes
+  );
+  const blocksNeededFromCurrent = Math.max(
+    minimumBlocks - priorBlocks,
+    1
+  );
+  const startMinutes = timeToMinutes(requirement.startTime);
+
+  if (startMinutes === null) {
+    return null;
+  }
+
+  const simulated = assignments.map((assignment) => ({ ...assignment }));
+  const planned: SchedulerAssignment[] = [];
+
+  for (let index = 0; index < blocksNeededFromCurrent; index += 1) {
+    const slot = minutesToTime(
+      startMinutes + index * input.rules.slotLengthMinutes
+    );
+
+    if (!requirement.client.requiredSlots.includes(slot)) {
+      return null;
+    }
+
+    if (
+      samePairAtSlot(
+        staffMember.id,
+        requirement.client.id,
+        slot,
+        simulated
+      )
+    ) {
+      continue;
+    }
+
+    if (
+      requirementIsAlreadyCovered(
+        { client: requirement.client, startTime: slot },
+        simulated
+      )
+    ) {
+      return null;
+    }
+
+    const check = canAssignStaffToClient({
+      staffMember,
+      client: requirement.client,
+      startTime: slot,
+      assignments: simulated,
+      callOutStaffIds,
+      rules: input.rules,
+    });
+
+    if (!check.allowed) {
+      return null;
+    }
+
+    const assignment = createAutoClientAssignment(
+      staffMember,
+      requirement.client,
+      slot
+    );
+    planned.push(assignment);
+    simulated.push(assignment);
+  }
+
+  return planned;
+}
+
+function pairingWouldMeetMinimumWithoutReservation(
+  staffMember: SchedulerStaff,
+  client: SchedulerClient,
+  startTime: string,
+  input: SchedulerInput,
+  assignments: SchedulerAssignment[]
+): boolean {
+  const minimumBlocks = Math.max(
+    Math.ceil(
+      input.rules.minimumClientStaffAssignmentMinutes /
+        input.rules.slotLengthMinutes
+    ),
+    1
+  );
+
+  if (minimumBlocks <= 1) return true;
+
+  const targetMinutes = timeToMinutes(startTime);
+  if (targetMinutes === null) return false;
+
+  const occupied = new Set(
+    assignments
+      .filter(
+        (assignment) =>
+          assignment.staffId === staffMember.id &&
+          assignment.clientId === client.id &&
+          assignment.assignmentType === "CLIENT_1_TO_1"
+      )
+      .map((assignment) => timeToMinutes(assignment.startTime))
+      .filter((value): value is number => value !== null)
+  );
+  occupied.add(targetMinutes);
+
+  let consecutive = 1;
+
+  for (
+    let minute = targetMinutes - input.rules.slotLengthMinutes;
+    occupied.has(minute);
+    minute -= input.rules.slotLengthMinutes
+  ) {
+    consecutive += 1;
+  }
+
+  for (
+    let minute = targetMinutes + input.rules.slotLengthMinutes;
+    occupied.has(minute);
+    minute += input.rules.slotLengthMinutes
+  ) {
+    consecutive += 1;
+  }
+
+  return consecutive >= minimumBlocks;
+}
+
 function countEligibleStaff(
   requirement: ClientRequirement,
   staff: SchedulerStaff[],
@@ -197,6 +409,18 @@ function findBestStaffMember(
       });
 
       if (!constraintCheck.allowed) {
+        return null;
+      }
+
+      const minimumPlan = buildMinimumPairingPlan(
+        requirement,
+        staffMember,
+        input,
+        assignments,
+        callOutStaffIds
+      );
+
+      if (!minimumPlan) {
         return null;
       }
 
@@ -435,6 +659,25 @@ function findBestSwap(
       return;
     }
 
+    if (
+      !pairingWouldMeetMinimumWithoutReservation(
+        bestReplacement.staffMember,
+        displacedClient,
+        requirement.startTime,
+        input,
+        assignmentsWithoutCurrent
+      ) ||
+      !pairingWouldMeetMinimumWithoutReservation(
+        occupiedStaff,
+        requirement.client,
+        requirement.startTime,
+        input,
+        assignmentsWithoutCurrent
+      )
+    ) {
+      return;
+    }
+
     const uncoveredScore = scoreCandidate({
       staffMember: occupiedStaff,
       client: requirement.client,
@@ -619,6 +862,10 @@ export function repairCoverageMinimally(
   const uncoveredRequirements: UncoveredRequirement[] = [];
 
   for (const requirement of sortedRequirements) {
+    if (requirementIsAlreadyCovered(requirement, assignments)) {
+      continue;
+    }
+
     const bestStaffMember = findBestStaffMember(
       requirement,
       input,
@@ -627,8 +874,18 @@ export function repairCoverageMinimally(
     );
 
     if (bestStaffMember) {
-      assignments.push(createAutoAssignment(bestStaffMember, requirement));
-      continue;
+      const minimumPlan = buildMinimumPairingPlan(
+        requirement,
+        bestStaffMember,
+        input,
+        assignments,
+        callOutStaffIds
+      );
+
+      if (minimumPlan) {
+        assignments.push(...minimumPlan);
+        continue;
+      }
     }
 
     const repairedBySwap = attemptSingleSwapRepair(
@@ -757,6 +1014,10 @@ export function generateSchedule(input: SchedulerInput): SchedulerResult {
   );
 
   for (const requirement of sortedRequirements) {
+    if (requirementIsAlreadyCovered(requirement, assignments)) {
+      continue;
+    }
+
     const bestStaffMember = findBestStaffMember(
       requirement,
       input,
@@ -769,12 +1030,20 @@ export function generateSchedule(input: SchedulerInput): SchedulerResult {
       continue;
     }
 
-    assignments.push(
-      createAutoAssignment(
-        bestStaffMember,
-        requirement
-      )
+    const minimumPlan = buildMinimumPairingPlan(
+      requirement,
+      bestStaffMember,
+      input,
+      assignments,
+      callOutStaffIds
     );
+
+    if (!minimumPlan) {
+      initiallyUncovered.push(requirement);
+      continue;
+    }
+
+    assignments.push(...minimumPlan);
   }
 
   const uncoveredRequirements: UncoveredRequirement[] = [];
@@ -800,7 +1069,7 @@ export function generateSchedule(input: SchedulerInput): SchedulerResult {
       clientCode: requirement.client.displayCode,
       startTime: requirement.startTime,
       reason:
-        "No eligible staff member satisfies availability, call-out, hard relationship, client rotation, and hour constraints, including a one-step swap repair.",
+        "No eligible staff member satisfies availability, call-out, hard relationship, minimum/maximum pairing duration, same-day repeat, client rotation, and hour constraints, including a one-step swap repair.",
     });
 
     warnings.push({
