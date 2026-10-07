@@ -18,7 +18,6 @@ import { persistScheduleReplacementSafely } from "@/features/scheduler/server/pe
 import { syncAutoUnplacedGaps } from "@/features/scheduler/server/syncAutoUnplacedGaps";
 import { writeAuditLog } from "@/lib/api/audit";
 import { connectToDatabase } from "@/lib/db";
-import { ScheduleAssignment } from "@/models/ScheduleAssignment";
 
 type GenerateRequest = {
   locationId?: string;
