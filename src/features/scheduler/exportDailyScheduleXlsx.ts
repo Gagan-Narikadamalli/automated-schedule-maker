@@ -1,7 +1,10 @@
+import { DAILY_TIME_SLOTS } from "./constants";
+
 type Staff = {
   id: string;
   name: string;
   role?: string;
+  color?: string;
   availableSlots?: string[];
 };
 
@@ -10,6 +13,7 @@ type Client = {
   id?: string;
   displayCode?: string;
   fullName?: string;
+  color?: string;
 };
 
 type Assignment = {
@@ -26,6 +30,7 @@ type Assignment = {
 
 type Unplaced = {
   clientCode?: string | null;
+  clientColor?: string | null;
   displayText?: string;
   originalStaffId?: string | null;
   originalStartTime?: string;
@@ -52,6 +57,33 @@ type ExportOptions = {
 
 type Cell = { value: string; style?: number };
 
+type StyleSpec = {
+  fill?: string;
+  fontColor?: string;
+  bold?: boolean;
+  fontSize?: number;
+  border?: boolean;
+  horizontal?: "left" | "center";
+  vertical?: "center";
+  wrap?: boolean;
+};
+
+type BaseStyles = {
+  title: number;
+  header: number;
+  metaValue: number;
+  body: number;
+  time: number;
+  section: number;
+  break: number;
+  breakNap: number;
+  breakSpeech: number;
+  nap: number;
+  speech: number;
+  unavailable: number;
+  unplaced: number;
+};
+
 type ZipEntry = {
   name: string;
   data: Uint8Array;
@@ -60,6 +92,25 @@ type ZipEntry = {
 };
 
 const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+class StyleCatalog {
+  private readonly specs: StyleSpec[] = [{}];
+  private readonly styleByKey = new Map<string, number>([["{}", 0]]);
+
+  add(spec: StyleSpec): number {
+    const key = JSON.stringify(spec);
+    const existing = this.styleByKey.get(key);
+    if (existing !== undefined) return existing;
+    const nextIndex = this.specs.length;
+    this.specs.push(spec);
+    this.styleByKey.set(key, nextIndex);
+    return nextIndex;
+  }
+
+  all(): StyleSpec[] {
+    return this.specs;
+  }
+}
 
 function xml(value: unknown): string {
   return String(value ?? "")
@@ -89,6 +140,29 @@ function formatTime(time: string): string {
   return `${hour % 12 || 12}:${minute} ${hour >= 12 ? "PM" : "AM"}`;
 }
 
+function normalizeHexColor(value: string | null | undefined, fallback?: string): string | undefined {
+  const candidate = (value || fallback || "").trim();
+  const short = /^#?([0-9a-f]{3})$/i.exec(candidate);
+  if (short) {
+    return `#${short[1].split("").map((part) => `${part}${part}`).join("").toUpperCase()}`;
+  }
+  const full = /^#?([0-9a-f]{6})$/i.exec(candidate);
+  return full ? `#${full[1].toUpperCase()}` : fallback;
+}
+
+function excelRgb(color: string): string {
+  return `FF${(normalizeHexColor(color, "#FFFFFF") || "#FFFFFF").slice(1)}`;
+}
+
+function textColorForFill(color: string): string {
+  const normalized = normalizeHexColor(color, "#FFFFFF") || "#FFFFFF";
+  const red = Number.parseInt(normalized.slice(1, 3), 16);
+  const green = Number.parseInt(normalized.slice(3, 5), 16);
+  const blue = Number.parseInt(normalized.slice(5, 7), 16);
+  const luminance = (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255;
+  return luminance > 0.58 ? "#17344A" : "#FFFFFF";
+}
+
 function clientOf(assignment: Assignment): Client | null {
   return assignment.clientId && typeof assignment.clientId === "object"
     ? assignment.clientId
@@ -100,13 +174,82 @@ function assignmentLabel(assignment: Assignment): string {
   switch (assignment.assignmentType) {
     case "CLIENT_1_TO_1": return `${code} 1:1`;
     case "BREAK": return "Break";
-    case "BREAK_NAP": return `${clientOf(assignment)?.displayCode ? `${code} ` : ""}Break/Nap`;
-    case "BREAK_SPEECH": return `${clientOf(assignment)?.displayCode ? `${code} ` : ""}Break/Speech`;
-    case "NAP": return `${clientOf(assignment)?.displayCode ? `${code} ` : ""}Nap`;
-    case "SPEECH": return `${clientOf(assignment)?.displayCode ? `${code} ` : ""}Speech`;
-    case "UNAVAILABLE": return "Unavailable";
-    case "OPEN": return "Open";
+    case "BREAK_NAP": return "Break/Nap";
+    case "BREAK_SPEECH": return "Break/Speech";
+    case "NAP": return `${code} Nap`;
+    case "SPEECH": return `${code} Speech`;
+    case "UNAVAILABLE": return "";
+    case "OPEN": return "";
     default: return assignment.assignmentType.replaceAll("_", " ");
+  }
+}
+
+function createBaseStyles(catalog: StyleCatalog): BaseStyles {
+  return {
+    title: catalog.add({ fontColor: "#0D315F", bold: true, fontSize: 16, vertical: "center" }),
+    header: catalog.add({ fill: "#D7E6F3", fontColor: "#102F46", bold: true, border: true, horizontal: "center", vertical: "center", wrap: true }),
+    metaValue: catalog.add({ border: true, vertical: "center", wrap: true }),
+    body: catalog.add({ border: true, vertical: "center", wrap: true }),
+    time: catalog.add({ fill: "#F4F9FC", fontColor: "#153650", bold: true, border: true, vertical: "center", wrap: true }),
+    section: catalog.add({ fill: "#EAF7FD", fontColor: "#0D315F", bold: true, fontSize: 13, border: true, vertical: "center" }),
+    break: catalog.add({ fill: "#FFF5D9", fontColor: "#79520F", bold: true, border: true, horizontal: "center", vertical: "center", wrap: true }),
+    breakNap: catalog.add({ fill: "#FFF3D6", fontColor: "#704D15", bold: true, border: true, horizontal: "center", vertical: "center", wrap: true }),
+    breakSpeech: catalog.add({ fill: "#E4F1FA", fontColor: "#2E5C73", bold: true, border: true, horizontal: "center", vertical: "center", wrap: true }),
+    nap: catalog.add({ fill: "#F4EFE3", fontColor: "#5C5136", bold: true, border: true, horizontal: "center", vertical: "center", wrap: true }),
+    speech: catalog.add({ fill: "#E2DAFB", fontColor: "#553D85", bold: true, border: true, horizontal: "center", vertical: "center", wrap: true }),
+    unavailable: catalog.add({ fill: "#76838F", fontColor: "#FFFFFF", bold: true, border: true, horizontal: "center", vertical: "center", wrap: true }),
+    unplaced: catalog.add({ fill: "#FFF3DC", fontColor: "#704D15", bold: true, border: true, vertical: "center", wrap: true }),
+  };
+}
+
+function staffHeaderStyle(member: Staff, catalog: StyleCatalog, fallbackStyle: number): number {
+  const fill = normalizeHexColor(member.color);
+  if (!fill) return fallbackStyle;
+  return catalog.add({
+    fill,
+    fontColor: textColorForFill(fill),
+    bold: true,
+    border: true,
+    horizontal: "center",
+    vertical: "center",
+    wrap: true,
+  });
+}
+
+function clientColorStyle(color: string | null | undefined, catalog: StyleCatalog, fallbackStyle: number): number {
+  const fill = normalizeHexColor(color);
+  if (!fill) return fallbackStyle;
+  return catalog.add({
+    fill,
+    fontColor: textColorForFill(fill),
+    bold: true,
+    border: true,
+    vertical: "center",
+    wrap: true,
+  });
+}
+
+function assignmentStyle(assignment: Assignment, catalog: StyleCatalog, styles: BaseStyles): number {
+  switch (assignment.assignmentType) {
+    case "CLIENT_1_TO_1": {
+      const fill = normalizeHexColor(clientOf(assignment)?.color, "#D9F4EE") || "#D9F4EE";
+      return catalog.add({
+        fill,
+        fontColor: textColorForFill(fill),
+        bold: true,
+        border: true,
+        vertical: "center",
+        wrap: true,
+      });
+    }
+    case "BREAK": return styles.break;
+    case "BREAK_NAP": return styles.breakNap;
+    case "BREAK_SPEECH": return styles.breakSpeech;
+    case "NAP": return styles.nap;
+    case "SPEECH": return styles.speech;
+    case "UNAVAILABLE": return styles.unavailable;
+    case "OPEN": return styles.body;
+    default: return styles.body;
   }
 }
 
@@ -115,49 +258,51 @@ function buildRows(
   date: string,
   staff: Staff[],
   assignments: Assignment[],
-  unplaced: Unplaced[]
+  unplaced: Unplaced[],
+  catalog: StyleCatalog,
+  styles: BaseStyles
 ): Cell[][] {
   const byCell = new Map(
     assignments.map((assignment) => [`${assignment.staffId}:${assignment.startTime}`, assignment])
   );
   const staffById = new Map(staff.map((member) => [member.id, member]));
-  const startTimes = Array.from(new Set([
-    ...staff.flatMap((member) => member.availableSlots ?? []),
-    ...assignments.map((assignment) => assignment.startTime),
-  ])).sort();
 
   const rows: Cell[][] = [
-    [{ value: "SOS Daily Schedule", style: 1 }],
-    [{ value: "Location", style: 2 }, { value: locationName, style: 3 }],
-    [{ value: "Date", style: 2 }, { value: date, style: 3 }],
+    [{ value: "SOS Daily Schedule", style: styles.title }],
+    [{ value: "Location", style: styles.header }, { value: locationName, style: styles.metaValue }],
+    [{ value: "Date", style: styles.header }, { value: date, style: styles.metaValue }],
     [],
     [
-      { value: "Time", style: 2 },
+      { value: "Time", style: styles.header },
       ...staff.map((member) => ({
-        value: `${member.name}${member.role ? ` (${member.role})` : ""}`,
-        style: 2,
+        value: member.name,
+        style: staffHeaderStyle(member, catalog, styles.header),
       })),
     ],
   ];
 
-  for (const startTime of startTimes) {
+  for (const timeSlot of DAILY_TIME_SLOTS) {
     rows.push([
-      { value: formatTime(startTime), style: 2 },
+      { value: timeSlot.label, style: styles.time },
       ...staff.map((member) => {
-        const assignment = byCell.get(`${member.id}:${startTime}`);
-        const unavailable = Array.isArray(member.availableSlots) && !member.availableSlots.includes(startTime);
+        const assignment = byCell.get(`${member.id}:${timeSlot.startTime}`);
+        const unavailable = Array.isArray(member.availableSlots) && !member.availableSlots.includes(timeSlot.startTime);
         return {
-          value: unavailable ? "Unavailable" : assignment ? assignmentLabel(assignment) : "",
-          style: unavailable ? 5 : assignment?.assignmentType.startsWith("BREAK") ? 4 : 3,
+          value: unavailable ? "" : assignment ? assignmentLabel(assignment) : "",
+          style: unavailable
+            ? styles.unavailable
+            : assignment
+              ? assignmentStyle(assignment, catalog, styles)
+              : styles.body,
         };
       }),
     ]);
   }
 
-  rows.push([], [{ value: "Assignment Details", style: 1 }]);
+  rows.push([], [{ value: "Assignment Details", style: styles.section }]);
   rows.push(
     ["Start", "End", "Staff", "Role", "Client", "Type", "Source", "Protected", "Note"].map(
-      (value) => ({ value, style: 2 })
+      (value) => ({ value, style: styles.header })
     )
   );
   for (const assignment of [...assignments].sort(
@@ -166,34 +311,35 @@ function buildRows(
     const member = staffById.get(assignment.staffId);
     const client = clientOf(assignment);
     rows.push([
-      { value: formatTime(assignment.startTime), style: 3 },
-      { value: formatTime(assignment.endTime), style: 3 },
-      { value: member?.name || assignment.staffId, style: 3 },
-      { value: member?.role || "", style: 3 },
-      { value: client?.displayCode || client?.fullName || "", style: 3 },
-      { value: assignment.assignmentType.replaceAll("_", " "), style: 3 },
-      { value: assignment.source || "", style: 3 },
-      { value: assignment.locked || assignment.manuallyOverridden ? "Yes" : "No", style: 3 },
-      { value: assignment.note || "", style: 3 },
+      { value: formatTime(assignment.startTime), style: styles.body },
+      { value: formatTime(assignment.endTime), style: styles.body },
+      { value: member?.name || assignment.staffId, style: styles.body },
+      { value: member?.role || "", style: styles.body },
+      { value: client?.displayCode || client?.fullName || "", style: clientColorStyle(client?.color, catalog, styles.body) },
+      { value: assignment.assignmentType.replaceAll("_", " "), style: assignmentStyle(assignment, catalog, styles) },
+      { value: assignment.source || "", style: styles.body },
+      { value: assignment.locked || assignment.manuallyOverridden ? "Yes" : "No", style: styles.body },
+      { value: assignment.note || "", style: styles.body },
     ]);
   }
 
-  rows.push([], [{ value: "Unplaced Assignments", style: 1 }]);
+  rows.push([], [{ value: "Unplaced Assignments", style: styles.section }]);
   rows.push(
     ["Client", "Original Time", "Original Staff ID", "Reason", "Origin"].map(
-      (value) => ({ value, style: 2 })
+      (value) => ({ value, style: styles.header })
     )
   );
   if (unplaced.length === 0) {
-    rows.push([{ value: "No unplaced assignments for this date.", style: 3 }]);
+    rows.push([{ value: "No unplaced assignments for this date.", style: styles.body }]);
   } else {
     for (const item of unplaced) {
+      const clientStyle = clientColorStyle(item.clientColor, catalog, styles.unplaced);
       rows.push([
-        { value: item.clientCode || item.displayText || "Client", style: 3 },
-        { value: item.originalStartTime ? formatTime(item.originalStartTime) : "", style: 3 },
-        { value: item.originalStaffId || "", style: 3 },
-        { value: item.reason || "", style: 3 },
-        { value: item.origin || "", style: 3 },
+        { value: item.clientCode || item.displayText || "Client", style: clientStyle },
+        { value: item.originalStartTime ? formatTime(item.originalStartTime) : "", style: styles.unplaced },
+        { value: item.originalStaffId || "", style: styles.unplaced },
+        { value: item.reason || "", style: styles.unplaced },
+        { value: item.origin || "", style: styles.unplaced },
       ]);
     }
   }
@@ -203,55 +349,85 @@ function buildRows(
 
 function worksheetXml(rows: Cell[][], staffCount: number): string {
   const maxColumns = Math.max(staffCount + 1, 9);
+  const scheduleEndRow = 5 + DAILY_TIME_SLOTS.length;
   const sheetRows = rows.map((row, rowIndex) => {
     const cells = row.map((cell, columnIndex) => {
       const reference = `${columnName(columnIndex)}${rowIndex + 1}`;
       return `<c r="${reference}" t="inlineStr" s="${cell.style ?? 0}"><is><t xml:space="preserve">${xml(cell.value)}</t></is></c>`;
     }).join("");
-    return `<row r="${rowIndex + 1}">${cells}</row>`;
+    const excelRow = rowIndex + 1;
+    const height = excelRow === 1 ? 26 : excelRow === 5 ? 24 : excelRow >= 6 && excelRow <= scheduleEndRow ? 23 : 20;
+    return `<row r="${excelRow}" ht="${height}" customHeight="1">${cells}</row>`;
   }).join("");
+
+  const staffColumnsEnd = Math.max(staffCount + 1, 2);
+  const extraColumns = maxColumns > staffColumnsEnd
+    ? `<col min="${staffColumnsEnd + 1}" max="${maxColumns}" width="20" customWidth="1"/>`
+    : "";
+  const titleMerge = staffCount > 0
+    ? `<mergeCells count="1"><mergeCell ref="A1:${columnName(staffCount)}1"/></mergeCells>`
+    : "";
 
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>
   <dimension ref="A1:${columnName(maxColumns - 1)}${Math.max(rows.length, 1)}"/>
-  <sheetViews><sheetView workbookViewId="0"><pane ySplit="5" topLeftCell="A6" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
-  <sheetFormatPr defaultRowHeight="18"/>
+  <sheetViews><sheetView workbookViewId="0" showGridLines="0"><pane xSplit="1" ySplit="5" topLeftCell="B6" activePane="bottomRight" state="frozen"/></sheetView></sheetViews>
+  <sheetFormatPr defaultRowHeight="20"/>
   <cols>
-    <col min="1" max="1" width="15" customWidth="1"/>
-    <col min="2" max="${maxColumns}" width="23" customWidth="1"/>
+    <col min="1" max="1" width="24" customWidth="1"/>
+    <col min="2" max="${staffColumnsEnd}" width="18" customWidth="1"/>
+    ${extraColumns}
   </cols>
   <sheetData>${sheetRows}</sheetData>
+  ${titleMerge}
+  <pageMargins left="0.25" right="0.25" top="0.4" bottom="0.4" header="0.2" footer="0.2"/>
+  <pageSetup orientation="landscape" fitToWidth="1" fitToHeight="0"/>
 </worksheet>`;
 }
 
-function stylesXml(): string {
+function stylesXml(catalog: StyleCatalog): string {
+  const specs = catalog.all();
+  const fonts = specs.map((spec) => {
+    const size = spec.fontSize ?? 11;
+    const bold = spec.bold ? "<b/>" : "";
+    const color = spec.fontColor ? `<color rgb="${excelRgb(spec.fontColor)}"/>` : "";
+    return `<font>${bold}<sz val="${size}"/>${color}<name val="Calibri"/></font>`;
+  });
+
+  const fills = [
+    `<fill><patternFill patternType="none"/></fill>`,
+    `<fill><patternFill patternType="gray125"/></fill>`,
+  ];
+  const fillIdByStyle = specs.map(() => 0);
+  specs.forEach((spec, index) => {
+    if (!spec.fill) return;
+    fillIdByStyle[index] = fills.length;
+    fills.push(`<fill><patternFill patternType="solid"><fgColor rgb="${excelRgb(spec.fill)}"/><bgColor indexed="64"/></patternFill></fill>`);
+  });
+
+  const cellXfs = specs.map((spec, index) => {
+    const fillId = fillIdByStyle[index];
+    const borderId = spec.border ? 1 : 0;
+    const alignmentParts = [
+      spec.horizontal ? `horizontal="${spec.horizontal}"` : "",
+      spec.vertical ? `vertical="${spec.vertical}"` : "",
+      spec.wrap ? `wrapText="1"` : "",
+    ].filter(Boolean).join(" ");
+    const alignment = alignmentParts ? `<alignment ${alignmentParts}/>` : "";
+    return `<xf numFmtId="0" fontId="${index}" fillId="${fillId}" borderId="${borderId}" xfId="0" applyFont="1"${fillId ? " applyFill=\"1\"" : ""}${borderId ? " applyBorder=\"1\"" : ""}${alignment ? " applyAlignment=\"1\"" : ""}>${alignment}</xf>`;
+  });
+
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <fonts count="3">
-    <font><sz val="11"/><name val="Calibri"/></font>
-    <font><b/><sz val="11"/><name val="Calibri"/></font>
-    <font><b/><sz val="16"/><color rgb="FF0D315F"/><name val="Calibri"/></font>
-  </fonts>
-  <fills count="5">
-    <fill><patternFill patternType="none"/></fill>
-    <fill><patternFill patternType="gray125"/></fill>
-    <fill><patternFill patternType="solid"><fgColor rgb="FFDCECF7"/><bgColor indexed="64"/></patternFill></fill>
-    <fill><patternFill patternType="solid"><fgColor rgb="FFFFF3D6"/><bgColor indexed="64"/></patternFill></fill>
-    <fill><patternFill patternType="solid"><fgColor rgb="FFE2E5E8"/><bgColor indexed="64"/></patternFill></fill>
-  </fills>
+  <fonts count="${fonts.length}">${fonts.join("")}</fonts>
+  <fills count="${fills.length}">${fills.join("")}</fills>
   <borders count="2">
     <border><left/><right/><top/><bottom/><diagonal/></border>
-    <border><left style="thin"><color rgb="FFD3E1EA"/></left><right style="thin"><color rgb="FFD3E1EA"/></right><top style="thin"><color rgb="FFD3E1EA"/></top><bottom style="thin"><color rgb="FFD3E1EA"/></bottom><diagonal/></border>
+    <border><left style="thin"><color rgb="FFC4DAE7"/></left><right style="thin"><color rgb="FFC4DAE7"/></right><top style="thin"><color rgb="FFC4DAE7"/></top><bottom style="thin"><color rgb="FFC4DAE7"/></bottom><diagonal/></border>
   </borders>
   <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-  <cellXfs count="6">
-    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
-    <xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>
-    <xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
-    <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1"><alignment vertical="center" wrapText="1"/></xf>
-    <xf numFmtId="0" fontId="0" fillId="3" borderId="1" xfId="0" applyFill="1" applyBorder="1"><alignment vertical="center" wrapText="1"/></xf>
-    <xf numFmtId="0" fontId="0" fillId="4" borderId="1" xfId="0" applyFill="1" applyBorder="1"><alignment vertical="center" wrapText="1"/></xf>
-  </cellXfs>
+  <cellXfs count="${cellXfs.length}">${cellXfs.join("")}</cellXfs>
   <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
 </styleSheet>`;
 }
@@ -339,7 +515,7 @@ function zip(files: Array<{ name: string; content: string }>): Uint8Array {
   return concat([...localParts, ...centralParts, end]);
 }
 
-function workbookBytes(rows: Cell[][], staffCount: number): Uint8Array {
+function workbookBytes(rows: Cell[][], staffCount: number, catalog: StyleCatalog): Uint8Array {
   const files = [
     {
       name: "[Content_Types].xml",
@@ -357,7 +533,7 @@ function workbookBytes(rows: Cell[][], staffCount: number): Uint8Array {
       name: "xl/_rels/workbook.xml.rels",
       content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`,
     },
-    { name: "xl/styles.xml", content: stylesXml() },
+    { name: "xl/styles.xml", content: stylesXml(catalog) },
     { name: "xl/worksheets/sheet1.xml", content: worksheetXml(rows, staffCount) },
   ];
   return zip(files);
@@ -385,7 +561,10 @@ export async function exportDailyScheduleXlsx({ locationId, locationName, date }
   const staff = scheduleData.staff ?? [];
   const assignments = scheduleData.assignments ?? [];
   const unplaced = unplacedData.unplacedAssignments ?? [];
-  const bytes = workbookBytes(buildRows(locationName || "Clinic", date, staff, assignments, unplaced), staff.length);
+  const catalog = new StyleCatalog();
+  const styles = createBaseStyles(catalog);
+  const rows = buildRows(locationName || "Clinic", date, staff, assignments, unplaced, catalog, styles);
+  const bytes = workbookBytes(rows, staff.length, catalog);
   const blobBuffer = new ArrayBuffer(bytes.byteLength);
   new Uint8Array(blobBuffer).set(bytes);
   const blob = new Blob([blobBuffer], { type: XLSX_MIME });
