@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { auditFinalCoverage } from "@/features/scheduler/engine/auditFinalCoverage";
 import { getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
 import { generateSchedule } from "@/features/scheduler/engine/generateSchedule";
 import { placeStaffBreaksAfterCoverage } from "@/features/scheduler/engine/placeStaffBreaks";
@@ -174,11 +175,38 @@ export async function POST(request: Request) {
       schedulerInput.clients,
       dayData.extendedRules.slotLengthMinutes
     );
-    const metrics = applyFinalBreakMetrics(
+    const finalCoverage = auditFinalCoverage(
+      schedulerInput.clients,
+      enrichedAssignments,
       coverageResult.metrics,
+      dayData.extendedRules.slotLengthMinutes
+    );
+    const metrics = applyFinalBreakMetrics(
+      finalCoverage.metrics,
       breakPlan.reservedBreaks.length,
       dayData.extendedRules.slotLengthMinutes
     );
+    const initialUncoveredKeys = new Set(
+      coverageResult.uncoveredRequirements.map(
+        (requirement) =>
+          `${requirement.clientId}|${requirement.startTime}`
+      )
+    );
+    const finalOnlyWarnings = finalCoverage.uncoveredRequirements
+      .filter(
+        (requirement) =>
+          !initialUncoveredKeys.has(
+            `${requirement.clientId}|${requirement.startTime}`
+          )
+      )
+      .map((requirement) => ({
+        code: "NO_ELIGIBLE_STAFF" as const,
+        message: `${requirement.clientCode} is uncovered at ${requirement.startTime} in the final schedule after break placement.`,
+      }));
+    const warnings = [
+      ...coverageResult.warnings,
+      ...finalOnlyWarnings,
+    ];
 
     await connectToDatabase();
 
@@ -223,11 +251,11 @@ export async function POST(request: Request) {
     const managerGapCount = await syncAutoUnplacedGaps(
       locationId,
       date,
-      coverageResult.uncoveredRequirements,
+      finalCoverage.uncoveredRequirements,
       enrichedAssignments
     );
 
-    const completeCoverage = coverageResult.metrics.uncoveredClientSlots === 0;
+    const completeCoverage = metrics.uncoveredClientSlots === 0;
     const partialBuild = !completeCoverage;
     const coverageByRole = buildCoverageByRole(
       enrichedAssignments,
@@ -242,14 +270,14 @@ export async function POST(request: Request) {
       entityType: "SCHEDULE_DAY",
       entityId: date,
       summary: partialBuild
-        ? `Built a partial schedule for ${date}: ${coverageResult.metrics.coveredClientSlots}/${coverageResult.metrics.requiredClientSlots} client blocks covered.`
-        : `Generated a complete schedule for ${date}: ${coverageResult.metrics.coveredClientSlots}/${coverageResult.metrics.requiredClientSlots} client blocks covered.`,
+        ? `Built a partial schedule for ${date}: ${metrics.coveredClientSlots}/${metrics.requiredClientSlots} client blocks covered.`
+        : `Generated a complete schedule for ${date}: ${metrics.coveredClientSlots}/${metrics.requiredClientSlots} client blocks covered.`,
       after: {
         readiness,
         metrics,
-        uncoveredRequirements: coverageResult.uncoveredRequirements,
+        uncoveredRequirements: finalCoverage.uncoveredRequirements,
         managerGapCount,
-        warningCount: coverageResult.warnings.length,
+        warningCount: warnings.length,
         reservedBreakCount: breakPlan.reservedBreaks.length,
         reliefSwapCount: breakPlan.reliefSwapCount,
         unplacedBreakStaffIds: breakPlan.unplacedBreakStaffIds,
@@ -285,8 +313,8 @@ export async function POST(request: Request) {
         : "The automatic scheduler completed all required client coverage, protected nap and speech events first, and then placed staff breaks.",
       readiness,
       metrics,
-      warnings: coverageResult.warnings,
-      uncoveredRequirements: coverageResult.uncoveredRequirements,
+      warnings,
+      uncoveredRequirements: finalCoverage.uncoveredRequirements,
       managerGapCount,
       reservedBreakCount: breakPlan.reservedBreaks.length,
       reliefSwapCount: breakPlan.reliefSwapCount,
