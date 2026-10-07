@@ -66,8 +66,8 @@ type ClientRecord = {
 };
 
 type ClientForm = {
-  fullName: string;
-  displayCode: string;
+  firstName: string;
+  lastName: string;
   startDate: string;
   endDate: string;
   teamId: string;
@@ -119,8 +119,8 @@ function localToday(): string {
 
 function emptyClientForm(): ClientForm {
   return {
-    fullName: "",
-    displayCode: "",
+    firstName: "",
+    lastName: "",
     startDate: localToday(),
     endDate: "",
     teamId: "",
@@ -153,6 +153,30 @@ function emptyNap(): TimePattern {
     startTime: "12:00",
     endTime: "13:00",
   };
+}
+
+function splitClientName(fullName: string): {
+  firstName: string;
+  lastName: string;
+} {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  return {
+    firstName: parts[0] ?? "",
+    lastName: parts.slice(1).join(" "),
+  };
+}
+
+function calendarCodePart(value: string): string {
+  const letters = value.trim().replace(/[^A-Za-z]/g, "");
+  if (!letters) return "";
+  return (
+    letters.charAt(0).toUpperCase() +
+    letters.charAt(1).toLowerCase()
+  );
+}
+
+function clientDisplayCode(firstName: string, lastName: string): string {
+  return `${calendarCodePart(firstName)}${calendarCodePart(lastName)}`;
 }
 
 function initials(value: string): string {
@@ -374,10 +398,12 @@ export function ClientCardManager() {
       .filter((relationship) => relationship.relationship === "HARD_RESTRICTION")
       .map((relationship) => relationship.staffId);
 
+    const clientName = splitClientName(client.fullName);
+
     setEditingId(client.id);
     setForm({
-      fullName: client.fullName,
-      displayCode: client.displayCode,
+      firstName: clientName.firstName,
+      lastName: clientName.lastName,
       startDate: client.startDate.slice(0, 10),
       endDate: client.endDate?.slice(0, 10) ?? "",
       teamId: client.teamId ?? "",
@@ -565,11 +591,11 @@ export function ClientCardManager() {
   async function saveClient() {
     if (
       !selectedLocationId ||
-      !form.fullName.trim() ||
-      !form.displayCode.trim() ||
+      !form.firstName.trim() ||
+      !form.lastName.trim() ||
       !form.startDate
     ) {
-      setMessage("Client name, display code, and start date are required.");
+      setMessage("Client first name, last name, and start date are required.");
       return;
     }
 
@@ -608,6 +634,19 @@ export function ClientCardManager() {
       "Nap window"
     );
 
+    const fullName = `${form.firstName.trim()} ${form.lastName.trim()}`.trim();
+    const displayCode = clientDisplayCode(
+      form.firstName,
+      form.lastName
+    );
+
+    if (displayCode.length < 4) {
+      setMessage(
+        "First name and last name must each contain at least two letters so the calendar code can be generated."
+      );
+      return;
+    }
+
     const staffRelationships = pairingStaff.map((staffMember) => {
       let relationship: Relationship = "ALLOWED";
       if (form.preferredStaffIds.includes(staffMember.id)) {
@@ -628,8 +667,8 @@ export function ClientCardManager() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             locationId: selectedLocationId,
-            fullName: form.fullName.trim(),
-            displayCode: form.displayCode.trim(),
+            fullName,
+            displayCode,
             startDate: form.startDate,
             endDate: form.endDate || null,
             teamId: form.teamId || null,
@@ -651,7 +690,7 @@ export function ClientCardManager() {
         throw new Error(data.error || "Client could not be saved.");
       }
 
-      const savedCode = form.displayCode.trim();
+      const savedCode = displayCode;
       closeModal(true);
       await loadLocationData(selectedLocationId);
       setMessage(`${savedCode} was saved and is available to the scheduler.`);
@@ -902,23 +941,51 @@ export function ClientCardManager() {
       >
         <div className={cardStyles.formSection}>
           <h3>Client essentials</h3>
-          <p>Calendar code is what appears inside the Excel-style schedule cells.</p>
+          <p>
+            Enter first and last name separately. The calendar code is generated
+            automatically using the first two letters of each name, for example
+            Ziva Bowman becomes ZiBo.
+          </p>
           <div className="form-grid">
-            <label className="form-field form-field-wide">
-              <span>Client full name</span>
+            <label className="form-field">
+              <span>First name</span>
               <input
                 autoFocus
-                value={form.fullName}
-                onChange={(event) => setForm((current) => ({ ...current, fullName: event.target.value }))}
+                value={form.firstName}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    firstName: event.target.value,
+                  }))
+                }
+              />
+            </label>
+            <label className="form-field">
+              <span>Last name</span>
+              <input
+                value={form.lastName}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    lastName: event.target.value,
+                  }))
+                }
               />
             </label>
             <label className="form-field">
               <span>Calendar display code</span>
               <input
-                value={form.displayCode}
-                placeholder="e.g. ZiBo"
-                onChange={(event) => setForm((current) => ({ ...current, displayCode: event.target.value }))}
+                readOnly
+                value={clientDisplayCode(
+                  form.firstName,
+                  form.lastName
+                )}
+                placeholder="Auto-generated"
               />
+              <small>
+                First name: capital first letter + lowercase second letter;
+                last name uses the same format.
+              </small>
             </label>
             <label className="form-field">
               <span>Support level</span>
