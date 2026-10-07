@@ -119,6 +119,16 @@ export async function POST(request: Request) {
       return forbiddenResponse("You do not have access to this location.");
     }
 
+    if (!Array.isArray(body.shiftPatterns) || body.shiftPatterns.length === 0) {
+      return NextResponse.json(
+        {
+          error:
+            "At least one working-hours pattern is required before creating a staff member.",
+        },
+        { status: 400 }
+      );
+    }
+
     const minimumWeeklyHours = Number(body.minimumWeeklyHours ?? 0);
     const targetWeeklyHours = Number(body.targetWeeklyHours ?? minimumWeeklyHours);
     const maximumWeeklyHours = Number(body.maximumWeeklyHours ?? 40);
