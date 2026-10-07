@@ -1,6 +1,7 @@
 import { jsonSchema, tool } from "ai";
 
 import { POST as saveClientAttendance, DELETE as deleteClientAttendance, GET as getClientAttendance } from "@/app/api/client-attendance/route";
+import { POST as repairScheduleDay } from "@/app/api/schedule/repair/route";
 import { POST as createClient } from "@/app/api/clients/route";
 import { PATCH as updateClient } from "@/app/api/clients/[id]/route";
 import { POST as createNapSession, DELETE as deleteNapSession, GET as getNapSessions } from "@/app/api/nap-sessions/route";
@@ -848,12 +849,12 @@ export function createSchedulerWebsiteTools(context: SchedulerAiContext) {
 
     manage_client_attendance: tool({
       description:
-        "Add/update or remove a client's day-specific call-out/call-in attendance change for the selected date. This changes client attendance inputs used by schedule generation.",
+        "Add/update or remove a client's day-specific call-out/call-in attendance change for the selected date, then immediately repair affected coverage for that day. This changes client attendance inputs used by schedule generation.",
       inputSchema: attendanceSchema,
       execute: async (input) => {
         const client = await resolveClient(locationId, input.client);
         if (input.action === "ADD") {
-          return invokeJson(saveClientAttendance, "POST", {
+          const attendance = await invokeJson(saveClientAttendance, "POST", {
             locationId,
             clientId: String(client._id),
             date,
@@ -862,6 +863,20 @@ export function createSchedulerWebsiteTools(context: SchedulerAiContext) {
             endTime: input.endTime,
             note: input.note || "Recorded by Scheduler AI",
           });
+          if (!attendance.ok) return attendance;
+
+          const repair = await invokeJson(repairScheduleDay, "POST", {
+            locationId,
+            date,
+            mode: "COVERAGE",
+          });
+
+          return {
+            ok: repair.ok,
+            changed: true,
+            attendance,
+            repair,
+          };
         }
         let exceptionId = input.exceptionId?.trim() || "";
         if (!exceptionId) {
@@ -870,7 +885,24 @@ export function createSchedulerWebsiteTools(context: SchedulerAiContext) {
           if (!existing) return { ok: true, removed: false, message: "No client attendance change existed for the selected date." };
           exceptionId = String((existing as any)._id);
         }
-        return invokeJson(deleteClientAttendance, "DELETE", { locationId, exceptionId });
+        const attendance = await invokeJson(deleteClientAttendance, "DELETE", {
+          locationId,
+          exceptionId,
+        });
+        if (!attendance.ok) return attendance;
+
+        const repair = await invokeJson(repairScheduleDay, "POST", {
+          locationId,
+          date,
+          mode: "COVERAGE",
+        });
+
+        return {
+          ok: repair.ok,
+          changed: true,
+          attendance,
+          repair,
+        };
       },
     }),
 
