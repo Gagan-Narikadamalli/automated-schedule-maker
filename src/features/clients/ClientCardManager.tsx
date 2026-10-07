@@ -223,6 +223,10 @@ export function ClientCardManager() {
       createWeeklySchedule("08:00", "16:00", true)
     );
   const [napDraft, setNapDraft] = useState<TimePattern>(emptyNap);
+  const [weeklyNapSchedule, setWeeklyNapSchedule] =
+    useState<WeeklySchedule>(() =>
+      createWeeklySchedule("12:00", "13:00", false)
+    );
   const [editingId, setEditingId] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -354,6 +358,9 @@ export function ClientCardManager() {
       createWeeklySchedule("08:00", "16:00", true)
     );
     setNapDraft(emptyNap());
+    setWeeklyNapSchedule(
+      createWeeklySchedule("12:00", "13:00", false)
+    );
     setModalOpen(true);
   }
 
@@ -398,6 +405,13 @@ export function ClientCardManager() {
       )
     );
     setNapDraft(emptyNap());
+    setWeeklyNapSchedule(
+      weeklyScheduleFromPatterns(
+        client.napPatterns ?? [],
+        "12:00",
+        "13:00"
+      )
+    );
     setModalOpen(true);
   }
 
@@ -413,6 +427,9 @@ export function ClientCardManager() {
       createWeeklySchedule("08:00", "16:00", true)
     );
     setNapDraft(emptyNap());
+    setWeeklyNapSchedule(
+      createWeeklySchedule("12:00", "13:00", false)
+    );
   }
 
   function toggleDraftDay(
@@ -481,31 +498,57 @@ export function ClientCardManager() {
     }));
   }
 
-  function addPattern(kind: "attendance" | "nap") {
-    const draft = kind === "attendance" ? attendanceDraft : napDraft;
-
-    if (!draft.name.trim() || draft.days.length === 0) {
-      setMessage("Pattern name and at least one weekday are required.");
-      return;
-    }
-    if (draft.endTime <= draft.startTime) {
-      setMessage("Pattern end time must be later than the start time.");
+  function applyNapToSelectedDays() {
+    if (napDraft.days.length === 0) {
+      setMessage("Choose at least one weekday to apply the nap window.");
       return;
     }
 
-    setForm((current) => ({
+    if (napDraft.endTime <= napDraft.startTime) {
+      setMessage("Nap window end time must be later than the start time.");
+      return;
+    }
+
+    setWeeklyNapSchedule((current) => {
+      const next = { ...current };
+
+      for (const day of napDraft.days) {
+        next[day] = {
+          enabled: true,
+          startTime: napDraft.startTime,
+          endTime: napDraft.endTime,
+        };
+      }
+
+      return next;
+    });
+    setMessage(
+      `Applied ${napDraft.startTime}-${napDraft.endTime} nap window to the selected weekdays.`
+    );
+  }
+
+  function toggleWeeklyNapDay(day: string) {
+    setWeeklyNapSchedule((current) => ({
       ...current,
-      [kind === "attendance" ? "attendancePatterns" : "napPatterns"]: [
-        ...current[kind === "attendance" ? "attendancePatterns" : "napPatterns"],
-        { ...draft, name: draft.name.trim(), days: [...draft.days] },
-      ],
+      [day]: {
+        ...current[day],
+        enabled: !current[day]?.enabled,
+      },
     }));
+  }
 
-    if (kind === "attendance") {
-      setAttendanceDraft(emptyAttendance());
-    } else {
-      setNapDraft(emptyNap());
-    }
+  function updateWeeklyNapTime(
+    day: string,
+    field: "startTime" | "endTime",
+    value: string
+  ) {
+    setWeeklyNapSchedule((current) => ({
+      ...current,
+      [day]: {
+        ...current[day],
+        [field]: value,
+      },
+    }));
   }
 
   function toggleId(field: "assignedInternIds" | "preferredStaffIds" | "restrictedStaffIds", id: string) {
@@ -542,6 +585,26 @@ export function ClientCardManager() {
       weeklyAttendanceSchedule,
       "Regular attendance"
     );
+    const napScheduleError =
+      Object.values(weeklyNapSchedule).some(
+        (day) =>
+          day.enabled &&
+          (!day.startTime ||
+            !day.endTime ||
+            day.endTime <= day.startTime)
+      )
+        ? "Each enabled nap window must end after it starts."
+        : null;
+
+    if (napScheduleError) {
+      setMessage(napScheduleError);
+      return;
+    }
+
+    const napPatterns = patternsFromWeeklySchedule(
+      weeklyNapSchedule,
+      "Nap window"
+    );
 
     const staffRelationships = pairingStaff.map((staffMember) => {
       let relationship: Relationship = "ALLOWED";
@@ -575,7 +638,7 @@ export function ClientCardManager() {
             assignedBcbaId: form.assignedBcbaId || null,
             assignedInternIds: form.assignedInternIds,
             attendancePatterns,
-            napPatterns: form.napPatterns,
+            napPatterns,
             staffRelationships,
           }),
         }
@@ -626,98 +689,6 @@ export function ClientCardManager() {
     } finally {
       setSaving(false);
     }
-  }
-
-  function patternEditor(
-    title: string,
-    draft: TimePattern,
-    setDraft: (pattern: TimePattern) => void,
-    kind: "attendance" | "nap",
-    patterns: TimePattern[]
-  ) {
-    return (
-      <div className={cardStyles.formSection}>
-        <h3>{title}</h3>
-        <p>
-          {kind === "attendance"
-            ? "These blocks create the client's required 1:1 coverage."
-            : "Optional nap windows let the scheduler use Break + Nap when coverage remains safe."}
-        </p>
-
-        <div className="form-grid">
-          <label className="form-field form-field-wide">
-            <span>Pattern name</span>
-            <input
-              value={draft.name}
-              onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-            />
-          </label>
-          <label className="form-field">
-            <span>Starts</span>
-            <input
-              type="time"
-              value={draft.startTime}
-              onChange={(event) => setDraft({ ...draft, startTime: event.target.value })}
-            />
-          </label>
-          <label className="form-field">
-            <span>Ends</span>
-            <input
-              type="time"
-              value={draft.endTime}
-              onChange={(event) => setDraft({ ...draft, endTime: event.target.value })}
-            />
-          </label>
-        </div>
-
-        <div className="day-selector">
-          {WEEKDAYS.map(([value, label]) => (
-            <label key={value} className="checkbox-card">
-              <input
-                type="checkbox"
-                checked={draft.days.includes(value)}
-                onChange={() => toggleDraftDay(draft, setDraft, value)}
-              />
-              <span>{label}</span>
-            </label>
-          ))}
-        </div>
-
-        <div className="form-actions">
-          <button
-            type="button"
-            className="button button-secondary button-small"
-            onClick={() => addPattern(kind)}
-          >
-            + Add {kind === "attendance" ? "attendance" : "nap"} pattern
-          </button>
-        </div>
-
-        {patterns.length > 0 ? (
-          <div className={cardStyles.chips}>
-            {patterns.map((pattern, index) => (
-              <button
-                key={`${kind}-${index}`}
-                type="button"
-                className={cardStyles.chip}
-                title="Click to remove this pattern"
-                onClick={() =>
-                  setForm((current) => ({
-                    ...current,
-                    [kind === "attendance" ? "attendancePatterns" : "napPatterns"]:
-                      current[kind === "attendance" ? "attendancePatterns" : "napPatterns"].filter(
-                        (_, patternIndex) => patternIndex !== index
-                      ),
-                  }))
-                }
-              >
-                {pattern.name} · {formatPattern(pattern)} ×
-              </button>
-            ))}
-          </div>
-        ) : null}
-      </div>
-    );
   }
 
   return (
@@ -1112,7 +1083,125 @@ export function ClientCardManager() {
           </p>
         </div>
 
-        {patternEditor("Nap / Break + Nap windows", napDraft, setNapDraft, "nap", form.napPatterns)}
+        <div className={cardStyles.formSection}>
+          <h3>Weekly Nap / Break + Nap windows</h3>
+          <p>
+            Nap times are placement windows for Auto Generate. The actual nap
+            duration comes from Clinic Settings. Enter the allowed window for
+            each weekday, or leave the day unchecked when no nap window applies.
+          </p>
+
+          <div className={cardStyles.quickSchedule}>
+            <strong>Quick Apply</strong>
+            <span>
+              Select the weekdays that share the same nap window, set the window,
+              and apply it. You can then adjust any day individually.
+            </span>
+
+            <div className="form-grid">
+              <label className="form-field">
+                <span>Window starts</span>
+                <input
+                  type="time"
+                  value={napDraft.startTime}
+                  onChange={(event) =>
+                    setNapDraft({
+                      ...napDraft,
+                      startTime: event.target.value,
+                    })
+                  }
+                />
+              </label>
+              <label className="form-field">
+                <span>Window ends</span>
+                <input
+                  type="time"
+                  value={napDraft.endTime}
+                  onChange={(event) =>
+                    setNapDraft({
+                      ...napDraft,
+                      endTime: event.target.value,
+                    })
+                  }
+                />
+              </label>
+            </div>
+
+            <div className="day-selector">
+              {WEEKDAYS.map(([value, label]) => (
+                <label key={value} className="checkbox-card">
+                  <input
+                    type="checkbox"
+                    checked={napDraft.days.includes(value)}
+                    onChange={() =>
+                      toggleDraftDay(napDraft, setNapDraft, value)
+                    }
+                  />
+                  <span>{label}</span>
+                </label>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              className="button button-secondary button-small"
+              onClick={applyNapToSelectedDays}
+            >
+              Apply nap window to selected days
+            </button>
+          </div>
+
+          <div className={cardStyles.weeklyEditor}>
+            {WEEKDAYS.map(([value, label]) => {
+              const daySchedule = weeklyNapSchedule[value];
+
+              return (
+                <div key={value} className={cardStyles.weeklyEditorRow}>
+                  <label className={cardStyles.weeklyDayToggle}>
+                    <input
+                      type="checkbox"
+                      checked={daySchedule?.enabled ?? false}
+                      onChange={() => toggleWeeklyNapDay(value)}
+                    />
+                    <strong>{label}</strong>
+                  </label>
+
+                  <label className="form-field">
+                    <span>Window start</span>
+                    <input
+                      type="time"
+                      disabled={!daySchedule?.enabled}
+                      value={daySchedule?.startTime ?? "12:00"}
+                      onChange={(event) =>
+                        updateWeeklyNapTime(
+                          value,
+                          "startTime",
+                          event.target.value
+                        )
+                      }
+                    />
+                  </label>
+
+                  <label className="form-field">
+                    <span>Window end</span>
+                    <input
+                      type="time"
+                      disabled={!daySchedule?.enabled}
+                      value={daySchedule?.endTime ?? "13:00"}
+                      onChange={(event) =>
+                        updateWeeklyNapTime(
+                          value,
+                          "endTime",
+                          event.target.value
+                        )
+                      }
+                    />
+                  </label>
+                </div>
+              );
+            })}
+          </div>
+        </div>
 
         <div className={cardStyles.formSection}>
           <h3>Clinical relationships</h3>
