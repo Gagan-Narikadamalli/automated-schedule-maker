@@ -139,6 +139,7 @@ export async function GET(request: Request) {
             ? supervisorNameById.get(supervisorStaffId) ?? "Unknown BCBA"
             : null,
           note: String(savedRecord?.note ?? ""),
+          hasSavedRecord: Boolean(savedRecord),
           status: remainingHours > 0 ? "NEEDS_SUPERVISION" : "ON_TARGET",
         };
       });
@@ -304,6 +305,86 @@ export async function POST(request: Request) {
 
     return NextResponse.json(
       { error: "The supervision record could not be saved." },
+      { status: 500 }
+    );
+  }
+}
+
+
+export async function DELETE(request: Request) {
+  const auth = await requireApiSession();
+
+  if (auth.error) {
+    return auth.error;
+  }
+
+  if (!sessionHasAnyRole(auth.session, SETTINGS_WRITE_ROLES)) {
+    return forbiddenResponse();
+  }
+
+  try {
+    const body = (await request.json()) as SupervisionRequest;
+    const locationId = body.locationId?.trim();
+    const staffId = body.staffId?.trim();
+    const month = body.month?.trim();
+
+    if (!locationId || !staffId || !month) {
+      return NextResponse.json(
+        { error: "Location, staff member, and month are required." },
+        { status: 400 }
+      );
+    }
+
+    if (!isValidMonth(month)) {
+      return NextResponse.json(
+        { error: "month must use YYYY-MM format." },
+        { status: 400 }
+      );
+    }
+
+    if (!sessionCanAccessLocation(auth.session, locationId)) {
+      return forbiddenResponse("You do not have access to this location.");
+    }
+
+    await connectToDatabase();
+
+    const record = await SupervisionRecord.findOne({
+      locationId,
+      staffId,
+      month,
+    });
+
+    if (!record) {
+      return NextResponse.json(
+        { error: "The saved supervision record was not found." },
+        { status: 404 }
+      );
+    }
+
+    const before = record.toObject();
+
+    await SupervisionRecord.deleteOne({ _id: record._id });
+
+    await writeAuditLog({
+      locationId,
+      userId: auth.session.userId,
+      action: "DELETE",
+      entityType: "SUPERVISION_RECORD",
+      entityId: String(record._id),
+      summary: `Deleted ${month} supervision record for staff ${staffId}.`,
+      before,
+      after: null,
+    });
+
+    return NextResponse.json({
+      success: true,
+      deletedId: String(record._id),
+    });
+  } catch (error) {
+    console.error("Failed to delete supervision record:", error);
+
+    return NextResponse.json(
+      { error: "The supervision record could not be deleted." },
       { status: 500 }
     );
   }
