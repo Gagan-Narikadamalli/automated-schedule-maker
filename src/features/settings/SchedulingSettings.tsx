@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+import { EditableNumberInput } from "@/components/EditableNumberInput";
+
 type LocationOption = {
   id: string;
   name: string;
@@ -543,8 +545,8 @@ export function SchedulingSettings() {
 
           <label className="form-field">
             <span>Minutes per block</span>
-            <input
-              type="number"
+            <EditableNumberInput
+              
               min="30"
               max="30"
               step="30"
@@ -571,8 +573,8 @@ export function SchedulingSettings() {
         <div className="form-grid">
           <label className="form-field">
             <span>Full-time minimum weekly hours</span>
-            <input
-              type="number"
+            <EditableNumberInput
+              
               min="0"
               step="0.5"
               value={rules.fullTimeMinimumWeeklyHours}
@@ -587,8 +589,8 @@ export function SchedulingSettings() {
 
           <label className="form-field">
             <span>Full-time maximum weekly hours</span>
-            <input
-              type="number"
+            <EditableNumberInput
+              
               min="0"
               step="0.5"
               value={rules.fullTimeMaximumWeeklyHours}
@@ -603,8 +605,8 @@ export function SchedulingSettings() {
 
           <label className="form-field">
             <span>Part-time minimum weekly hours</span>
-            <input
-              type="number"
+            <EditableNumberInput
+              
               min="0"
               step="0.5"
               value={rules.partTimeMinimumWeeklyHours}
@@ -619,8 +621,8 @@ export function SchedulingSettings() {
 
           <label className="form-field">
             <span>Part-time maximum weekly hours</span>
-            <input
-              type="number"
+            <EditableNumberInput
+              
               min="0"
               step="0.5"
               value={rules.partTimeMaximumWeeklyHours}
@@ -635,8 +637,8 @@ export function SchedulingSettings() {
 
           <label className="form-field">
             <span>Weekly hour target priority</span>
-            <input
-              type="number"
+            <EditableNumberInput
+              
               min="0"
               max="200"
               step="1"
@@ -708,8 +710,8 @@ export function SchedulingSettings() {
 
           <label className="form-field">
             <span>Break required after shift hours</span>
-            <input
-              type="number"
+            <EditableNumberInput
+              
               min="0"
               max="24"
               step="0.5"
@@ -767,8 +769,8 @@ export function SchedulingSettings() {
         <div className="form-grid">
           <label className="form-field">
             <span>BT / RBT priority</span>
-            <input
-              type="number"
+            <EditableNumberInput
+              
               min="0"
               max="1000"
               step="25"
@@ -787,8 +789,8 @@ export function SchedulingSettings() {
 
           <label className="form-field">
             <span>Intern priority</span>
-            <input
-              type="number"
+            <EditableNumberInput
+              
               min="0"
               max="1000"
               step="25"
@@ -807,8 +809,8 @@ export function SchedulingSettings() {
 
           <label className="form-field">
             <span>Office Manager priority</span>
-            <input
-              type="number"
+            <EditableNumberInput
+              
               min="0"
               max="1000"
               step="25"
@@ -827,8 +829,8 @@ export function SchedulingSettings() {
 
           <label className="form-field">
             <span>BCBA priority</span>
-            <input
-              type="number"
+            <EditableNumberInput
+              
               min="0"
               max="1000"
               step="25"
@@ -847,8 +849,8 @@ export function SchedulingSettings() {
 
           <label className="form-field">
             <span>Other role priority</span>
-            <input
-              type="number"
+            <EditableNumberInput
+              
               min="0"
               max="1000"
               step="25"
@@ -932,8 +934,8 @@ export function SchedulingSettings() {
         <div className="form-grid">
           <label className="form-field">
             <span>Weekday template priority</span>
-            <input
-              type="number"
+            <EditableNumberInput
+              
               min="0"
               max="200"
               step="5"
@@ -952,8 +954,8 @@ export function SchedulingSettings() {
 
           <label className="form-field">
             <span>Current schedule stability priority</span>
-            <input
-              type="number"
+            <EditableNumberInput
+              
               min="0"
               max="200"
               step="5"
@@ -972,8 +974,8 @@ export function SchedulingSettings() {
 
           <label className="form-field">
             <span>Historical pairing priority</span>
-            <input
-              type="number"
+            <EditableNumberInput
+              
               min="0"
               max="200"
               step="5"
@@ -993,8 +995,8 @@ export function SchedulingSettings() {
 
           <label className="form-field">
             <span>Historical exact-slot priority</span>
-            <input
-              type="number"
+            <EditableNumberInput
+              
               min="0"
               max="200"
               step="5"
@@ -1014,8 +1016,8 @@ export function SchedulingSettings() {
 
           <label className="form-field">
             <span>Historical break priority</span>
-            <input
-              type="number"
+            <EditableNumberInput
+              
               min="0"
               max="200"
               step="5"
@@ -1045,8 +1047,8 @@ export function SchedulingSettings() {
         <div className="form-grid">
           <label className="form-field">
             <span>Preferred staff priority</span>
-            <input
-              type="number"
+            <EditableNumberInput
+              
               min="0"
               max="200"
               step="5"
@@ -1065,8 +1067,8 @@ export function SchedulingSettings() {
 
           <label className="form-field">
             <span>Same team priority</span>
-            <input
-              type="number"
+            <EditableNumberInput
+              
               min="0"
               max="200"
               step="5"
@@ -1085,8 +1087,8 @@ export function SchedulingSettings() {
 
           <label className="form-field">
             <span>Continuity priority</span>
-            <input
-              type="number"
+            <EditableNumberInput
+              
               min="0"
               max="200"
               step="5"
@@ -1105,8 +1107,8 @@ export function SchedulingSettings() {
 
           <label className="form-field">
             <span>Rotation / higher-support priority</span>
-            <input
-              type="number"
+            <EditableNumberInput
+              
               min="0"
               max="200"
               step="5"
@@ -1125,8 +1127,8 @@ export function SchedulingSettings() {
 
           <label className="form-field">
             <span>Workload balance priority</span>
-            <input
-              type="number"
+            <EditableNumberInput
+              
               min="0"
               max="200"
               step="5"
@@ -1145,8 +1147,8 @@ export function SchedulingSettings() {
 
           <label className="form-field">
             <span>Reduce client handoffs priority</span>
-            <input
-              type="number"
+            <EditableNumberInput
+              
               min="0"
               max="200"
               step="5"
@@ -1167,8 +1169,8 @@ export function SchedulingSettings() {
 
           <label className="form-field">
             <span>Compact staff schedule priority</span>
-            <input
-              type="number"
+            <EditableNumberInput
+              
               min="0"
               max="200"
               step="5"
@@ -1469,8 +1471,8 @@ export function SchedulingSettings() {
 
           <label className="form-field">
             <span>Max clients per technician per day</span>
-            <input
-              type="number"
+            <EditableNumberInput
+              
               min="1"
               value={rules.maximumClientsPerTechPerDay}
               onChange={(event) =>
@@ -1484,8 +1486,8 @@ export function SchedulingSettings() {
 
           <label className="form-field">
             <span>Max technicians per client per day</span>
-            <input
-              type="number"
+            <EditableNumberInput
+              
               min="1"
               value={rules.maximumTechsPerClientPerDay}
               onChange={(event) =>
@@ -1499,8 +1501,8 @@ export function SchedulingSettings() {
 
           <label className="form-field">
             <span>Supervision planning target (%)</span>
-            <input
-              type="number"
+            <EditableNumberInput
+              
               min="0"
               max="100"
               step="0.1"
