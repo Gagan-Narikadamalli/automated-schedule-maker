@@ -161,7 +161,7 @@ function extractClientLookup(message: string): string | null {
   return firstEntity(message, [
     /\bwho\s+(?:is\s+)?(?:covering|with)\s+(.+?)(?=\s+(?:at|from|between|today|tomorrow|on)\b|[?.!,]|$)/i,
     /\bcoverage\s+(?:for|of)\s+(.+?)(?=\s+(?:at|from|between|today|tomorrow|on)\b|[?.!,]|$)/i,
-    /\bclient\s+([A-Za-z0-9_-]+)\b/i,
+    /\bclient\s+(?:code\s+)?([A-Z][A-Za-z0-9_-]{1,8})\b/,
   ]);
 }
 
