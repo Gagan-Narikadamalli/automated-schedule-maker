@@ -192,6 +192,7 @@ export async function POST(request: Request) {
                 schedulerInput.rules.historicalBreakPriority,
             },
             schedulerRules: schedulerInput.rules,
+            allowProtectedRelief: true,
           })
         : null;
 
