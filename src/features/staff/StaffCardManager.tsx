@@ -332,6 +332,11 @@ export function StaffCardManager() {
       return;
     }
 
+    if (form.shiftPatterns.length === 0) {
+      setMessage("Add at least one working-hours pattern before saving the staff member.");
+      return;
+    }
+
     if (
       form.minimumWeeklyHours < 0 ||
       form.targetWeeklyHours < form.minimumWeeklyHours ||
