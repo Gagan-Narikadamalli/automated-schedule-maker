@@ -140,8 +140,8 @@ export function TeamCardManager() {
       setLoading(true);
       const [teamsResponse, staffResponse, clientsResponse] = await Promise.all([
         fetch(`/api/teams?locationId=${encodeURIComponent(locationId)}`, { cache: "no-store" }),
-        fetch(`/api/staff?locationId=${encodeURIComponent(locationId)}&includeArchived=true`, { cache: "no-store" }),
-        fetch(`/api/clients?locationId=${encodeURIComponent(locationId)}&includeArchived=true`, { cache: "no-store" }),
+        fetch(`/api/staff?locationId=${encodeURIComponent(locationId)}`, { cache: "no-store" }),
+        fetch(`/api/clients?locationId=${encodeURIComponent(locationId)}`, { cache: "no-store" }),
       ]);
 
       const teamsData = (await teamsResponse.json()) as TeamsResponse;
