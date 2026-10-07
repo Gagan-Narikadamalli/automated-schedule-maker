@@ -8,6 +8,11 @@ import {
   type FormEvent,
 } from "react";
 
+import {
+  assistantInvitedMoreSchedulerWork,
+  isSchedulerConversationEndReply,
+} from "@/features/ai/schedulerConversationLifecycle";
+
 import styles from "./ScheduleAssistant.module.css";
 
 type LocationOption = {
@@ -237,31 +242,6 @@ function readWorkspaceContext(): WorkspaceContext | null {
   };
 }
 
-function normalizeShortReply(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[.!?]+$/g, "")
-    .replace(/\s+/g, " ");
-}
-
-function isConversationEndReply(value: string): boolean {
-  const normalized = normalizeShortReply(value);
-  return /^(no|nope|nah|no thanks|no thank you|nothing else|that's all|thats all|all done|done|i'm done|im done|that is all)$/.test(
-    normalized
-  );
-}
-
-function assistantInvitedMoreHelp(messages: ChatMessage[]): boolean {
-  const latestAssistant = [...messages]
-    .reverse()
-    .find((message) => message.role === "assistant");
-  if (!latestAssistant) return false;
-  return /is there anything else (you('|’)d|you would) like help with\??/i.test(
-    latestAssistant.text
-  );
-}
-
 export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps) {
   const [open, setOpen] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
@@ -366,7 +346,10 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     setStatus("New Scheduler AI conversation ready.");
   }
 
-  function completeConversation(message: string) {
+  async function completeConversation(
+    message: string,
+    conversationLocationId: string
+  ) {
     const userMessage: ChatMessage = {
       id: makeId("user"),
       role: "user",
@@ -380,9 +363,30 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     };
     setMessages((current) => [...current, userMessage, closingMessage]);
     setInput("");
+    setAttachments([]);
     setShowHelp(false);
-    setStatus("Conversation complete. Refreshing chat...");
-    window.setTimeout(resetConversation, 850);
+    setStatus("Conversation complete. Clearing chat and pending Native AI state...");
+
+    try {
+      const response = await fetch("/api/ai/session/reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ locationId: conversationLocationId }),
+      });
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        console.error(
+          "Scheduler AI session reset warning:",
+          data.error || "Server reset request failed."
+        );
+      }
+    } catch (error) {
+      console.error("Scheduler AI session reset warning:", error);
+    }
+
+    window.setTimeout(resetConversation, 500);
   }
 
   function chooseSavedPrompt(prompt: string) {
@@ -444,8 +448,15 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     const requestContext = getRequestContext();
     if (!message || !requestContext.locationId || working) return;
 
-    if (isConversationEndReply(message) && assistantInvitedMoreHelp(messages)) {
-      completeConversation(message);
+    const latestAssistant = [...messages]
+      .reverse()
+      .find((entry) => entry.role === "assistant");
+    if (
+      isSchedulerConversationEndReply(message) &&
+      latestAssistant &&
+      assistantInvitedMoreSchedulerWork(latestAssistant.text)
+    ) {
+      void completeConversation(message, requestContext.locationId);
       return;
     }
 

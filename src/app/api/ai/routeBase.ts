@@ -11,6 +11,7 @@ import { buildSchedulerDateContextFallback } from "@/features/ai/schedulerDateCo
 import { analyzeNaturalTimeRange, naturalTimeConfirmationQuestion } from "@/features/ai/naturalTime";
 import { buildSchedulerAiInstructions } from "@/features/ai/schedulerPrompt";
 import { buildSchedulerReplyFallback } from "@/features/ai/schedulerReplyFallback";
+import { ensureSchedulerConversationClosing } from "@/features/ai/schedulerConversationLifecycle";
 import {
   planNativeSchedulerAction,
   resolveSchedulerAiProvider,
@@ -59,7 +60,6 @@ const ALLOWED_ATTACHMENT_MIME_TYPES = new Set([
 ]);
 const MAX_TOOL_EVIDENCE_LENGTH = 32_000;
 const MAX_DATE_CONTEXT_LENGTH = 42_000;
-const CLOSING_QUESTION = "Is there anything else you'd like help with?";
 
 function cleanLocationName(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -459,51 +459,6 @@ function buildConversationPrompt(
   return `Conversation so far:\n${transcript}${contextSection}\n\nUser's latest message:\n${message}`;
 }
 
-function answerNeedsFollowUp(reply: string): boolean {
-  const normalized = reply.trim().toLowerCase();
-  if (!normalized) return true;
-  if (normalized.endsWith("?")) return true;
-  return (
-    normalized.includes("please explain or elaborate") ||
-    normalized.includes("please clarify") ||
-    normalized.includes("which day") ||
-    normalized.includes("what date") ||
-    normalized.includes("would you like me to generate") ||
-    normalized.includes("would you like to proceed") ||
-    normalized.includes("still want to proceed") ||
-    normalized.includes("want me to proceed") ||
-    normalized.includes("do you allow me to override") ||
-    normalized.includes("i need a few required details") ||
-    normalized.includes("i need the following required") ||
-    normalized.includes("i just need") ||
-    normalized.includes("i need two more") ||
-    normalized.includes("please provide") ||
-    normalized.includes("please send") ||
-    normalized.includes("before i can create") ||
-    normalized.includes("before i can update") ||
-    normalized.includes("before i can continue") ||
-    normalized.includes("which person do you mean") ||
-    normalized.includes("which client do you mean") ||
-    normalized.includes("which staff member do you mean")
-  );
-}
-
-function ensureConversationClosing(reply: string): string {
-  const genericClosing =
-    /\n*is there anything else (you('|’)d|you would) like help with\??\s*$/i;
-  const withoutGenericClosing = reply.replace(genericClosing, "").trim();
-
-  if (answerNeedsFollowUp(withoutGenericClosing)) {
-    return withoutGenericClosing;
-  }
-
-  if (/is there anything else (you('|’)d|you would) like help with\??/i.test(reply)) {
-    return reply;
-  }
-
-  return `${withoutGenericClosing}\n\n${CLOSING_QUESTION}`;
-}
-
 export async function POST(request: Request) {
   const auth = await requireApiSession();
   if (auth.error) return auth.error;
@@ -868,7 +823,7 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
         "I couldn't generate a reliable answer from the available scheduler information. Please try again with a different date, person, client, time, or more detail.";
     }
 
-    reply = ensureConversationClosing(reply);
+    reply = ensureSchedulerConversationClosing(reply);
 
     let nativeShadow:
       | ReturnType<typeof evaluateNativeShadowPlan>

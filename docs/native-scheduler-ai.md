@@ -52,3 +52,17 @@ The main npm run test:scheduler suite also includes the native AI intent tests.
 3. Build evaluation datasets from accepted/corrected scheduler interactions.
 4. Build safe screenshot/table extraction without an external AI service.
 5. Compare native decisions against historical schedules before making native mode the default.
+
+
+## Storage and conversation lifecycle
+
+The Native Scheduler AI engine itself is TypeScript/Node.js application code. It does not store model weights in MongoDB and does not need a separate AI database.
+
+It uses the same MongoDB connection configured by `MONGODB_URI` as the rest of the scheduler. Historical intelligence reads existing operational collections such as schedules, staff, clients, templates, and manager feedback. Native-specific persistent state is intentionally small:
+
+- `NativeAiPendingAction`: short-lived pending confirmation records. These expire automatically and are also cleared when the user ends a conversation.
+- `AITrainingExample`: request/response, selected-tool, manager feedback, and Native shadow-evaluation records used to improve and evaluate the scheduler assistant.
+
+The visible chat transcript is held in the browser component state and is sent back only as recent conversation context. It is not stored as a separate full chat-history database. When a completed assistant response asks "Is there anything else you'd like me to do?" and the user answers with an end phrase such as "done", "no", or "no thanks", the UI clears the visible transcript and calls the authenticated session-reset API to remove outstanding Native pending-action state.
+
+Training/evaluation examples are not deleted by ending the visible chat because they are learning/evaluation records rather than conversation-session state.
