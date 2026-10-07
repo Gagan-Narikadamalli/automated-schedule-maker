@@ -11,7 +11,7 @@ export function isNativeConfirmation(message: string): boolean {
   const value = message
     .trim()
     .toLowerCase()
-    .replace(/[.!?]+$/g, "")
+    .replace(/[,.!?]+/g, "")
     .replace(/\s+/g, " ");
   return /^(yes|y|yeah|yep|sure|ok|okay|confirm|confirmed|proceed|go ahead|do it|apply it|yes please|please proceed|yes proceed|yes do it|approve|approved|override|yes override|allow override)$/.test(
     value
