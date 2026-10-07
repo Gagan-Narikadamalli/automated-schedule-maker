@@ -165,6 +165,12 @@ export async function buildSchedulerDateContextSnapshot(context: SchedulerAiCont
     readiness: calculateSchedulerReadiness(dayData.input, dayData.extendedRules),
     rules: {
       slotLengthMinutes,
+      minimumClientStaffAssignmentMinutes:
+        dayData.extendedRules.minimumClientStaffAssignmentMinutes,
+      maximumClientStaffConsecutiveHours:
+        dayData.extendedRules.maximumClientStaffConsecutiveHours,
+      preventSameStaffClientRepeatSameDay:
+        dayData.extendedRules.preventSameStaffClientRepeatSameDay,
       breakEligibilityHours: dayData.extendedRules.breakEligibilityHours,
       breakWindowStart: dayData.extendedRules.breakWindowStart ?? null,
       breakWindowEnd: dayData.extendedRules.breakWindowEnd ?? null,
