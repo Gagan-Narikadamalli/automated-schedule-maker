@@ -354,8 +354,8 @@ export function ClientCardManager() {
     setModalOpen(true);
   }
 
-  function closeModal() {
-    if (saving) {
+  function closeModal(force = false) {
+    if (saving && !force) {
       return;
     }
     setModalOpen(false);
@@ -472,8 +472,8 @@ export function ClientCardManager() {
       }
 
       const savedCode = form.displayCode.trim();
+      closeModal(true);
       await loadLocationData(selectedLocationId);
-      closeModal();
       setMessage(`${savedCode} was saved and is available to the scheduler.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Client could not be saved.");
@@ -717,6 +717,11 @@ export function ClientCardManager() {
                   </div>
 
                   <div className={cardStyles.chips}>
+                    {client.attendancePatterns.length === 0 && client.active ? (
+                      <span className={cardStyles.chip}>
+                        Needs attendance days/hours before scheduling
+                      </span>
+                    ) : null}
                     {client.attendancePatterns.slice(0, 2).map((pattern, index) => (
                       <span key={`${client.id}-attendance-${index}`} className={cardStyles.chip}>
                         {formatPattern(pattern)}
@@ -764,7 +769,7 @@ export function ClientCardManager() {
         onClose={closeModal}
         footer={
           <>
-            <button type="button" className="button button-secondary" disabled={saving} onClick={closeModal}>
+            <button type="button" className="button button-secondary" disabled={saving} onClick={() => closeModal()}>
               Cancel
             </button>
             <button type="button" className="button button-primary" disabled={saving} onClick={() => void saveClient()}>
