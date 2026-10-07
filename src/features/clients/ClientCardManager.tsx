@@ -298,8 +298,17 @@ export function ClientCardManager() {
       }
 
       const teamName = client.teamId ? teamNameById.get(client.teamId) ?? "" : "";
-      return [client.displayCode, client.fullName, client.supportLevel, teamName].some(
-        (value) => value.toLowerCase().includes(normalizedQuery)
+      const clientType =
+        client.serviceSetting === "IN_HOME"
+          ? "home client"
+          : "regular kid in-center";
+      return [
+        client.displayCode,
+        client.supportLevel,
+        clientType,
+        teamName,
+      ].some((value) =>
+        value.toLowerCase().includes(normalizedQuery)
       );
     });
   }, [clients, query, teamNameById]);
@@ -776,7 +785,7 @@ export function ClientCardManager() {
               <span>Find client</span>
               <input
                 value={query}
-                placeholder="Search code, name, support, or team..."
+                placeholder="Search code, client type, support, or team..."
                 onChange={(event) => setQuery(event.target.value)}
               />
             </label>
@@ -796,20 +805,38 @@ export function ClientCardManager() {
 
         <div className={cardStyles.summaryStrip}>
           <div className={cardStyles.summaryItem}>
-            <span>Active clients</span>
+            <span>Total clients</span>
             <strong>{clients.filter((client) => client.active).length}</strong>
           </div>
           <div className={cardStyles.summaryItem}>
-            <span>Rotation / high support</span>
+            <span>Regular kids / in-center</span>
             <strong>
               {clients.filter(
-                (client) => client.active && ["ROTATION", "HIGH_SUPPORT"].includes(client.supportLevel)
+                (client) =>
+                  client.active &&
+                  client.serviceSetting === "IN_CENTER"
               ).length}
             </strong>
           </div>
           <div className={cardStyles.summaryItem}>
-            <span>Nap plans</span>
-            <strong>{clients.filter((client) => client.active && client.napPatterns.length > 0).length}</strong>
+            <span>Home clients</span>
+            <strong>
+              {clients.filter(
+                (client) =>
+                  client.active &&
+                  client.serviceSetting === "IN_HOME"
+              ).length}
+            </strong>
+          </div>
+          <div className={cardStyles.summaryItem}>
+            <span>Schedulable now</span>
+            <strong>
+              {clients.filter(
+                (client) =>
+                  client.active &&
+                  client.attendancePatterns.length > 0
+              ).length}
+            </strong>
           </div>
         </div>
 
