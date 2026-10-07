@@ -14,10 +14,6 @@ type TimeRange = {
   endTime: string | null;
 };
 
-function normalize(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-
 function displayTime(time: string): string {
   const match = time.match(/^(\d{2}):(\d{2})$/);
   if (!match) return time;
