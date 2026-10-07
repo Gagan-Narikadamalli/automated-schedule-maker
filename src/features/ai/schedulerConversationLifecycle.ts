@@ -40,6 +40,9 @@ export function schedulerAnswerNeedsFollowUp(reply: string): boolean {
     normalized.includes("reply 'yes'") ||
     normalized.includes("reply yes") ||
     normalized.includes("confirm again") ||
+    normalized.includes("creating a staff member requires") ||
+    normalized.includes("creating a client requires") ||
+    normalized.includes("requires the full name") ||
     normalized.includes("i need a few required details") ||
     normalized.includes("i need the following required") ||
     normalized.includes("i just need") ||
