@@ -98,7 +98,7 @@ export async function GET(request: Request) {
           .sort({ fullName: 1 })
           .lean(),
         ScheduleAssignment.find({ locationId, date })
-          .populate("clientId", "displayCode fullName color supportLevel teamId")
+          .populate("clientId", "displayCode color supportLevel teamId")
           .sort({ startTime: 1 })
           .lean(),
         ScheduleAssignment.distinct("date", { locationId }),
