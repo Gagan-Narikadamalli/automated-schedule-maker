@@ -61,7 +61,8 @@ type StaffMember = {
 };
 
 type StaffForm = {
-  fullName: string;
+  firstName: string;
+  lastName: string;
   startDate: string;
   endDate: string;
   role: StaffRole;
@@ -106,7 +107,8 @@ function localToday(): string {
 
 function emptyForm(): StaffForm {
   return {
-    fullName: "",
+    firstName: "",
+    lastName: "",
     startDate: localToday(),
     endDate: "",
     role: "BT",
@@ -132,6 +134,17 @@ function emptyShift(): ShiftPattern {
 
 function dateForInput(value: string | null): string {
   return value ? value.slice(0, 10) : "";
+}
+
+function splitStaffName(fullName: string): {
+  firstName: string;
+  lastName: string;
+} {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  return {
+    firstName: parts[0] ?? "",
+    lastName: parts.slice(1).join(" "),
+  };
 }
 
 function initials(name: string): string {
@@ -295,15 +308,18 @@ export function StaffCardManager() {
     setForm(emptyForm());
     setShiftDraft(emptyShift());
     setWeeklyShiftSchedule(
-      createWeeklySchedule("08:00", "17:00", true)
+      createWeeklySchedule("08:00", "17:00", false)
     );
     setModalOpen(true);
   }
 
   function openEditStaff(staffMember: StaffMember) {
+    const staffName = splitStaffName(staffMember.fullName);
+
     setEditingId(staffMember.id);
     setForm({
-      fullName: staffMember.fullName,
+      firstName: staffName.firstName,
+      lastName: staffName.lastName,
       startDate: dateForInput(staffMember.startDate),
       endDate: dateForInput(staffMember.endDate),
       role: staffMember.role,
@@ -340,7 +356,7 @@ export function StaffCardManager() {
     setForm(emptyForm());
     setShiftDraft(emptyShift());
     setWeeklyShiftSchedule(
-      createWeeklySchedule("08:00", "17:00", true)
+      createWeeklySchedule("08:00", "17:00", false)
     );
   }
 
@@ -407,15 +423,22 @@ export function StaffCardManager() {
   }
 
   async function saveStaff() {
-    if (!selectedLocationId || !form.fullName.trim() || !form.startDate) {
-      setMessage("Full name and start date are required.");
+    if (
+      !selectedLocationId ||
+      !form.firstName.trim() ||
+      !form.lastName.trim() ||
+      !form.startDate
+    ) {
+      setMessage("First name, last name, and start date are required.");
       return;
     }
 
-    const weeklyScheduleError = validateWeeklySchedule(
-      weeklyShiftSchedule,
-      "working"
+    const hasWorkingHours = Object.values(weeklyShiftSchedule).some(
+      (day) => day.enabled
     );
+    const weeklyScheduleError = hasWorkingHours
+      ? validateWeeklySchedule(weeklyShiftSchedule, "working")
+      : null;
 
     if (weeklyScheduleError) {
       setMessage(weeklyScheduleError);
@@ -439,6 +462,8 @@ export function StaffCardManager() {
     try {
       setSaving(true);
 
+      const fullName = `${form.firstName.trim()} ${form.lastName.trim()}`.trim();
+
       const response = await fetch(
         editingId ? `/api/staff/${editingId}` : "/api/staff",
         {
@@ -446,7 +471,7 @@ export function StaffCardManager() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             locationId: selectedLocationId,
-            fullName: form.fullName.trim(),
+            fullName,
             startDate: form.startDate,
             endDate: form.endDate || null,
             role: form.role,
@@ -467,10 +492,14 @@ export function StaffCardManager() {
         throw new Error(data.error || "Staff member could not be saved.");
       }
 
-      const savedName = form.fullName.trim();
+      const savedName = fullName;
       closeModal(true);
       await loadLocationData(selectedLocationId);
-      setMessage(`${savedName} was saved and is available to the scheduler.`);
+      setMessage(
+        shiftPatterns.length > 0
+          ? `${savedName} was saved and is available to the scheduler.`
+          : `${savedName} was saved. Add working days/hours before the automatic scheduler can use this staff member.`
+      );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Staff member could not be saved.");
     } finally {
@@ -751,14 +780,31 @@ export function StaffCardManager() {
           <p>These fields determine how this person can be used by the scheduler.</p>
 
           <div className="form-grid">
-            <label className="form-field form-field-wide">
-              <span>Full name</span>
+            <label className="form-field">
+              <span>First name</span>
               <input
                 autoFocus
-                value={form.fullName}
-                placeholder="e.g. Jane Doe"
+                value={form.firstName}
+                placeholder="e.g. Jane"
                 onChange={(event) =>
-                  setForm((current) => ({ ...current, fullName: event.target.value }))
+                  setForm((current) => ({
+                    ...current,
+                    firstName: event.target.value,
+                  }))
+                }
+              />
+            </label>
+
+            <label className="form-field">
+              <span>Last name</span>
+              <input
+                value={form.lastName}
+                placeholder="e.g. Doe"
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    lastName: event.target.value,
+                  }))
                 }
               />
             </label>
