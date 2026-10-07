@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { useActionConfirmDialog } from "@/components/ActionConfirmDialog";
+
 import styles from "./TrialDataPanel.module.css";
 
 type TrialStatus = {
@@ -76,6 +78,7 @@ export function TrialDataPanel() {
   const [message, setMessage] = useState(
     "Loading the Livingston trial-data status..."
   );
+  const { requestActionDialog, actionDialog } = useActionConfirmDialog();
 
   useEffect(() => {
     void loadStatus();
@@ -112,13 +115,24 @@ export function TrialDataPanel() {
   }
 
   async function runAction(action: "seed-and-run" | "reset") {
-    if (
-      action === "reset" &&
-      !window.confirm(
-        "Remove the tracked Livingston trial roster, clients, teams, trial schedules, speech sessions, call-out, and trial template?"
-      )
-    ) {
-      return;
+    if (action === "reset") {
+      const choice = await requestActionDialog({
+        eyebrow: "REMOVE TRIAL DATA",
+        title: "Remove the Livingston trial dataset?",
+        description:
+          "This removes the tracked Livingston trial roster, clients, teams, trial schedules, speech sessions, call-out, and trial template without touching unrelated clinic records.",
+        actions: [
+          {
+            id: "remove",
+            label: "Remove trial data",
+            tone: "danger",
+          },
+        ],
+      });
+
+      if (choice !== "remove") {
+        return;
+      }
     }
 
     try {
@@ -169,7 +183,9 @@ export function TrialDataPanel() {
   const generationEntries = Object.entries(lastRun?.generations ?? {});
 
   return (
-    <section className={`section-card ${styles.labCard}`}>
+    <>
+      {actionDialog}
+      <section className={`section-card ${styles.labCard}`}>
       <div className="panel-heading-row">
         <div>
           <p className="page-eyebrow">SAFE TEST WORKSPACE</p>
@@ -312,6 +328,7 @@ export function TrialDataPanel() {
       <div className="inline-message" aria-live="polite">
         {message}
       </div>
-    </section>
+      </section>
+    </>
   );
 }
