@@ -50,7 +50,6 @@ export type SchedulerAiRequest = {
   dateSelectionExplicit?: boolean;
   history?: SchedulerAiHistoryMessage[];
   attachments?: SchedulerAiAttachment[];
-  provider?: SchedulerAiProviderMode;
 };
 
 export type SchedulerAiResponse = {
