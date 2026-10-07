@@ -23,7 +23,6 @@ import {
 } from "@/lib/api/auth";
 import { writeAuditLog } from "@/lib/api/audit";
 import { connectToDatabase } from "@/lib/db";
-import { ScheduleAssignment } from "@/models/ScheduleAssignment";
 
 type GenerateRangeRequest = {
   locationId?: string;
