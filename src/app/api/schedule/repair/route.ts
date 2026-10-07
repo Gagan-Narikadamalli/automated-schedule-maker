@@ -443,7 +443,8 @@ export async function POST(request: Request) {
       schedulerInput.clients,
       result.assignments,
       result.metrics,
-      dayData.extendedRules.slotLengthMinutes
+      dayData.extendedRules.slotLengthMinutes,
+      result.uncoveredRequirements
     );
 
     const managerGapCount = await syncAutoUnplacedGaps(
