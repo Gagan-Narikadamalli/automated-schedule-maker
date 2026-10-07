@@ -4,6 +4,7 @@ import { calculateSchedulerReadiness } from "@/features/scheduler/engine/preflig
 import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySchedulerInput";
 import { connectToDatabase } from "@/lib/db";
 import { ScheduleAssignment } from "@/models/ScheduleAssignment";
+import { Staff } from "@/models/Staff";
 import { UnplacedAssignment } from "@/models/UnplacedAssignment";
 
 import { matchEntityReference } from "./entityReference";
@@ -372,10 +373,16 @@ export function createSchedulerReadOnlyTools(context: SchedulerAiContext) {
         "Read all saved assignments for the currently selected scheduler location and date and report whether a generated schedule is available. Use this for broad day questions, comparisons, locked/manual blocks, naps, speech, or when lookup_schedule is too narrow.",
       inputSchema: noInputSchema,
       execute: async () => {
-        const [dayData, assignments] = await Promise.all([
+        const [dayData, assignments, savedDates] = await Promise.all([
           buildDaySchedulerInput(locationId, date),
           loadAssignments(locationId, date),
+          ScheduleAssignment.distinct("date", { locationId }),
         ]);
+
+        const recentSavedScheduleDates = (savedDates as string[])
+          .filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value))
+          .sort((left, right) => right.localeCompare(left))
+          .slice(0, 8);
 
         const staffNames = new Map(dayData.staff.map((member) => [member.id, member.name]));
         const clientCodes = new Map(
@@ -392,6 +399,7 @@ export function createSchedulerReadOnlyTools(context: SchedulerAiContext) {
             0
           ),
           assignmentCount: assignments.length,
+          recentSavedScheduleDates,
           assignments: enriched,
           segments: mergeSegments(enriched),
         };
@@ -403,10 +411,13 @@ export function createSchedulerReadOnlyTools(context: SchedulerAiContext) {
         "Read active scheduler staff, their availability, current scheduled client workload, and required-break status for the selected day. Use this for questions such as who is available, who is called out, workload, or who is missing a break. For time-slot availability on the generated calendar, prefer lookup_schedule with includeFreeStaff=true.",
       inputSchema: noInputSchema,
       execute: async () => {
-        const [dayData, assignments] = await Promise.all([
-          buildDaySchedulerInput(locationId, date),
-          loadAssignments(locationId, date),
-        ]);
+        const [dayData, assignments, activeProfileCount, totalProfileCount] =
+          await Promise.all([
+            buildDaySchedulerInput(locationId, date),
+            loadAssignments(locationId, date),
+            Staff.countDocuments({ locationId, active: true }),
+            Staff.countDocuments({ locationId }),
+          ]);
 
         const assignmentsByStaff = new Map<string, DatabaseRecord[]>();
         for (const assignment of assignments) {
@@ -422,6 +433,9 @@ export function createSchedulerReadOnlyTools(context: SchedulerAiContext) {
           date,
           scheduleAvailable: assignments.length > 0,
           assignmentCount: assignments.length,
+          totalProfileCount,
+          activeProfileCount,
+          activeOnSelectedDateCount: dayData.staff.length,
           breakEligibilityHours: dayData.extendedRules.breakEligibilityHours,
           staff: dayData.staff.map((member) => {
             const scheduled = assignmentsByStaff.get(member.id) ?? [];
