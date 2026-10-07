@@ -229,6 +229,50 @@ const SchedulingRulesSchema = new Schema(
       type: Boolean,
       default: true,
     },
+    napDurationRulesEnabled: {
+      type: Boolean,
+      default: true,
+    },
+    napMinimumMinutes: {
+      type: Number,
+      default: 30,
+      min: 30,
+      max: 240,
+    },
+    napPreferredMinutes: {
+      type: Number,
+      default: 30,
+      min: 30,
+      max: 240,
+    },
+    napMaximumMinutes: {
+      type: Number,
+      default: 60,
+      min: 30,
+      max: 240,
+    },
+    speechDurationRulesEnabled: {
+      type: Boolean,
+      default: false,
+    },
+    speechMinimumMinutes: {
+      type: Number,
+      default: 30,
+      min: 30,
+      max: 240,
+    },
+    speechPreferredMinutes: {
+      type: Number,
+      default: 30,
+      min: 30,
+      max: 240,
+    },
+    speechMaximumMinutes: {
+      type: Number,
+      default: 60,
+      min: 30,
+      max: 240,
+    },
     supervisionPlanningTargetPercent: {
       type: Number,
       default: 5,
