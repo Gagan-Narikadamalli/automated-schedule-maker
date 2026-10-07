@@ -12,6 +12,9 @@ type RulesRequest = {
   partTimeMaximumWeeklyHours?: number;
   maximumClientsPerTechPerDay?: number;
   maximumTechsPerClientPerDay?: number;
+  minimumClientStaffAssignmentMinutes?: number;
+  maximumClientStaffConsecutiveHours?: number;
+  preventSameStaffClientRepeatSameDay?: boolean;
   defaultBreakMinutes?: number;
   breakEligibilityHours?: number;
   breakWindowStart?: string;
@@ -55,6 +58,9 @@ function defaultRules(locationId: string) {
     partTimeMaximumWeeklyHours: 29,
     maximumClientsPerTechPerDay: 6,
     maximumTechsPerClientPerDay: 4,
+    minimumClientStaffAssignmentMinutes: 30,
+    maximumClientStaffConsecutiveHours: 4,
+    preventSameStaffClientRepeatSameDay: true,
     defaultBreakMinutes: 30,
     breakEligibilityHours: 6,
     breakWindowStart: "11:00",
@@ -214,6 +220,34 @@ export async function PUT(request: Request) {
     }
 
     if (
+      body.minimumClientStaffAssignmentMinutes !== undefined &&
+      (body.minimumClientStaffAssignmentMinutes < 30 ||
+        body.minimumClientStaffAssignmentMinutes > 240 ||
+        body.minimumClientStaffAssignmentMinutes % 30 !== 0)
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Minimum client/staff assignment must be a 30-minute multiple between 30 and 240 minutes.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (
+      body.maximumClientStaffConsecutiveHours !== undefined &&
+      ![3, 3.5, 4].includes(body.maximumClientStaffConsecutiveHours)
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Maximum continuous client/staff assignment must be 3, 3.5, or 4 hours.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (
       body.defaultBreakMinutes !== undefined &&
       body.defaultBreakMinutes !== 0 &&
       body.defaultBreakMinutes !== 30
@@ -292,6 +326,19 @@ export async function PUT(request: Request) {
       existingRecord,
       body
     );
+
+    if (
+      changes.minimumClientStaffAssignmentMinutes >
+      changes.maximumClientStaffConsecutiveHours * 60
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Minimum client/staff assignment cannot exceed the maximum continuous pairing duration.",
+        },
+        { status: 400 }
+      );
+    }
 
     const savedRules = await SchedulingRules.findOneAndUpdate(
       { locationId },
