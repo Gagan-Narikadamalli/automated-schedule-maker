@@ -684,10 +684,10 @@ async function loadPendingAction(args: {
   userId: string;
 }): Promise<(NativePendingSnapshot & { preview: string }) | null> {
   await connectToDatabase();
-  const found = await NativeAiPendingAction.findOne({
+  const found = (await NativeAiPendingAction.findOne({
     locationId: args.locationId,
     userId: args.userId,
-  }).lean();
+  }).lean()) as Record<string, any> | null;
 
   if (!found) return null;
   if (new Date(found.expiresAt).getTime() <= Date.now()) {
