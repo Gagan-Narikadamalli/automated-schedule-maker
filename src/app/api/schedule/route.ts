@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
+import { applyFixedNapSessions } from "@/features/scheduler/server/applyFixedNapSessions";
 import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySchedulerInput";
 import {
   forbiddenResponse,
@@ -99,6 +100,13 @@ export async function GET(request: Request) {
         ScheduleAssignment.distinct("date", { locationId }),
       ]);
 
+    const fixedNapApplication = await applyFixedNapSessions(
+      locationId,
+      date,
+      dayData.input
+    );
+    const effectiveClients = fixedNapApplication.input.clients;
+
     const availableSlotMap = new Map(
       dayData.staff.map((staffMember) => [
         staffMember.id,
@@ -133,10 +141,11 @@ export async function GET(request: Request) {
       assignments: plainAssignments.map((assignment) =>
         serializeAssignment(assignment)
       ),
-      requiredClientSlots: dayData.clients.reduce(
+      requiredClientSlots: effectiveClients.reduce(
         (total, client) => total + client.requiredSlots.length,
         0
       ),
+      configuredNapSessions: fixedNapApplication.sessionCount,
     });
   } catch (error) {
     console.error("Failed to load schedule:", error);
@@ -221,6 +230,12 @@ export async function PUT(request: Request) {
       );
     }
 
+    const fixedNapApplication = await applyFixedNapSessions(
+      locationId,
+      date,
+      dayData.input
+    );
+
     const existingCell = existingCellResult
       ? (existingCellResult as unknown as PlainDatabaseRecord)
       : null;
@@ -304,7 +319,7 @@ export async function PUT(request: Request) {
         });
       }
 
-      const schedulerClient = dayData.clients.find(
+      const schedulerClient = fixedNapApplication.input.clients.find(
         (candidate) => candidate.id === clientId
       );
 
