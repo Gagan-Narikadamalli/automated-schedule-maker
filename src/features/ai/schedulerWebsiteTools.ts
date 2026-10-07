@@ -604,6 +604,20 @@ export const SCHEDULER_WEBSITE_WRITE_TOOL_NAMES = new Set([
   "manage_schedule_template",
 ]);
 
+export function isSchedulerWebsiteWriteInvocation(
+  toolName: string,
+  input?: Record<string, unknown>
+): boolean {
+  if (!SCHEDULER_WEBSITE_WRITE_TOOL_NAMES.has(toolName)) return false;
+  if (
+    toolName === "manage_schedule_template" &&
+    String(input?.action ?? "").toUpperCase() === "LIST"
+  ) {
+    return false;
+  }
+  return true;
+}
+
 export function createSchedulerWebsiteTools(context: SchedulerAiContext) {
   const { locationId, date } = context;
 
