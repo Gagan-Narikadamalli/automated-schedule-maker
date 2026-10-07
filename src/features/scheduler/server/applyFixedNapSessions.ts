@@ -1,4 +1,5 @@
 import { getSlotsInsideTimeRange } from "@/features/scheduler/engine/dateUtils";
+import { resolveFlexibleEventWindows } from "@/features/scheduler/engine/flexibleEventWindows";
 import type {
   NapPriorityCategory,
   SchedulerInput,
@@ -58,28 +59,61 @@ export async function applyFixedNapSessions(
     ]);
   }
 
+  const fixedNapWindows = sessions
+    .filter((session) => {
+      const startTime = String(session.startTime ?? "");
+      const endTime = String(session.endTime ?? "");
+      return Boolean(startTime && endTime && endTime > startTime);
+    })
+    .map((session, index) => ({
+      key: `fixed-nap-${String(session._id ?? index)}`,
+      clientId: String(session.clientId ?? ""),
+      startTime: String(session.startTime),
+      endTime: String(session.endTime),
+      priority:
+        String(session.priorityCategory ?? "OLDER") === "YOUNGER"
+          ? 0
+          : 10,
+    }));
+
+  const resolvedFixedNapSlots = resolveFlexibleEventWindows(
+    fixedNapWindows,
+    {
+      enabled: input.rules.napDurationRulesEnabled ?? true,
+      minimumMinutes: input.rules.napMinimumMinutes ?? 30,
+      preferredMinutes: input.rules.napPreferredMinutes ?? 30,
+      maximumMinutes: input.rules.napMaximumMinutes ?? 60,
+      slotLengthMinutes: input.rules.slotLengthMinutes,
+    }
+  );
+  const fixedNapSlotsByClient = new Map<string, Set<string>>();
+
+  for (const window of fixedNapWindows) {
+    if (!window.clientId) continue;
+    const slots = fixedNapSlotsByClient.get(window.clientId) ?? new Set<string>();
+
+    for (const slot of resolvedFixedNapSlots.get(window.key) ?? []) {
+      slots.add(slot);
+    }
+
+    fixedNapSlotsByClient.set(window.clientId, slots);
+  }
+
   const clients = input.clients.map((client) => {
     const clientSessions = sessionsByClient.get(client.id) ?? [];
     const clientAttendanceChanges = attendanceChangesByClient.get(client.id) ?? [];
     let nextClient = { ...client };
 
     if (clientSessions.length > 0) {
-      const fixedNapSlots = new Set<string>();
-      let priorityCategory: NapPriorityCategory = "OLDER";
-
-      for (const session of clientSessions) {
-        const startTime = String(session.startTime ?? "");
-        const endTime = String(session.endTime ?? "");
-        if (!startTime || !endTime || endTime <= startTime) continue;
-
-        if (String(session.priorityCategory ?? "OLDER") === "YOUNGER") {
-          priorityCategory = "YOUNGER";
-        }
-
-        for (const slot of getSlotsInsideTimeRange(startTime, endTime)) {
-          fixedNapSlots.add(slot);
-        }
-      }
+      const fixedNapSlots =
+        fixedNapSlotsByClient.get(client.id) ?? new Set<string>();
+      const priorityCategory: NapPriorityCategory =
+        clientSessions.some(
+          (session) =>
+            String(session.priorityCategory ?? "OLDER") === "YOUNGER"
+        )
+          ? "YOUNGER"
+          : "OLDER";
 
       if (fixedNapSlots.size > 0) {
         const restoredCoverage = new Set([
