@@ -20,6 +20,7 @@ type RulesForm = {
   minimumClientStaffAssignmentMinutes: number;
   maximumClientStaffConsecutiveHours: number;
   preventSameStaffClientRepeatSameDay: boolean;
+  allowSameStaffClientRepeatForCoverageException: boolean;
   defaultBreakMinutes: number;
   breakEligibilityHours: number;
   breakWindowStart: string;
@@ -95,6 +96,7 @@ const DEFAULT_RULES: RulesForm = {
   minimumClientStaffAssignmentMinutes: 30,
   maximumClientStaffConsecutiveHours: 4,
   preventSameStaffClientRepeatSameDay: true,
+  allowSameStaffClientRepeatForCoverageException: true,
   defaultBreakMinutes: 30,
   breakEligibilityHours: 6,
   breakWindowStart: "11:00",
@@ -263,6 +265,7 @@ export function SchedulingSettings() {
       | "preferStaffContinuity"
       | "preserveManualOverrides"
       | "preventSameStaffClientRepeatSameDay"
+      | "allowSameStaffClientRepeatForCoverageException"
       | "autoUseWeekdayTemplate"
       | "autoUsePreviousWeekdaySchedule",
     value: boolean
@@ -1071,6 +1074,25 @@ export function SchedulingSettings() {
               still handle approved special cases.
             </span>
           </label>
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={rules.allowSameStaffClientRepeatForCoverageException}
+              onChange={(event) =>
+                updateBooleanField(
+                  "allowSameStaffClientRepeatForCoverageException",
+                  event.target.checked
+                )
+              }
+            />
+            <span>
+              Allow a same-day staff/client repeat only as a last-resort
+              coverage exception when every non-repeat option would leave the
+              client uncovered. The continuous 3-4 hour maximum still applies,
+              and the scheduler reports the exception as a warning.
+            </span>
+          </label>
+
           <label className="form-field">
             <span>Max clients per technician per day</span>
             <input
