@@ -14,6 +14,7 @@ export type CandidateCheckContext = {
   callOutStaffIds: Set<string>;
   rules: SchedulerRules;
   allowSameDayPairRepeat?: boolean;
+  allowCoverageLimitException?: boolean;
 };
 
 function getStaffClientIds(
@@ -192,6 +193,7 @@ export function canAssignStaffToClient({
   callOutStaffIds,
   rules,
   allowSameDayPairRepeat = false,
+  allowCoverageLimitException = false,
 }: CandidateCheckContext): { allowed: boolean; reason?: string } {
   if (callOutStaffIds.has(staffMember.id)) {
     return {
@@ -259,6 +261,7 @@ export function canAssignStaffToClient({
   const staffClientIds = getStaffClientIds(staffMember.id, assignments);
 
   if (
+    !allowCoverageLimitException &&
     !staffClientIds.has(client.id) &&
     staffClientIds.size >= rules.maximumClientsPerTechPerDay
   ) {
@@ -271,6 +274,7 @@ export function canAssignStaffToClient({
   const clientStaffIds = getClientStaffIds(client.id, assignments);
 
   if (
+    !allowCoverageLimitException &&
     !clientStaffIds.has(staffMember.id) &&
     clientStaffIds.size >= rules.maximumTechsPerClientPerDay
   ) {
