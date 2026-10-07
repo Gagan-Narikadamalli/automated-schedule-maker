@@ -1,3 +1,4 @@
+import { Types } from "mongoose";
 import { NextResponse } from "next/server";
 
 import { getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
@@ -354,43 +355,81 @@ export async function POST(request: Request) {
       (assignment) => !originalAssignmentIds.has(assignment.id)
     );
 
+    const removalFilter = {
+      _id: {
+        $in: removedOriginalIds,
+      },
+      locationId,
+      date,
+      ...(repairMode === "CALL_OUT"
+        ? {
+            manuallyOverridden: {
+              $ne: true,
+            },
+          }
+        : {}),
+    };
+
+    const removedSnapshots =
+      removedOriginalIds.length > 0
+        ? await ScheduleAssignment.find(removalFilter).lean()
+        : [];
+
+    const preparedNewAssignments = newAssignments.map((assignment) => ({
+      _id: new Types.ObjectId(),
+      locationId,
+      date,
+      startTime: assignment.startTime,
+      endTime: getEndTimeForSlot(assignment.startTime),
+      staffId: assignment.staffId,
+      clientId: assignment.clientId || null,
+      assignmentType: assignment.assignmentType,
+      source: "AUTO",
+      locked: false,
+      manuallyOverridden: false,
+      note:
+        assignment.note ||
+        (repairMode === "COVERAGE"
+          ? "Added by automatic minimal fix repair."
+          : "Added by targeted call-out schedule repair."),
+    }));
+
     if (removedOriginalIds.length > 0) {
-      await ScheduleAssignment.deleteMany({
-        _id: {
-          $in: removedOriginalIds,
-        },
-        locationId,
-        date,
-        ...(repairMode === "CALL_OUT"
-          ? {
-              manuallyOverridden: {
-                $ne: true,
-              },
-            }
-          : {}),
-      });
+      await ScheduleAssignment.deleteMany(removalFilter);
     }
 
-    if (newAssignments.length > 0) {
-      await ScheduleAssignment.insertMany(
-        newAssignments.map((assignment) => ({
-          locationId,
-          date,
-          startTime: assignment.startTime,
-          endTime: getEndTimeForSlot(assignment.startTime),
-          staffId: assignment.staffId,
-          clientId: assignment.clientId || null,
-          assignmentType: assignment.assignmentType,
-          source: "AUTO",
-          locked: false,
-          manuallyOverridden: false,
-          note:
-            assignment.note ||
-            (repairMode === "COVERAGE"
-              ? "Added by automatic minimal fix repair."
-              : "Added by targeted call-out schedule repair."),
-        }))
-      );
+    try {
+      if (preparedNewAssignments.length > 0) {
+        await ScheduleAssignment.insertMany(preparedNewAssignments);
+      }
+    } catch (writeError) {
+      // Repair should never leave a selected day with holes simply because a
+      // replacement insert failed. Remove any partially inserted repair rows
+      // and restore the exact records that were removed.
+      try {
+        if (preparedNewAssignments.length > 0) {
+          await ScheduleAssignment.deleteMany({
+            _id: {
+              $in: preparedNewAssignments.map(
+                (assignment) => assignment._id
+              ),
+            },
+            locationId,
+            date,
+          });
+        }
+        if (removedSnapshots.length > 0) {
+          await ScheduleAssignment.insertMany(removedSnapshots, {
+            ordered: false,
+          });
+        }
+      } catch (rollbackError) {
+        console.error(
+          "CRITICAL: schedule repair rollback failed:",
+          rollbackError
+        );
+      }
+      throw writeError;
     }
 
     const managerGapCount = await syncAutoUnplacedGaps(
