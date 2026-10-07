@@ -315,7 +315,7 @@ function buildRows(
       { value: formatTime(assignment.endTime), style: styles.body },
       { value: member?.name || assignment.staffId, style: styles.body },
       { value: member?.role || "", style: styles.body },
-      { value: client?.displayCode || client?.fullName || "", style: clientColorStyle(client?.color, catalog, styles.body) },
+      { value: client?.displayCode || "", style: clientColorStyle(client?.color, catalog, styles.body) },
       { value: assignment.assignmentType.replaceAll("_", " "), style: assignmentStyle(assignment, catalog, styles) },
       { value: assignment.source || "", style: styles.body },
       { value: assignment.locked || assignment.manuallyOverridden ? "Yes" : "No", style: styles.body },
