@@ -16,7 +16,7 @@ It cannot generate, repair, move, delete, create call-outs, or otherwise modify 
 
 ## Runtime setup
 
-The app uses Vercel AI SDK and AI Gateway. The default model is `openai/gpt-5.6-luna`, configurable with `SCHEDULER_AI_MODEL`.
+Paid AI uses Vercel AI SDK and AI Gateway through the independent `/api/ai/paid` endpoint. Its default model is `openai/gpt-5.6-sol`, configurable with `SCHEDULER_AI_PAID_MODEL`. Free/Native AI uses the separate `/api/ai/native` endpoint and does not import or call the paid model stack.
 
 Production on Vercel should use the project's AI Gateway/OIDC configuration. For local development, use Vercel OIDC or set `AI_GATEWAY_API_KEY` in `.env.local`. Never commit the real key.
 
