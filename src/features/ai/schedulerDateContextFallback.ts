@@ -1,3 +1,4 @@
+import { matchEntityReference } from "./entityReference";
 import { buildDateRecommendations } from "./schedulerDateRecommendations";
 
 type JsonRecord = Record<string, any>;
@@ -144,21 +145,25 @@ function formatSegment(segment: JsonRecord, perspective: "staff" | "client" | "g
 }
 
 function findStaff(request: string, staff: JsonRecord[]): JsonRecord | null {
-  const normalizedRequest = normalize(request);
-  const exactish = staff.filter((member) => {
-    const name = normalize(String(member.name ?? ""));
-    return Boolean(name) && normalizedRequest.includes(name);
-  });
-  return exactish.length === 1 ? exactish[0] : null;
+  const matched = matchEntityReference(
+    request,
+    staff.map((member) => ({
+      record: member,
+      labels: [String(member.name ?? "")],
+    }))
+  );
+  return matched.status === "MATCH" ? matched.record : null;
 }
 
 function findClient(request: string, clients: JsonRecord[]): JsonRecord | null {
-  const normalizedRequest = normalize(request);
-  const exactish = clients.filter((client) => {
-    const code = normalize(String(client.displayCode ?? ""));
-    return Boolean(code) && normalizedRequest.includes(code);
-  });
-  return exactish.length === 1 ? exactish[0] : null;
+  const matched = matchEntityReference(
+    request,
+    clients.map((client) => ({
+      record: client,
+      labels: [String(client.displayCode ?? "")],
+    }))
+  );
+  return matched.status === "MATCH" ? matched.record : null;
 }
 
 function slotWithinRange(slot: string, range: TimeRange): boolean {
