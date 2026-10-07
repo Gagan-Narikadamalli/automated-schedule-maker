@@ -56,6 +56,33 @@ const AITrainingExampleSchema = new Schema(
       trim: true,
       maxlength: 4000,
     },
+    nativeIntent: {
+      type: String,
+      default: "",
+      trim: true,
+      index: true,
+    },
+    nativeTool: {
+      type: String,
+      default: "",
+      trim: true,
+      index: true,
+    },
+    nativeConfidence: {
+      type: Number,
+      default: null,
+      min: 0,
+      max: 1,
+    },
+    nativeInput: {
+      type: Schema.Types.Mixed,
+      default: null,
+    },
+    nativeAgreement: {
+      type: Boolean,
+      default: null,
+      index: true,
+    },
   },
   {
     timestamps: true,

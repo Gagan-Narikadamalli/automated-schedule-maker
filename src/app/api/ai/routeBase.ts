@@ -12,9 +12,12 @@ import { analyzeNaturalTimeRange, naturalTimeConfirmationQuestion } from "@/feat
 import { buildSchedulerAiInstructions } from "@/features/ai/schedulerPrompt";
 import { buildSchedulerReplyFallback } from "@/features/ai/schedulerReplyFallback";
 import {
+  planNativeSchedulerAction,
   resolveSchedulerAiProvider,
   runNativeSchedulerAi,
 } from "@/features/ai/schedulerNativeAi";
+import { evaluateNativeShadowPlan } from "@/features/ai/schedulerNativeEvaluation";
+import { expandNativeFollowUp } from "@/features/ai/schedulerNativeFollowUp";
 import { createSchedulerReadOnlyTools } from "@/features/ai/schedulerTools";
 import {
   createSchedulerWebsiteTools,
@@ -867,6 +870,24 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
 
     reply = ensureConversationClosing(reply);
 
+    let nativeShadow:
+      | ReturnType<typeof evaluateNativeShadowPlan>
+      | null = null;
+    if (aiProvider === "gateway") {
+      try {
+        const shadowMessage = expandNativeFollowUp(normalizedMessage, history);
+        const shadowPlan = planNativeSchedulerAction({
+          message: shadowMessage,
+          history,
+          writeToolsEnabled,
+          date: resolvedDate.date,
+        });
+        nativeShadow = evaluateNativeShadowPlan(shadowPlan, toolsUsed);
+      } catch (shadowError) {
+        console.error("Native Scheduler AI shadow evaluation failed:", shadowError);
+      }
+    }
+
     let trainingExampleId: string | null = null;
     try {
       await connectToDatabase();
@@ -881,6 +902,15 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
         toolsSelected: toolsUsed,
         managerAccepted: null,
         managerCorrection: "",
+        ...(nativeShadow
+          ? {
+              nativeIntent: nativeShadow.nativeIntent,
+              nativeTool: nativeShadow.nativeTool,
+              nativeConfidence: nativeShadow.nativeConfidence,
+              nativeInput: nativeShadow.nativeInput,
+              nativeAgreement: nativeShadow.nativeAgreement,
+            }
+          : {}),
       });
       trainingExampleId = String(example._id);
     } catch (trainingError) {
