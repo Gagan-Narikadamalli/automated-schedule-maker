@@ -196,6 +196,12 @@ export function expandNativeFollowUp(
   const previousAssistant = lastAssistantMessage(history);
   if (!current || !previous) return message;
 
+  const clarificationContinuation = expandNativeClarificationFollowUp(
+    current,
+    history
+  );
+  if (clarificationContinuation) return clarificationContinuation;
+
   const staffContinuation = staffCreationContinuation(
     current,
     previous,
@@ -209,12 +215,6 @@ export function expandNativeFollowUp(
     previousAssistant
   );
   if (clientContinuation) return clientContinuation;
-
-  const clarificationContinuation = expandNativeClarificationFollowUp(
-    current,
-    history
-  );
-  if (clarificationContinuation) return clarificationContinuation;
 
   if (
     /^(?:what\s+about|same\s+(?:thing\s+)?(?:for)?|and)\s+(?:today|tomorrow|yesterday|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\??$/i.test(
