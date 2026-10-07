@@ -84,6 +84,9 @@ export type HistoricalPatternScores = {
 export type SchedulerRules = {
   maximumClientsPerTechPerDay: number;
   maximumTechsPerClientPerDay: number;
+  minimumClientStaffAssignmentMinutes: number;
+  maximumClientStaffConsecutiveHours: number;
+  preventSameStaffClientRepeatSameDay: boolean;
   preferSameTeam: boolean;
   preferStaffContinuity: boolean;
   slotLengthMinutes: number;
