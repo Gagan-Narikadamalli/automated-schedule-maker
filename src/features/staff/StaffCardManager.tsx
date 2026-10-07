@@ -595,8 +595,18 @@ export function StaffCardManager() {
 
         <div className={cardStyles.summaryStrip}>
           <div className={cardStyles.summaryItem}>
-            <span>Active staff</span>
+            <span>Total staff profiles</span>
             <strong>{staff.filter((item) => item.active).length}</strong>
+          </div>
+          <div className={cardStyles.summaryItem}>
+            <span>Schedulable now</span>
+            <strong>
+              {staff.filter(
+                (item) =>
+                  item.active &&
+                  (item.shiftPatterns?.length ?? 0) > 0
+              ).length}
+            </strong>
           </div>
           <div className={cardStyles.summaryItem}>
             <span>BT / RBT</span>
@@ -607,14 +617,6 @@ export function StaffCardManager() {
           <div className={cardStyles.summaryItem}>
             <span>Interns</span>
             <strong>{staff.filter((item) => item.active && item.role === "INTERN").length}</strong>
-          </div>
-          <div className={cardStyles.summaryItem}>
-            <span>Managers / BCBAs</span>
-            <strong>
-              {staff.filter(
-                (item) => item.active && ["OFFICE_MANAGER", "BCBA"].includes(item.role)
-              ).length}
-            </strong>
           </div>
         </div>
 
