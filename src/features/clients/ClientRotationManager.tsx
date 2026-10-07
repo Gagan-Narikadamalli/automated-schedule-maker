@@ -360,7 +360,6 @@ export function ClientRotationManager() {
                     <tr key={client.id}>
                       <td>
                         <strong>{client.displayCode}</strong>
-                        <div className="helper-text">{client.fullName}</div>
                       </td>
                       <td>{client.supportLevel.replaceAll("_", " ")}</td>
                       <td>{client.serviceSetting.replaceAll("_", " ")}</td>
