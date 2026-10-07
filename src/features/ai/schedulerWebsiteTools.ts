@@ -306,6 +306,26 @@ const rulesSchema = jsonSchema<JsonRecord>({
     continuityPriority: { type: "number" },
     rotationPriority: { type: "number" },
     workloadBalancePriority: { type: "number" },
+    clientHandoffPenaltyPriority: {
+      type: "number",
+      description:
+        "Soft priority from 0-200 that discourages unnecessary staff handoffs between neighboring blocks for the same client.",
+    },
+    staffScheduleCompactnessPriority: {
+      type: "number",
+      description:
+        "Soft priority from 0-200 that prefers placing work next to a staff member's existing assignments to reduce avoidable idle gaps.",
+    },
+    minimalFixAllowProtectedRelocation: {
+      type: "boolean",
+      description:
+        "Whether Minimal Fix may relocate manager/manual client blocks when needed for coverage.",
+    },
+    minimalFixAllowBreakRelocation: {
+      type: "boolean",
+      description:
+        "Whether Minimal Fix may temporarily move a break and recalculate it afterward when needed for client coverage.",
+    },
     scheduleStabilityPriority: { type: "number" },
     weekdayTemplatePriority: { type: "number" },
     weeklyHoursPriority: { type: "number" },
@@ -856,7 +876,7 @@ export function createSchedulerWebsiteTools(context: SchedulerAiContext) {
 
     update_scheduler_rules: tool({
       description:
-        "Update clinic-wide automatic scheduler rules and priorities such as break window/eligibility, weekly hour ranges, client/staff minimum and maximum continuous pairing duration, same-day pair reuse, rotation/continuity priorities, schedule hours, role coverage priorities, historical/template preferences, and supervision target. Only send fields the user actually wants changed.",
+        "Update clinic-wide automatic scheduler rules and priorities such as break window/eligibility, weekly hour ranges, client/staff minimum and maximum continuous pairing duration, same-day pair reuse, handoff reduction, staff schedule compactness, Minimal Fix protection behavior, rotation/continuity priorities, schedule hours, role coverage priorities, historical/template preferences, and supervision target. Only send fields the user actually wants changed.",
       inputSchema: rulesSchema,
       execute: async (changes) => invokeJson(updateSchedulingRules, "PUT", { locationId, ...changes }),
     }),
