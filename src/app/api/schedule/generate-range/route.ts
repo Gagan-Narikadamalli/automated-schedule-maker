@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { auditFinalCoverage } from "@/features/scheduler/engine/auditFinalCoverage";
 import { getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
 import { generateSchedule } from "@/features/scheduler/engine/generateSchedule";
 import { placeStaffBreaksAfterCoverage } from "@/features/scheduler/engine/placeStaffBreaks";
@@ -229,8 +230,14 @@ export async function POST(request: Request) {
         schedulerInput.clients,
         dayData.extendedRules.slotLengthMinutes
       );
-      const metrics = applyFinalBreakMetrics(
+      const finalCoverage = auditFinalCoverage(
+        schedulerInput.clients,
+        enrichedAssignments,
         coverageResult.metrics,
+        dayData.extendedRules.slotLengthMinutes
+      );
+      const metrics = applyFinalBreakMetrics(
+        finalCoverage.metrics,
         breakPlan.reservedBreaks.length,
         dayData.extendedRules.slotLengthMinutes
       );
@@ -276,11 +283,11 @@ export async function POST(request: Request) {
       const managerGapCount = await syncAutoUnplacedGaps(
         locationId,
         date,
-        coverageResult.uncoveredRequirements,
+        finalCoverage.uncoveredRequirements,
         enrichedAssignments
       );
 
-      const completeCoverage = coverageResult.metrics.uncoveredClientSlots === 0;
+      const completeCoverage = metrics.uncoveredClientSlots === 0;
 
       results.push({
         date,
@@ -289,7 +296,7 @@ export async function POST(request: Request) {
         partialBuild: !completeCoverage,
         metrics,
         warningCount: coverageResult.warnings.length,
-        uncoveredCount: coverageResult.uncoveredRequirements.length,
+        uncoveredCount: finalCoverage.uncoveredRequirements.length,
         managerGapCount,
         reservedBreakCount: breakPlan.reservedBreaks.length,
         reliefSwapCount: breakPlan.reliefSwapCount,
