@@ -297,7 +297,7 @@ function extractClientReplacementAnalysis(message: string): {
 } | null {
   const raw = visibleMessage(message);
   const patterns = [
-    /\b(?:analyze|check|preview|evaluate)\s+(?:what\s+happens\s+if\s+)?(?:we\s+)?replace\s+(?:client\s+)?(.+?)\s+with\s+(?:client\s+)?(.+?)(?=\s+(?:from|between|at|today|tomorrow|on)\b|[?.!,]|$)/i,
+    /\b(?:analyze|check|preview|evaluate)\s+(?:what\s+happens\s+if\s+)?(?:we\s+)?replac(?:e|ing)\s+(?:client\s+)?(.+?)\s+with\s+(?:client\s+)?(.+?)(?=\s+(?:from|between|at|today|tomorrow|on)\b|[?.!,]|$)/i,
     /\bwhat\s+(?:would|will)\s+happen\s+if\s+(?:we\s+)?replace\s+(?:client\s+)?(.+?)\s+with\s+(?:client\s+)?(.+?)(?=\s+(?:from|between|at|today|tomorrow|on)\b|[?.!,]|$)/i,
   ];
   for (const pattern of patterns) {
