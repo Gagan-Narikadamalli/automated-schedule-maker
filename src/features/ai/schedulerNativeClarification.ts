@@ -39,7 +39,11 @@ function clean(value: string): string {
 }
 
 function normalize(value: string): string {
-  return value
+  const visible = value
+    .split(/\n\n\[SCHEDULER TIME NORMALIZATION:/i)[0]
+    .trim();
+
+  return visible
     .replace(/\bfull[- _0]*time\b/gi, "full-time")
     .replace(/\bpart[- _0]*time\b/gi, "part-time")
     .replace(/\boffice[- _]*manager\b/gi, "office manager")
@@ -95,25 +99,76 @@ function staffCreate(
   history: SchedulerAiHistoryMessage[],
   assistant: string
 ): string | null {
-  if (!/creating a staff member requires the full name, role/i.test(assistant)) return null;
-  const seedPattern=/\b(?:create|add)\s+(?:a\s+)?(?:new\s+)?staff(?:\s+member)?\b/i;
-  const seed=recent(history, seedPattern);
+  if (!/creating a staff member requires the full name, role/i.test(assistant)) {
+    return null;
+  }
+
+  const seedPattern =
+    /\b(?:create|add)\s+(?:a\s+)?(?:new\s+)?staff(?:\s+member)?\b/i;
+  const seed = recent(history, seedPattern);
   if (!seed) return null;
-  const replies=repliesSince(history, seedPattern, current);
-  const aggregate=normalize([seed,...replies].join(" ; "));
-  const role=aggregate.match(/\b(office manager|rbt|bt|intern|bcba|other)\b/i)?.[1] || "";
-  const employeeType=aggregate.match(/\b(full-time|part-time)\b/i)?.[1] || "";
-  const date=dateToken(aggregate);
-  const seedName=seed.match(
+
+  const replies = repliesSince(history, seedPattern, current);
+  const normalizedReplies = replies.map(normalize).filter(Boolean);
+  const aggregate = normalize([seed, ...normalizedReplies].join(" ; "));
+
+  const role =
+    aggregate.match(/\b(office manager|rbt|bt|intern|bcba|other)\b/i)?.[1] || "";
+  const employeeType =
+    aggregate.match(/\b(full-time|part-time)\b/i)?.[1] || "";
+  const date = dateToken(aggregate);
+
+  const seedName = seed.match(
     /\bstaff(?:\s+member)?(?:\s+named)?\s+(.+?)(?=\s+(?:as\s+)?(?:office\s+manager|rbt|bt|intern|bcba|other)\b|\s+(?:full[- ]?time|part[- ]?time)\b|\s+(?:starting|start\s+date|from)\b|[,.!?]|$)/i
   )?.[1];
-  const replyName=nameCandidate(
-    replies,
-    /^(?:office manager|rbt|bt|intern|bcba|other|full-time|part-time|role\b|employee\s*type\b|start\b)/i
+
+  const candidates = [
+    ...(seedName ? [clean(seedName)] : []),
+    ...parts(replies).filter(
+      (value) =>
+        /^[A-Za-z][A-Za-z' -]{1,80}$/.test(value) &&
+        !/^(?:office manager|rbt|bt|intern|bcba|other|full-time|part-time|today|tomorrow|yesterday|weekdays?|weekends?|monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/i.test(
+          value
+        ) &&
+        !/\b(?:from|between|at)\s+\d/i.test(value)
+    ),
+  ];
+
+  const fullName =
+    candidates
+      .map(clean)
+      .filter(Boolean)
+      .sort(
+        (left, right) =>
+          right.split(/\s+/).length - left.split(/\s+/).length ||
+          right.length - left.length
+      )[0] || "";
+
+  const scheduleDetails = normalizedReplies.filter(
+    (value) =>
+      /\b(?:weekdays?|weekends?|monday|tuesday|wednesday|thursday|friday|saturday|sunday|every\s+day)\b/i.test(
+        value
+      ) ||
+      /\b(?:from|between)\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b/i.test(value)
   );
-  const fullName=clean(replyName || seedName || "");
-  if (!fullName || !role || !employeeType || !date) return null;
-  return `create a new staff member ${fullName} as ${role} ${employeeType} starting ${date}`;
+
+  if (fullName && role && employeeType && date) {
+    return [
+      "create a new staff member " +
+        fullName +
+        " as " +
+        role +
+        " " +
+        employeeType +
+        " starting " +
+        date,
+      ...scheduleDetails,
+    ]
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  return [seed, ...normalizedReplies].filter(Boolean).join(" ");
 }
 
 function clientCreate(
@@ -121,33 +176,101 @@ function clientCreate(
   history: SchedulerAiHistoryMessage[],
   assistant: string
 ): string | null {
-  if (!/creating a client requires the full name, display code/i.test(assistant)) return null;
-  const seedPattern=/\b(?:create|add)\s+(?:a\s+)?(?:new\s+)?client\b/i;
-  const seed=recent(history, seedPattern);
+  if (!/creating a client requires the full name, display code/i.test(assistant)) {
+    return null;
+  }
+
+  const seedPattern =
+    /\b(?:create|add)\s+(?:a\s+)?(?:new\s+)?client\b/i;
+  const seed = recent(history, seedPattern);
   if (!seed) return null;
-  const replies=repliesSince(history, seedPattern, current);
-  const aggregate=normalize([seed,...replies].join(" ; "));
-  const date=dateToken(aggregate);
-  const autoCode=/\b(?:(?:code|display\s+code)\s+(?:anything(?:\s+you\s+like)?|whatever(?:\s+you\s+like)?|any\s+code|your\s+choice|you\s+(?:choose|pick|decide))|(?:choose|pick)\s+(?:(?:the|a)\s+)?(?:display\s+)?code)\b/i.test(aggregate);
-  const explicitCode=aggregate.match(
+
+  const replies = repliesSince(history, seedPattern, current);
+  const normalizedReplies = replies.map(normalize).filter(Boolean);
+  const aggregate = normalize([seed, ...normalizedReplies].join(" ; "));
+  const date = dateToken(aggregate);
+
+  const autoCode =
+    /\b(?:(?:code|display\s+code)\s+(?:anything(?:\s+you\s+like)?|whatever(?:\s+you\s+like)?|any\s+code|your\s+choice|you\s+(?:choose|pick|decide))|(?:choose|pick)\s+(?:(?:the|a)\s+)?(?:display\s+)?code)\b/i.test(
+      aggregate
+    );
+  const explicitCode = aggregate.match(
     /\b(?:code|display\s+code)(?:\s+is|\s*:)?\s+(?!anything\b|whatever\b|your\b|you\b|choose\b|pick\b|any\b)([A-Za-z0-9_-]+)\b/i
   )?.[1];
-  const currentName=normalize(current).match(
+
+  const currentName = normalize(current).match(
     /^(.+?)(?=\s+(?:and\s+)?(?:with\s+)?(?:code|display\s+code)\b)/i
   )?.[1];
-  const seedName=seed.match(
+  const seedName = seed.match(
     /\bclient(?:\s+named)?\s+(.+?)(?=\s+(?:with\s+)?(?:code|display\s+code)\b|\s+(?:starting|start\s+date|from)\b|[,.!?]|$)/i
   )?.[1];
-  const replyName=nameCandidate(
-    replies,
-    /^(?:code\b|display\s+code\b|choose\b|pick\b|anything\b|whatever\b|start\b)/i
+
+  const replyNames = parts(replies)
+    .map((value) =>
+      value
+        .replace(
+          /\s+and\s+(?:with\s+)?(?:code|display\s+code)\b.*$/i,
+          ""
+        )
+        .trim()
+    )
+    .filter(
+      (value) =>
+        /^[A-Za-z][A-Za-z' -]{1,80}$/.test(value) &&
+        !/^(?:code|display code|choose|pick|anything|whatever|today|tomorrow|yesterday|weekdays?|weekends?|monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/i.test(
+          value
+        ) &&
+        !/\b(?:from|between|at)\s+\d/i.test(value)
+    );
+
+  const fullName =
+    [currentName || "", ...replyNames, seedName || ""]
+      .map((value) => clean(value).replace(/\s+and\s+then$/i, ""))
+      .filter(Boolean)
+      .sort(
+        (left, right) =>
+          right.split(/\s+/).length - left.split(/\s+/).length ||
+          right.length - left.length
+      )[0] || "";
+
+  const positionalCode =
+    parts(replies).find(
+      (value) =>
+        /^[A-Za-z][A-Za-z0-9_-]{1,11}$/.test(value) &&
+        value.toLowerCase() !== fullName.toLowerCase() &&
+        !/^(?:today|tomorrow|yesterday|weekdays?|weekends?|monday|tuesday|wednesday|thursday|friday|saturday|sunday|code|choose|pick|anything|whatever)$/i.test(
+          value
+        )
+    ) || "";
+
+  const displayCode =
+    explicitCode ||
+    positionalCode ||
+    (fullName && autoCode ? suggestClientDisplayCode(fullName) : "");
+
+  const attendanceDetails = normalizedReplies.filter(
+    (value) =>
+      /\b(?:weekdays?|weekends?|monday|tuesday|wednesday|thursday|friday|saturday|sunday|every\s+day)\b/i.test(
+        value
+      ) ||
+      /\b(?:from|between)\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b/i.test(value)
   );
-  const fullName=clean(currentName || replyName || seedName || "").replace(/\s+and\s+then$/i,"");
-  if (!fullName || !date) return null;
-  const displayCode=explicitCode || (autoCode ? suggestClientDisplayCode(fullName) : "");
-  return displayCode
-    ? `create a new client ${fullName} with display code ${displayCode} starting ${date}`
-    : null;
+
+  if (fullName && displayCode && date) {
+    return [
+      "create a new client " +
+        fullName +
+        " with display code " +
+        displayCode +
+        " starting " +
+        date,
+      ...attendanceDetails,
+    ]
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  return [seed, ...normalizedReplies].filter(Boolean).join(" ");
 }
 
 function eventFollowUp(
