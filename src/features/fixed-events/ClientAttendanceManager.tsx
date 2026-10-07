@@ -199,7 +199,6 @@ export function ClientAttendanceManager() {
               <div className={cardStyles.cardTop}>
                 <div className={cardStyles.identityCopy}>
                   <h3>{change.client?.displayCode ?? "Client"} · {change.changeType === "CALL_IN" ? "Call In" : "Call Out"}</h3>
-                  <p>{change.client?.fullName ?? ""}</p>
                 </div>
                 <span className={cardStyles.pill}>{change.changeType === "CALL_IN" ? "Coming In" : "Out"}</span>
               </div>
@@ -231,7 +230,7 @@ export function ClientAttendanceManager() {
       >
         <div className={cardStyles.formSection}>
           <div className="form-grid">
-            <label className="form-field form-field-wide"><span>Client / kid</span><select value={clientId} onChange={(event) => setClientId(event.target.value)}>{clients.map((client) => <option key={client.id} value={client.id}>{client.displayCode} — {client.fullName}</option>)}</select></label>
+            <label className="form-field form-field-wide"><span>Client / kid</span><select value={clientId} onChange={(event) => setClientId(event.target.value)}>{clients.map((client) => <option key={client.id} value={client.id}>{client.displayCode}</option>)}</select></label>
             <label className="form-field"><span>Starts</span><input type="time" step="1800" value={startTime} onChange={(event) => setStartTime(event.target.value)} /></label>
             <label className="form-field"><span>Ends</span><input type="time" step="1800" value={endTime} onChange={(event) => setEndTime(event.target.value)} /></label>
             <label className="form-field form-field-wide"><span>Note (optional)</span><input value={note} onChange={(event) => setNote(event.target.value)} placeholder={changeType === "CALL_IN" ? "Example: Parent confirmed late arrival" : "Example: Sick today"} /></label>
