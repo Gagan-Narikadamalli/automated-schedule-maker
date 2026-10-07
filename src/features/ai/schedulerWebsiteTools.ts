@@ -764,7 +764,8 @@ export function createSchedulerWebsiteTools(context: SchedulerAiContext) {
           );
 
         if (input.action === "LIST") {
-          return listTemplates();
+          const listed = await listTemplates();
+          return { ...listed, changed: false, readOnly: true };
         }
 
         if (input.action === "CREATE") {
