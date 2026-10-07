@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import { EditableNumberInput } from "@/components/EditableNumberInput";
+
 import cardStyles from "@/components/ManagementCards.module.css";
 import { useActionConfirmDialog } from "@/components/ActionConfirmDialog";
 import { ManagementModal } from "@/components/ManagementModal";
@@ -869,8 +871,8 @@ export function StaffCardManager() {
           <div className="form-grid">
             <label className="form-field">
               <span>Minimum</span>
-              <input
-                type="number"
+              <EditableNumberInput
+                
                 min="0"
                 step="0.5"
                 value={form.minimumWeeklyHours}
@@ -884,8 +886,8 @@ export function StaffCardManager() {
             </label>
             <label className="form-field">
               <span>Target</span>
-              <input
-                type="number"
+              <EditableNumberInput
+                
                 min="0"
                 step="0.5"
                 value={form.targetWeeklyHours}
@@ -899,8 +901,8 @@ export function StaffCardManager() {
             </label>
             <label className="form-field">
               <span>Maximum</span>
-              <input
-                type="number"
+              <EditableNumberInput
+                
                 min="0"
                 step="0.5"
                 value={form.maximumWeeklyHours}
