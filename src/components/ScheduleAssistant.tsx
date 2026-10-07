@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type ChangeEvent,
+  type FormEvent,
+} from "react";
 
 import styles from "./ScheduleAssistant.module.css";
 
@@ -25,7 +31,17 @@ type SchedulerAiResponse = {
   changed?: boolean;
   mode?: SchedulerAiMode;
   effectiveDate?: string;
+  attachmentAnalysis?: string;
+  attachmentNames?: string[];
+  attachmentPreviewOnly?: boolean;
   error?: string;
+};
+
+type ChatAttachment = {
+  name: string;
+  mimeType: "image/png" | "image/jpeg" | "image/webp";
+  dataUrl: string;
+  size: number;
 };
 
 type ChatMessage = {
@@ -34,6 +50,9 @@ type ChatMessage = {
   text: string;
   trainingExampleId?: string | null;
   feedback?: "accepted" | "corrected";
+  attachments?: Pick<ChatAttachment, "name" | "dataUrl">[];
+  attachmentContext?: string;
+  attachmentNames?: string[];
 };
 
 type WorkspaceContext = {
@@ -51,6 +70,26 @@ type SavedPromptGroup = {
   title: string;
   prompts: string[];
 };
+
+const MAX_SCREENSHOT_ATTACHMENTS = 3;
+const MAX_SCREENSHOT_TOTAL_BYTES = 3 * 1024 * 1024;
+const ALLOWED_SCREENSHOT_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+]);
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () =>
+      typeof reader.result === "string"
+        ? resolve(reader.result)
+        : reject(new Error("The screenshot could not be read."));
+    reader.onerror = () => reject(new Error("The screenshot could not be read."));
+    reader.readAsDataURL(file);
+  });
+}
 
 const SAVED_PROMPT_GROUPS: SavedPromptGroup[] = [
   {
@@ -232,6 +271,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
   const [dateSelectionExplicit, setDateSelectionExplicit] = useState(false);
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [working, setWorking] = useState(false);
   const [status, setStatus] = useState("Connected to the Automatic Scheduler website");
   const [mode, setMode] = useState<SchedulerAiMode | null>(null);
@@ -317,6 +357,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     }
     setMessages([]);
     setInput("");
+    setAttachments([]);
     setShowHelp(false);
     setMode(null);
     setCorrectionFor(null);
@@ -350,9 +391,56 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     setStatus("Saved prompt loaded. Edit any [bracketed] details, or replace it with your own wording.");
   }
 
+  async function handleAttachmentSelection(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.currentTarget.files ?? []);
+    event.currentTarget.value = "";
+    if (files.length === 0) return;
+
+    if (attachments.length + files.length > MAX_SCREENSHOT_ATTACHMENTS) {
+      setStatus(`Attach no more than ${MAX_SCREENSHOT_ATTACHMENTS} screenshots at once.`);
+      return;
+    }
+    if (files.some((file) => !ALLOWED_SCREENSHOT_TYPES.has(file.type))) {
+      setStatus("Only PNG, JPG/JPEG, and WebP screenshots are supported.");
+      return;
+    }
+
+    const totalBytes =
+      attachments.reduce((sum, attachment) => sum + attachment.size, 0) +
+      files.reduce((sum, file) => sum + file.size, 0);
+    if (totalBytes > MAX_SCREENSHOT_TOTAL_BYTES) {
+      setStatus("Keep the total screenshot upload under 3 MB.");
+      return;
+    }
+
+    try {
+      const nextAttachments = await Promise.all(
+        files.map(async (file): Promise<ChatAttachment> => ({
+          name: file.name.slice(0, 120),
+          mimeType: file.type as ChatAttachment["mimeType"],
+          dataUrl: await readFileAsDataUrl(file),
+          size: file.size,
+        }))
+      );
+      setAttachments((current) => [...current, ...nextAttachments]);
+      setStatus(
+        "Screenshot attached. The next run will analyze and preview it first; it will not make changes until you confirm the proposed import."
+      );
+    } catch (error) {
+      setStatus(
+        error instanceof Error ? error.message : "The screenshot could not be attached."
+      );
+    }
+  }
+
   async function askScheduler(event?: FormEvent) {
     event?.preventDefault();
-    const message = input.trim();
+    const selectedAttachments = attachments;
+    const message =
+      input.trim() ||
+      (selectedAttachments.length > 0
+        ? "Analyze the attached scheduler screenshot and tell me what it contains. Do not make changes yet."
+        : "");
     const requestContext = getRequestContext();
     if (!message || !requestContext.locationId || working) return;
 
@@ -361,22 +449,33 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
       return;
     }
 
-    const history = messages
-      .slice(-12)
-      .map((entry) => ({ role: entry.role, text: entry.text }));
+    const history = messages.slice(-12).map((entry) => ({
+      role: entry.role,
+      text: entry.text,
+      attachmentContext: entry.attachmentContext,
+      attachmentNames: entry.attachmentNames,
+    }));
 
     const userMessage: ChatMessage = {
       id: makeId("user"),
       role: "user",
       text: message,
+      attachments: selectedAttachments.map((attachment) => ({
+        name: attachment.name,
+        dataUrl: attachment.dataUrl,
+      })),
+      attachmentNames: selectedAttachments.map((attachment) => attachment.name),
     };
 
     setMessages((current) => [...current, userMessage]);
     setInput("");
+    setAttachments([]);
     setShowHelp(false);
     setWorking(true);
     setStatus(
-      "Scheduler AI is resolving the date and loading the relevant staff, client, availability, break, coverage, event, and unplaced information..."
+      selectedAttachments.length > 0
+        ? "Scheduler AI is reading the screenshot, comparing it with the live scheduler, and preparing a preview. No changes will be made on this upload turn."
+        : "Scheduler AI is resolving the date and loading the relevant staff, client, availability, break, coverage, event, and unplaced information..."
     );
 
     try {
@@ -390,6 +489,11 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
           date: requestContext.date,
           dateSelectionExplicit: requestContext.dateSelectionExplicit,
           history,
+          attachments: selectedAttachments.map((attachment) => ({
+            name: attachment.name,
+            mimeType: attachment.mimeType,
+            dataUrl: attachment.dataUrl,
+          })),
         }),
       });
       const data = (await response.json()) as SchedulerAiResponse;
@@ -397,7 +501,18 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
 
       setMode(data.mode ?? null);
       setMessages((current) => [
-        ...current,
+        ...current.map((entry) =>
+          entry.id === userMessage.id && data.attachmentAnalysis
+            ? {
+                ...entry,
+                attachmentContext: data.attachmentAnalysis,
+                attachmentNames:
+                  data.attachmentNames?.length
+                    ? data.attachmentNames
+                    : entry.attachmentNames,
+              }
+            : entry
+        ),
         {
           id: makeId("assistant"),
           role: "assistant",
@@ -419,9 +534,11 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
         );
       } else {
         setStatus(
-          data.toolsUsed?.length
-            ? `${data.mode === "AUTONOMOUS" ? "Autonomous" : "Read-only"} scheduler analysis used: ${data.toolsUsed.join(", ")}`
-            : "Scheduler AI response complete. Continue naturally if it asked for a date, clarification, or confirmation."
+          data.attachmentPreviewOnly
+            ? "Screenshot analysis complete. Review the proposed import and confirm it in chat before Scheduler AI makes any changes."
+            : data.toolsUsed?.length
+              ? `${data.mode === "AUTONOMOUS" ? "Autonomous" : "Read-only"} scheduler analysis used: ${data.toolsUsed.join(", ")}`
+              : "Scheduler AI response complete. Continue naturally if it asked for a date, clarification, or confirmation."
         );
       }
     } catch (error) {
@@ -549,7 +666,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
 
           <div className={styles.promptHint}>
             <span>
-              Ask naturally — capitalization does not matter. Schedule checks, analysis, what-if questions, generation, Minimal Fix, moves/replacements, Unplaced work, staff/client profiles, call-outs, attendance, naps/speech, teams, templates, rules, supervision, or planning are all supported. Use Saved prompts for realistic examples.
+              Ask naturally — capitalization does not matter. You can also attach a schedule/Excel screenshot for the AI to read, compare with live staff/clients, and preview as staff information or a day template before you confirm any changes. Use Saved prompts for more examples.
             </span>
             <button
               type="button"
@@ -601,6 +718,16 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
                     {message.role === "user" ? "You" : "Scheduler AI"}
                   </span>
                   <p>{message.text}</p>
+                  {message.attachments && message.attachments.length > 0 && (
+                    <div className={styles.messageAttachments}>
+                      {message.attachments.map((attachment) => (
+                        <figure key={attachment.name} className={styles.messageAttachment}>
+                          <img src={attachment.dataUrl} alt={attachment.name} />
+                          <figcaption>{attachment.name}</figcaption>
+                        </figure>
+                      ))}
+                    </div>
+                  )}
 
                   {message.role === "assistant" &&
                     message.trainingExampleId &&
@@ -677,27 +804,85 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
           </div>
 
           <form className={styles.composer} onSubmit={(event) => void askScheduler(event)}>
-            <textarea
-              value={input}
-              maxLength={5000}
-              disabled={working || !locationId}
-              onChange={(event) => setInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (
-                  event.key === "Enter" &&
-                  !event.shiftKey &&
-                  !event.nativeEvent.isComposing
-                ) {
-                  event.preventDefault();
-                  void askScheduler();
+            {attachments.length > 0 && (
+              <div className={styles.attachmentTray}>
+                {attachments.map((attachment, index) => (
+                  <div
+                    key={`${attachment.name}-${index}`}
+                    className={styles.attachmentChip}
+                  >
+                    <img src={attachment.dataUrl} alt="" />
+                    <span title={attachment.name}>{attachment.name}</span>
+                    <button
+                      type="button"
+                      aria-label={`Remove ${attachment.name}`}
+                      onClick={() =>
+                        setAttachments((current) =>
+                          current.filter((_, currentIndex) => currentIndex !== index)
+                        )
+                      }
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className={styles.composerRow}>
+              <input
+                id="scheduler-ai-screenshot-input"
+                className={styles.hiddenFileInput}
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                multiple
+                disabled={
+                  working ||
+                  !locationId ||
+                  attachments.length >= MAX_SCREENSHOT_ATTACHMENTS
                 }
-              }}
-              placeholder="Ask anything related to this scheduler website in your own words..."
-              aria-keyshortcuts="Enter"
-            />
-            <button type="submit" disabled={working || !locationId || !input.trim()}>
-              {working ? "Working…" : "Run"}
-            </button>
+                onChange={(event) => void handleAttachmentSelection(event)}
+              />
+              <label
+                className={styles.attachButton}
+                htmlFor="scheduler-ai-screenshot-input"
+                title="Attach schedule screenshot"
+                aria-label="Attach schedule screenshot"
+              >
+                +
+              </label>
+              <textarea
+                value={input}
+                maxLength={5000}
+                disabled={working || !locationId}
+                onChange={(event) => setInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (
+                    event.key === "Enter" &&
+                    !event.shiftKey &&
+                    !event.nativeEvent.isComposing
+                  ) {
+                    event.preventDefault();
+                    void askScheduler();
+                  }
+                }}
+                placeholder="Ask about the schedule, or attach a screenshot to import/analyze..."
+                aria-keyshortcuts="Enter"
+              />
+              <button
+                className={styles.sendButton}
+                type="submit"
+                disabled={
+                  working ||
+                  !locationId ||
+                  (!input.trim() && attachments.length === 0)
+                }
+              >
+                {working ? "Working…" : "Run"}
+              </button>
+            </div>
+            <small className={styles.attachmentHint}>
+              Screenshots: PNG/JPG/WebP, up to 3 images and 3 MB total. Uploads are preview-only until you confirm the import.
+            </small>
           </form>
 
           <div className={styles.status}>{status}</div>

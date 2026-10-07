@@ -25,6 +25,7 @@ type AiRequestBody = {
   date?: string;
   dateSelectionExplicit?: boolean;
   history?: HistoryMessage[];
+  attachments?: unknown[];
 };
 
 type BreakAction = "ADD" | "REMOVE";
@@ -476,6 +477,12 @@ export async function POST(request: Request) {
   }
 
   if (!baseResponse.ok) {
+    return NextResponse.json(baseData, { status: baseResponse.status });
+  }
+
+  // A new screenshot/image is always analysis + preview only. Do not allow the
+  // deterministic repair/break fallbacks below to turn that same upload into a write.
+  if (baseData.attachmentPreviewOnly === true) {
     return NextResponse.json(baseData, { status: baseResponse.status });
   }
 

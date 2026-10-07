@@ -21,9 +21,22 @@ export type SchedulerAiContext = {
   userId: string;
 };
 
+export type SchedulerAiAttachmentMimeType =
+  | "image/png"
+  | "image/jpeg"
+  | "image/webp";
+
+export type SchedulerAiAttachment = {
+  name: string;
+  mimeType: SchedulerAiAttachmentMimeType;
+  dataUrl: string;
+};
+
 export type SchedulerAiHistoryMessage = {
   role: "user" | "assistant";
   text: string;
+  attachmentContext?: string;
+  attachmentNames?: string[];
 };
 
 export type SchedulerAiRequest = {
@@ -33,6 +46,7 @@ export type SchedulerAiRequest = {
   date?: string;
   dateSelectionExplicit?: boolean;
   history?: SchedulerAiHistoryMessage[];
+  attachments?: SchedulerAiAttachment[];
 };
 
 export type SchedulerAiResponse = {
@@ -43,6 +57,9 @@ export type SchedulerAiResponse = {
   changed: boolean;
   mode: SchedulerAiMode;
   effectiveDate?: string;
+  attachmentAnalysis?: string;
+  attachmentNames?: string[];
+  attachmentPreviewOnly?: boolean;
 };
 
 export type SchedulerAiFeedbackRequest = {
