@@ -172,8 +172,16 @@ export async function GET(request: Request) {
       );
     }
 
+    const completeRules = mergeRuleValues(
+      locationId,
+      rules as unknown as Record<string, unknown>,
+      {}
+    );
+
     return NextResponse.json({
-      rules: serializeRules(rules as unknown as Record<string, unknown>),
+      rules: serializeRules(
+        completeRules as unknown as Record<string, unknown>
+      ),
     });
   } catch (error) {
     console.error("Failed to load scheduling rules:", error);
