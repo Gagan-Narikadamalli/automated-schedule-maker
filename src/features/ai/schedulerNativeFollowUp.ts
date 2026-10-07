@@ -1,3 +1,4 @@
+import { expandNativeClarificationFollowUp } from "./schedulerNativeClarification";
 import type { SchedulerAiHistoryMessage } from "./types";
 
 function lastUserMessage(history: SchedulerAiHistoryMessage[]): string {
@@ -208,6 +209,12 @@ export function expandNativeFollowUp(
     previousAssistant
   );
   if (clientContinuation) return clientContinuation;
+
+  const clarificationContinuation = expandNativeClarificationFollowUp(
+    current,
+    history
+  );
+  if (clarificationContinuation) return clarificationContinuation;
 
   if (
     /^(?:what\s+about|same\s+(?:thing\s+)?(?:for)?|and)\s+(?:today|tomorrow|yesterday|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\??$/i.test(

@@ -36,7 +36,7 @@ export function suggestClientDisplayCode(fullName: string): string {
 }
 
 function autoDisplayCodeRequested(message: string): boolean {
-  return /\b(?:code|display\s+code)\s+(?:anything(?:\s+you\s+like)?|whatever(?:\s+you\s+like)?|any\s+code|your\s+choice|you\s+(?:choose|pick|decide)|choose\s+(?:one|it|a\s+code)|pick\s+(?:one|it|a\s+code))\b/i.test(
+  return /\b(?:(?:code|display\s+code)\s+(?:anything(?:\s+you\s+like)?|whatever(?:\s+you\s+like)?|any\s+code|your\s+choice|you\s+(?:choose|pick|decide))|(?:choose|pick)\s+(?:(?:the|a)\s+)?(?:display\s+)?code)\b/i.test(
     message
   );
 }
@@ -507,7 +507,8 @@ export function planNativeManagementAction(args: {
   }
 
   if (
-    /\b(?:set|move|change|add|remove|delete|clear)\b[\s\S]*\bbreak\b/i.test(raw)
+    /\b(?:set|move|change|add|remove|delete|clear)\b[\s\S]*\bbreak\b/i.test(raw) &&
+    !args.times.startTime
   ) {
     return clarification(
       "A break change requires the staff member and start time."
@@ -519,6 +520,14 @@ export function planNativeManagementAction(args: {
   ) {
     return clarification(
       "A client attendance change requires the client reference and whether it is a call-out or call-in. A time range is optional for a full-day change."
+    );
+  }
+
+  if (
+    /\b(?:set|change|update)\b[\s\S]*\b(?:break\s+eligibility|default\s+break|break\s+window|schedule\s+hours?|minimum\s+assignment|maximum\s+consecutive)\b/i.test(raw)
+  ) {
+    return clarification(
+      "This scheduler rule change is missing its value or time range. Please provide the exact value you want to use."
     );
   }
 

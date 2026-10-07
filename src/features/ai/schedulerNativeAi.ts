@@ -357,6 +357,22 @@ export function planNativeSchedulerAction(args: {
 
   const copySourceDate = extractCopySourceDate(normalizedMessage, args.date);
   if (
+    !copySourceDate &&
+    /\b(?:copy|use)\b[\s\S]*\bschedule\b/i.test(raw) &&
+    !/\btemplate\b/i.test(raw)
+  ) {
+    return {
+      intent: "CLARIFICATION",
+      toolName: "__native_clarification__",
+      input: {
+        message:
+          "Copying a schedule requires the source day or date. The currently selected date will be the target.",
+      },
+      confidence: 1,
+      explanation: "A source schedule day is required before copying.",
+    };
+  }
+  if (
     copySourceDate &&
     /\b(?:copy|use)\b[\s\S]*\bschedule\b/i.test(raw)
   ) {
@@ -449,6 +465,19 @@ export function planNativeSchedulerAction(args: {
     };
   }
 
+  if (/\b(?:apply|use)\b[\s\S]*\btemplate\b/i.test(raw)) {
+    return {
+      intent: "CLARIFICATION",
+      toolName: "__native_clarification__",
+      input: {
+        message:
+          "A schedule template change requires the template name. Applying a template uses the currently selected date unless you specify another target date.",
+      },
+      confidence: 1,
+      explanation: "A template name is required.",
+    };
+  }
+
   const removeCallOut =
     /\b(?:remove|delete|clear|cancel)\b[\s\S]*\bcall[- ]?out\b/i.test(raw);
   const callOutStaff = extractCallOutStaff(normalizedMessage);
@@ -461,6 +490,18 @@ export function planNativeSchedulerAction(args: {
           .replace(/\bcall[- ]?out\b/gi, "")
           .replace(/\bfor\b/gi, "")
       );
+    if (!staff) {
+      return {
+        intent: "CLARIFICATION",
+        toolName: "__native_clarification__",
+        input: {
+          message:
+            "A staff call-out change requires the staff member. A time range is optional; without one I will treat it as a full-day call-out.",
+        },
+        confidence: 1,
+        explanation: "A staff reference is required for a call-out change.",
+      };
+    }
     return {
       intent: "CALL_OUT",
       toolName: "record_call_out",
@@ -475,6 +516,21 @@ export function planNativeSchedulerAction(args: {
       },
       confidence: 0.98,
       explanation: "Record or remove a staff call-out through scheduler validation.",
+    };
+  }
+
+  if (
+    /\b(?:record|add|mark|remove|delete|clear|cancel)?\s*(?:a\s+)?call[- ]?out\b/i.test(raw)
+  ) {
+    return {
+      intent: "CLARIFICATION",
+      toolName: "__native_clarification__",
+      input: {
+        message:
+          "A staff call-out change requires the staff member. A time range is optional; without one I will treat it as a full-day call-out.",
+      },
+      confidence: 1,
+      explanation: "A staff reference is required for a call-out change.",
     };
   }
 

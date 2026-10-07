@@ -54,7 +54,12 @@ export function schedulerAnswerNeedsFollowUp(reply: string): boolean {
     normalized.includes("before i can continue") ||
     normalized.includes("which person do you mean") ||
     normalized.includes("which client do you mean") ||
-    normalized.includes("which staff member do you mean")
+    normalized.includes("which staff member do you mean") ||
+    /\b(?:creating|adding|saving|copying|placing|applying)\b[\s\S]*\brequires?\b/.test(normalized) ||
+    /\b(?:staff|client|schedule|template|rule|event|break|call-out|attendance|replacement)\b[\s\S]*\b(?:requires?|needs?|missing)\b/.test(normalized) ||
+    normalized.includes("requires both a start time and end time") ||
+    normalized.includes("needs weekday information") ||
+    normalized.includes("is missing its value or time range")
   );
 }
 
