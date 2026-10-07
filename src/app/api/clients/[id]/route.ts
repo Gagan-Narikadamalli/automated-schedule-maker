@@ -10,6 +10,14 @@ import {
 import { writeAuditLog } from "@/lib/api/audit";
 import { connectToDatabase } from "@/lib/db";
 import { Client } from "@/models/Client";
+import { ClientAttendanceException } from "@/models/ClientAttendanceException";
+import { HistoricalScheduleAssignment } from "@/models/HistoricalScheduleAssignment";
+import { NapSession } from "@/models/NapSession";
+import { ScheduleAssignment } from "@/models/ScheduleAssignment";
+import { ScheduleTemplate } from "@/models/ScheduleTemplate";
+import { SpeechSession } from "@/models/SpeechSession";
+import { TrialDataset } from "@/models/TrialDataset";
+import { UnplacedAssignment } from "@/models/UnplacedAssignment";
 
 type TimePatternRequest = {
   name: string;
@@ -253,6 +261,90 @@ export async function PATCH(request: Request, context: RouteContext) {
 
     return NextResponse.json(
       { error: "Client could not be updated." },
+      { status: 500 }
+    );
+  }
+}
+
+
+export async function DELETE(_request: Request, context: RouteContext) {
+  const auth = await requireApiSession();
+
+  if (auth.error) {
+    return auth.error;
+  }
+
+  if (!sessionHasAnyRole(auth.session, PEOPLE_WRITE_ROLES)) {
+    return forbiddenResponse();
+  }
+
+  try {
+    const { id } = await context.params;
+
+    await connectToDatabase();
+
+    const client = await Client.findById(id);
+
+    if (!client) {
+      return NextResponse.json(
+        { error: "Client was not found." },
+        { status: 404 }
+      );
+    }
+
+    const locationId = String(client.locationId);
+
+    if (!sessionCanAccessLocation(auth.session, locationId)) {
+      return forbiddenResponse("You do not have access to this location.");
+    }
+
+    const before = client.toObject();
+
+    await Promise.all([
+      ScheduleAssignment.deleteMany({ locationId, clientId: client._id }),
+      NapSession.deleteMany({ locationId, clientId: client._id }),
+      SpeechSession.deleteMany({ locationId, clientId: client._id }),
+      ClientAttendanceException.deleteMany({
+        locationId,
+        clientId: client._id,
+      }),
+      UnplacedAssignment.deleteMany({ locationId, clientId: client._id }),
+      HistoricalScheduleAssignment.updateMany(
+        { locationId, clientId: client._id },
+        { $set: { clientId: null } }
+      ),
+      ScheduleTemplate.updateMany(
+        { locationId, "assignments.clientId": client._id },
+        { $pull: { assignments: { clientId: client._id } } }
+      ),
+      TrialDataset.updateMany(
+        { locationId },
+        { $pull: { clientIds: client._id } }
+      ),
+    ]);
+
+    await Client.deleteOne({ _id: client._id });
+
+    await writeAuditLog({
+      locationId,
+      userId: auth.session.userId,
+      action: "DELETE",
+      entityType: "CLIENT",
+      entityId: String(client._id),
+      summary: `Deleted client ${client.displayCode} and cleaned scheduler references.`,
+      before,
+      after: null,
+    });
+
+    return NextResponse.json({
+      success: true,
+      deletedId: String(client._id),
+    });
+  } catch (error) {
+    console.error("Failed to delete client:", error);
+
+    return NextResponse.json(
+      { error: "Client could not be deleted." },
       { status: 500 }
     );
   }
