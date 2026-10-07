@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 
+import { isSchedulerWebsiteWriteInvocation } from "../src/features/ai/schedulerWebsiteTools";
+
 const root = process.cwd();
 
 function source(relativePath: string): string {
@@ -132,6 +134,28 @@ assert.doesNotMatch(paidBase, /schedulerNativeAi/);
 assert.doesNotMatch(paidBase, /schedulerNativeEvaluation/);
 assert.doesNotMatch(paidBase, /schedulerNativeFollowUp/);
 
+assert.equal(
+  isSchedulerWebsiteWriteInvocation("manage_schedule_template", {
+    action: "LIST",
+  }),
+  false,
+  "Listing templates must remain read-only."
+);
+assert.equal(
+  isSchedulerWebsiteWriteInvocation("manage_schedule_template", {
+    action: "APPLY",
+  }),
+  true,
+  "Applying a template must remain a write."
+);
+
+const nativeRoute = source(nativeEntry);
+assert.match(
+  nativeRoute,
+  /manage_schedule_template:\s*websiteTools\.manage_schedule_template/,
+  "Native read-only mode must still support template listing."
+);
+
 const assistant = source("src/components/ScheduleAssistant.tsx");
 assert.match(
   assistant,
@@ -141,8 +165,17 @@ assert.match(assistant, /changeProvider\("native"\)/);
 assert.match(assistant, /changeProvider\("gateway"\)/);
 assert.match(assistant, /Free AI/);
 assert.match(assistant, /Paid AI/);
+assert.match(
+  assistant,
+  /provider === "native" && messages\.length === 0/,
+  "A fresh Native chat must clear stale pending confirmations before its first request."
+);
+assert.match(
+  assistant,
+  /if \(!\(await clearPendingAiState\(requestContext\.locationId\)\)\)/,
+  "Switching providers must always clear Native pending confirmation state."
+);
 
-const nativeRoute = source(nativeEntry);
 assert.match(nativeRoute, /provider: "native"/);
 assert.match(nativeRoute, /thinkingLevel: "low"/);
 assert.doesNotMatch(nativeRoute, /ToolLoopAgent|generateText|AI_GATEWAY|openai\//i);
