@@ -49,6 +49,14 @@ type RulesRequest = {
   autoUseWeekdayTemplate?: boolean;
   autoUsePreviousWeekdaySchedule?: boolean;
   autoUseHistoricalPatterns?: boolean;
+  napDurationRulesEnabled?: boolean;
+  napMinimumMinutes?: number;
+  napPreferredMinutes?: number;
+  napMaximumMinutes?: number;
+  speechDurationRulesEnabled?: boolean;
+  speechMinimumMinutes?: number;
+  speechPreferredMinutes?: number;
+  speechMaximumMinutes?: number;
   supervisionPlanningTargetPercent?: number;
 };
 
@@ -100,6 +108,14 @@ function defaultRules(locationId: string) {
     autoUseWeekdayTemplate: true,
     autoUsePreviousWeekdaySchedule: true,
     autoUseHistoricalPatterns: true,
+    napDurationRulesEnabled: true,
+    napMinimumMinutes: 30,
+    napPreferredMinutes: 30,
+    napMaximumMinutes: 60,
+    speechDurationRulesEnabled: false,
+    speechMinimumMinutes: 30,
+    speechPreferredMinutes: 30,
+    speechMaximumMinutes: 60,
     supervisionPlanningTargetPercent: 5,
   };
 }
@@ -148,6 +164,39 @@ function validatePriority(value: number | undefined): boolean {
 
 function validateRolePriority(value: number | undefined): boolean {
   return value === undefined || (value >= 0 && value <= 1000);
+}
+
+function validateEventDurationValue(value: number | undefined): boolean {
+  return (
+    value === undefined ||
+    (value >= 30 && value <= 240 && value % 30 === 0)
+  );
+}
+
+function durationRuleError(
+  label: string,
+  minimumMinutes: number,
+  preferredMinutes: number,
+  maximumMinutes: number
+): string | null {
+  if (
+    minimumMinutes < 30 ||
+    maximumMinutes > 240 ||
+    minimumMinutes % 30 !== 0 ||
+    preferredMinutes % 30 !== 0 ||
+    maximumMinutes % 30 !== 0
+  ) {
+    return `${label} duration values must use 30-minute increments between 30 and 240 minutes.`;
+  }
+
+  if (
+    minimumMinutes > preferredMinutes ||
+    preferredMinutes > maximumMinutes
+  ) {
+    return `${label} duration must satisfy minimum <= preferred <= maximum.`;
+  }
+
+  return null;
 }
 
 export async function GET(request: Request) {
@@ -286,6 +335,25 @@ export async function PUT(request: Request) {
       );
     }
 
+    const durationValuesAreValid = [
+      body.napMinimumMinutes,
+      body.napPreferredMinutes,
+      body.napMaximumMinutes,
+      body.speechMinimumMinutes,
+      body.speechPreferredMinutes,
+      body.speechMaximumMinutes,
+    ].every(validateEventDurationValue);
+
+    if (!durationValuesAreValid) {
+      return NextResponse.json(
+        {
+          error:
+            "Nap and Speech duration values must use 30-minute increments between 30 and 240 minutes.",
+        },
+        { status: 400 }
+      );
+    }
+
     const prioritiesAreValid = [
       body.preferredStaffPriority,
       body.sameTeamPriority,
@@ -346,6 +414,26 @@ export async function PUT(request: Request) {
       existingRecord,
       body
     );
+
+    const napDurationError = durationRuleError(
+      "Nap",
+      changes.napMinimumMinutes,
+      changes.napPreferredMinutes,
+      changes.napMaximumMinutes
+    );
+    const speechDurationError = durationRuleError(
+      "Speech",
+      changes.speechMinimumMinutes,
+      changes.speechPreferredMinutes,
+      changes.speechMaximumMinutes
+    );
+
+    if (napDurationError || speechDurationError) {
+      return NextResponse.json(
+        { error: napDurationError || speechDurationError },
+        { status: 400 }
+      );
+    }
 
     if (
       changes.minimumClientStaffAssignmentMinutes >
