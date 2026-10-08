@@ -237,13 +237,17 @@ export function TemplateManager() {
         throw new Error(data.error || "Template could not be saved.");
       }
 
+      const savedTemplateId = data.template?.id ?? null;
       setName("");
       await loadTemplates();
       setMessage(
         `Exact ${displayDay(
           getDayOfWeekFromDate(templateSourceDate)
-        )} template saved from ${templateSourceDate}. Auto Generate can use it as the same-weekday reference, and direct application will still revalidate current constraints.`
+        )} template captured from ${templateSourceDate}. Edit the template in the isolated template workspace; the live schedule will not be changed.`
       );
+      if (savedTemplateId) {
+        setEditorTemplateId(savedTemplateId);
+      }
     } catch (error) {
       setMessage(
         error instanceof Error ? error.message : "Template could not be saved."
@@ -372,6 +376,9 @@ export function TemplateManager() {
       }
 
       await loadTemplates();
+      if (data.template?.id) {
+        setEditorTemplateId(data.template.id);
+      }
       const inspection = data.inspection;
       const skippedStaff = inspection?.unmatchedStaffHeaders.length ?? 0;
       const skippedClients = inspection?.unmatchedClientCodes.length ?? 0;
@@ -553,10 +560,10 @@ export function TemplateManager() {
       <section className="section-card">
         <h2>Create Template from a Saved Day</h2>
         <p className="helper-text">
-          Generate or manually edit any schedule in the main workspace first,
-          then capture that exact saved day here. The weekday is detected from
-          the date automatically. Saving the same template name again updates it
-          with the newly edited day.
+          Capture any already-saved schedule day as a template draft. After it
+          is captured, the isolated Template Editor opens automatically so you
+          can change the template without changing the live scheduling calendar.
+          The weekday is detected from the date automatically.
         </p>
 
         <div className="form-grid">
@@ -605,11 +612,10 @@ export function TemplateManager() {
             }
             onClick={() => void createTemplate()}
           >
-            {working ? "Working..." : "Save Exact Day as Template"}
+            {working
+              ? "Working..."
+              : "Capture Day & Open Template Editor"}
           </button>
-          <a className="button button-secondary" href="/">
-            Open Schedule Workspace to Generate / Edit
-          </a>
         </div>
       </section>
 
