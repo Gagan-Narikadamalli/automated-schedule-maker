@@ -112,7 +112,7 @@ function getPairAssignmentMinutes(
 
 function isSameDayPairContinuation(
   staffId: string,
-  clientId: string,
+  client: SchedulerClient,
   startTime: string,
   assignments: SchedulerAssignment[],
   slotLengthMinutes: number
@@ -125,7 +125,7 @@ function isSameDayPairContinuation(
 
   const pairMinutes = getPairAssignmentMinutes(
     staffId,
-    clientId,
+    client.id,
     assignments
   );
 
@@ -133,10 +133,49 @@ function isSameDayPairContinuation(
     return true;
   }
 
-  return pairMinutes.some(
-    (minute) =>
-      Math.abs(minute - targetMinutes) === slotLengthMinutes
+  if (
+    pairMinutes.some(
+      (minute) =>
+        Math.abs(minute - targetMinutes) === slotLengthMinutes
+    )
+  ) {
+    return true;
+  }
+
+  // A planned client event is not treated as an arbitrary pairing restart.
+  // If the technician was with the client immediately before the client's Nap
+  // or Speech event, allow that same technician to resume afterward. This
+  // preserves one readable client block around the protected event instead of
+  // forcing another unnecessary handoff.
+  const earlierPairMinutes = pairMinutes.filter(
+    (minute) => minute < targetMinutes
   );
+
+  if (earlierPairMinutes.length === 0) {
+    return false;
+  }
+
+  const latestPairMinute = Math.max(...earlierPairMinutes);
+
+  for (
+    let minute = latestPairMinute + slotLengthMinutes;
+    minute < targetMinutes;
+    minute += slotLengthMinutes
+  ) {
+    const slot = `${String(Math.floor(minute / 60)).padStart(
+      2,
+      "0"
+    )}:${String(minute % 60).padStart(2, "0")}`;
+
+    if (
+      !client.napSlots.includes(slot) &&
+      !client.speechSlots.includes(slot)
+    ) {
+      return false;
+    }
+  }
+
+  return latestPairMinute + slotLengthMinutes < targetMinutes;
 }
 
 function countConsecutiveClientBlocksWithStaff(
@@ -289,7 +328,7 @@ export function canAssignStaffToClient({
     !allowSameDayPairRepeat &&
     !isSameDayPairContinuation(
       staffMember.id,
-      client.id,
+      client,
       startTime,
       assignments,
       rules.slotLengthMinutes
