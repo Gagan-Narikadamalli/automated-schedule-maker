@@ -18,6 +18,12 @@ type TemplateRecord = {
   sourceName?: string;
   sourceDate?: string;
   styleNotes?: string[];
+  learningOnly?: boolean;
+  learningProfile?: {
+    humanStyleBlockBalancingEnabled?: boolean;
+    preferredClientsPerStaffPerDay?: number;
+    preferredStaffPerClientPerDay?: number;
+  } | null;
   active: boolean;
 };
 
@@ -213,6 +219,16 @@ export function TemplateManager() {
           sourceDate: workbookSourceDate,
           sourceType: "HISTORICAL_WORKBOOK",
           sourceName: "Livingston workbook history",
+          allowLearningOnlyFallback: true,
+          learningProfile: {
+            humanStyleBlockBalancingEnabled: true,
+            preferredClientsPerStaffPerDay: 2,
+            preferredStaffPerClientPerDay: 2,
+            continuityPriority: 200,
+            clientHandoffPenaltyPriority: 200,
+            workloadBalancePriority: 0,
+            staffScheduleCompactnessPriority: 8,
+          },
           styleNotes: [
             "Prefer long continuous client/staff blocks instead of half-hour fragmentation.",
             "Use natural handoff points around Speech, Nap, and staff breaks.",
@@ -234,7 +250,9 @@ export function TemplateManager() {
       setWorkbookName("");
       await loadTemplates();
       setMessage(
-        `Workbook template saved from ${workbookSourceDate}. ${data.skippedHistoricalRows ?? 0} unmapped workbook row(s) were skipped. Auto Generate and Native AI can use this as same-weekday guidance.`
+        data.template?.learningOnly
+          ? `Workbook learning template saved for ${workbookDayOfWeek}. The screenshot/style guidance is active now; exact workbook cells can be added later when the sheet is imported.`
+          : `Workbook template saved from ${workbookSourceDate}. ${data.skippedHistoricalRows ?? 0} unmapped workbook row(s) were skipped. Auto Generate and Native AI can use this as same-weekday guidance.`
       );
     } catch (error) {
       setMessage(
@@ -588,7 +606,9 @@ export function TemplateManager() {
                     <td>{template.assignmentCount}</td>
                     <td>
                       {template.sourceType === "HISTORICAL_WORKBOOK"
-                        ? `Workbook ${template.sourceDate ?? ""}`
+                        ? template.learningOnly
+                          ? `Workbook learning profile ${template.sourceDate ?? ""}`
+                          : `Workbook ${template.sourceDate ?? ""}`
                         : template.sourceType === "SAVED_SCHEDULE"
                           ? `Saved day ${template.sourceDate ?? ""}`
                           : "Manual"}
@@ -598,10 +618,15 @@ export function TemplateManager() {
                         <button
                           type="button"
                           className="button button-primary button-small"
-                          disabled={working}
+                          disabled={working || template.learningOnly}
+                          title={
+                            template.learningOnly
+                              ? "Learning-only workbook templates guide Auto Generate and Native AI; they are not direct cell copies."
+                              : undefined
+                          }
                           onClick={() => void applyTemplate(template)}
                         >
-                          Apply
+                          {template.learningOnly ? "Learning only" : "Apply"}
                         </button>
                         <button
                           type="button"
