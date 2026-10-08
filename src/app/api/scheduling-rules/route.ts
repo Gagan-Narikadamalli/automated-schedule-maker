@@ -74,7 +74,7 @@ function defaultRules(locationId: string) {
     maximumTechsPerClientPerDay: 3,
     minimumClientStaffAssignmentMinutes: 30,
     maximumClientStaffConsecutiveHours: 4,
-    preventSameStaffClientRepeatSameDay: true,
+    preventSameStaffClientRepeatSameDay: false,
     allowSameStaffClientRepeatForCoverageException: true,
     breakSchedulingEnabled: true,
     defaultBreakMinutes: 30,
