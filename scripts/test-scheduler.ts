@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import { matchEntityReference } from "../src/features/ai/entityReference";
 import { generateSchedule } from "../src/features/scheduler/engine/generateSchedule";
+import { balanceScheduleLikeHuman } from "../src/features/scheduler/engine/humanStyleBlockBalance";
 import { buildHistoricalPatternScores } from "../src/features/scheduler/engine/historicalPatterns";
 import { reserveStaffBreaks } from "../src/features/scheduler/engine/reserveBreaks";
 import type {
@@ -447,6 +448,199 @@ function testNewArrivalDoesNotStealOngoingClientStaff() {
     result.metrics.uncoveredClientSlots,
     0,
     "Continuity must never reduce client coverage."
+  );
+}
+
+function testHumanStyleBlockExchangeBalancesLongRuns() {
+  const staff = [
+    createStaff(
+      "izzy",
+      "Izzy",
+      "BT",
+      [
+        "08:00",
+        "08:30",
+        "09:00",
+        "09:30",
+        "10:00",
+        "10:30",
+        "11:00",
+        "11:30",
+        "12:00",
+        "12:30",
+        "13:00",
+        "13:30",
+        "14:00",
+        "14:30",
+      ]
+    ),
+    createStaff(
+      "dezz",
+      "Dezz",
+      "BT",
+      [
+        "08:00",
+        "08:30",
+        "09:00",
+        "09:30",
+        "10:00",
+        "10:30",
+        "11:00",
+        "11:30",
+        "12:00",
+        "12:30",
+        "13:00",
+        "13:30",
+        "14:00",
+        "14:30",
+      ]
+    ),
+  ];
+  const zibo = createClient(
+    "zibo",
+    "ZiBo",
+    [
+      "08:00",
+      "08:30",
+      "09:00",
+      "09:30",
+      "10:00",
+      "10:30",
+      "11:00",
+      "11:30",
+      "12:30",
+      "13:00",
+      "13:30",
+      "14:00",
+      "14:30",
+    ]
+  );
+  const rema = createClient(
+    "rema",
+    "ReMa",
+    [
+      "08:00",
+      "08:30",
+      "09:00",
+      "09:30",
+      "10:00",
+      "10:30",
+      "11:00",
+      "11:30",
+    ]
+  );
+  const lura = createClient(
+    "lura",
+    "LuRa",
+    ["12:30", "13:00", "13:30", "14:00", "14:30"]
+  );
+  const assignments: SchedulerAssignment[] = [
+    ...zibo.requiredSlots.slice(0, 8).map((startTime) => ({
+      id: `zibo-morning-${startTime}`,
+      staffId: "izzy",
+      clientId: "zibo",
+      startTime,
+      assignmentType: "CLIENT_1_TO_1" as const,
+      source: "AUTO" as const,
+      locked: false,
+    })),
+    {
+      id: "izzy-break",
+      staffId: "izzy",
+      startTime: "12:00",
+      assignmentType: "BREAK",
+      source: "AUTO",
+      locked: true,
+    },
+    ...zibo.requiredSlots.slice(8).map((startTime) => ({
+      id: `zibo-afternoon-${startTime}`,
+      staffId: "izzy",
+      clientId: "zibo",
+      startTime,
+      assignmentType: "CLIENT_1_TO_1" as const,
+      source: "AUTO" as const,
+      locked: false,
+    })),
+    ...rema.requiredSlots.map((startTime) => ({
+      id: `rema-${startTime}`,
+      staffId: "dezz",
+      clientId: "rema",
+      startTime,
+      assignmentType: "CLIENT_1_TO_1" as const,
+      source: "AUTO" as const,
+      locked: false,
+    })),
+    {
+      id: "dezz-break",
+      staffId: "dezz",
+      startTime: "12:00",
+      assignmentType: "BREAK",
+      source: "AUTO",
+      locked: true,
+    },
+    ...lura.requiredSlots.map((startTime) => ({
+      id: `lura-${startTime}`,
+      staffId: "dezz",
+      clientId: "lura",
+      startTime,
+      assignmentType: "CLIENT_1_TO_1" as const,
+      source: "AUTO" as const,
+      locked: false,
+    })),
+  ];
+
+  const result = balanceScheduleLikeHuman({
+    staff,
+    clients: [zibo, rema, lura],
+    assignments,
+    callOutStaffIds: [],
+    rules: {
+      ...DEFAULT_RULES,
+      humanStyleBlockBalancingEnabled: true,
+      preferredClientsPerStaffPerDay: 2,
+      preferredStaffPerClientPerDay: 2,
+      maximumClientsPerTechPerDay: 3,
+      maximumTechsPerClientPerDay: 3,
+    },
+  });
+
+  assert.ok(
+    result.blockSwapCount >= 1,
+    "Human-style balancing should exchange an afternoon block when two long continuous blocks can be cleanly swapped."
+  );
+
+  const izzyClients = new Set(
+    result.assignments
+      .filter(
+        (assignment) =>
+          assignment.staffId === "izzy" &&
+          assignment.assignmentType === "CLIENT_1_TO_1"
+      )
+      .map((assignment) => assignment.clientId)
+  );
+  const dezzClients = new Set(
+    result.assignments
+      .filter(
+        (assignment) =>
+          assignment.staffId === "dezz" &&
+          assignment.assignmentType === "CLIENT_1_TO_1"
+      )
+      .map((assignment) => assignment.clientId)
+  );
+
+  assert.equal(
+    izzyClients.size,
+    2,
+    "Izzy should end with two stable clients rather than owning only ZiBo all day."
+  );
+  assert.equal(
+    dezzClients.size,
+    2,
+    "Dezz should keep a two-client day after the clean block exchange."
+  );
+  assert.ok(
+    result.penaltyAfter < result.penaltyBefore,
+    "The human-style exchange must improve the schedule quality score."
   );
 }
 
@@ -1104,6 +1298,7 @@ function runSchedulerRegressionScenarios() {
   testManualAssignmentsStayProtected();
   testManualAssignmentsCanBeRebuiltWhenPreservationIsOff();
   testNewArrivalDoesNotStealOngoingClientStaff();
+  testHumanStyleBlockExchangeBalancesLongRuns();
   testPairingCanResumeAcrossClientNap();
   testHandoffPenaltyPrefersNeighboringClientContinuity();
   testCompactnessPrefersAdjacentStaffWork();
