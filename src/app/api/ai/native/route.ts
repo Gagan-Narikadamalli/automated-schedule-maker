@@ -238,8 +238,6 @@ export async function POST(request: Request) {
           ...advisoryTools,
           get_scheduler_configuration:
             websiteTools.get_scheduler_configuration,
-          manage_schedule_template:
-            websiteTools.manage_schedule_template,
         };
 
     const nativeResult = await runNativeSchedulerAi({
