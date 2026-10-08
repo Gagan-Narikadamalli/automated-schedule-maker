@@ -1,4 +1,10 @@
 import { NextResponse } from "next/server";
+import {
+  forbiddenResponse,
+  requireApiSession,
+  sessionCanAccessLocation,
+} from "@/lib/api/auth";
+
 
 import { auditFinalCoverage } from "@/features/scheduler/engine/auditFinalCoverage";
 import { generateSchedule } from "@/features/scheduler/engine/generateSchedule";
@@ -57,6 +63,9 @@ function buildCoverageByRole(
 }
 
 export async function POST(request: Request) {
+  const auth = await requireApiSession();
+  if (auth.error) return auth.error;
+  
   try {
     const body = (await request.json()) as PreviewRequest;
     const locationId = body.locationId?.trim();
@@ -68,6 +77,10 @@ export async function POST(request: Request) {
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return NextResponse.json({ error: "Date must use YYYY-MM-DD format." }, { status: 400 });
+    }
+
+    if (!sessionCanAccessLocation(auth.session, locationId)) {
+      return forbiddenResponse("You do not have access to this location.");
     }
 
     const dayData = await buildDaySchedulerInput(locationId, date);
