@@ -152,6 +152,11 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       clients: clientRows,
+      rosterStaff: plainStaffDocuments.map((member) => ({
+        id: String(member._id),
+        name: firstNameOnly(member.fullName),
+        role: String(member.role ?? ""),
+      })),
       date,
       locationId,
       recentSavedScheduleDates,
