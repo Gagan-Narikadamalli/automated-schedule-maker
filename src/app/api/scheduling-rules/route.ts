@@ -78,9 +78,9 @@ function defaultRules(locationId: string) {
     allowSameStaffClientRepeatForCoverageException: true,
     breakSchedulingEnabled: true,
     defaultBreakMinutes: 30,
-    breakEligibilityHours: 6,
+    breakEligibilityHours: 0,
     breakWindowStart: "11:00",
-    breakWindowEnd: "13:30",
+    breakWindowEnd: "14:00",
     scheduleStartTime: "08:00",
     scheduleEndTime: "20:00",
     slotLengthMinutes: 30,
@@ -113,11 +113,11 @@ function defaultRules(locationId: string) {
     napDurationRulesEnabled: true,
     napMinimumMinutes: 30,
     napPreferredMinutes: 30,
-    napMaximumMinutes: 60,
+    napMaximumMinutes: 30,
     speechDurationRulesEnabled: true,
     speechMinimumMinutes: 30,
     speechPreferredMinutes: 30,
-    speechMaximumMinutes: 60,
+    speechMaximumMinutes: 30,
     supervisionPlanningTargetPercent: 5,
   };
 }
@@ -390,13 +390,33 @@ export async function PUT(request: Request) {
       body
     );
 
-    // Legacy min/max fields are kept in MongoDB for compatibility with
-    // previously saved rules. The current scheduler uses one exact event
-    // duration inside each configured placement window.
+    // Every scheduled staff member is owed one break. Breaks may be
+    // narrowed inside the clinic window, but never scheduled before 11 AM or
+    // after 2 PM.
+    changes.breakEligibilityHours = 0;
+
+    if (
+      changes.breakWindowStart < "11:00" ||
+      changes.breakWindowEnd > "14:00" ||
+      changes.breakWindowEnd <= changes.breakWindowStart
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Staff breaks must stay inside the 11:00 AM to 2:00 PM clinic break window.",
+        },
+        { status: 400 }
+      );
+    }
+
+    // Nap duration remains configurable, but Speech is always one fixed
+    // 30-minute appointment for one client.
     changes.napMinimumMinutes = changes.napPreferredMinutes;
     changes.napMaximumMinutes = changes.napPreferredMinutes;
-    changes.speechMinimumMinutes = changes.speechPreferredMinutes;
-    changes.speechMaximumMinutes = changes.speechPreferredMinutes;
+    changes.speechDurationRulesEnabled = true;
+    changes.speechMinimumMinutes = 30;
+    changes.speechPreferredMinutes = 30;
+    changes.speechMaximumMinutes = 30;
 
     if (
       changes.minimumClientStaffAssignmentMinutes >
