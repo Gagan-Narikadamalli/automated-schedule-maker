@@ -522,7 +522,7 @@ export function ScheduleGridEnhanced({
 
     // Preserve an existing rectangular selection when the user starts dragging
     // one of its occupied cells, rather than collapsing it to a single cell.
-    if (manualMode && isCellSelected(row, column) &&
+    if (manualMode && (normalizedSelection.firstRow !== normalizedSelection.lastRow || normalizedSelection.firstColumn !== normalizedSelection.lastColumn) && isCellSelected(row, column) &&
         !["EMPTY", "OPEN", "UNAVAILABLE"].includes(grid[row][column].assignmentType)) {
       setDragSelecting(false);
       return;
@@ -1254,32 +1254,40 @@ export function ScheduleGridEnhanced({
     if (!(await confirmManualOverride(replacing.length, unavailable.length, "replaced by the moved selection"))) return;
     const nextGrid = cloneGrid(grid);
     const mutations: ScheduleGridMutation[] = [];
+    const movedEntirelyIntoScratch = destinations.every(({ target: destination }) => isScratchColumn(destination.column));
+    const affected = new Map<string, CellPosition>();
+    for (const source of sources) affected.set(`${source.row}:${source.column}`, source);
+    for (const item of destinations) affected.set(`${item.target.row}:${item.target.column}`, item.target);
 
-    // Clear every source first, then place the exact same block pattern at
-    // the destination. This supports overlapping source/destination ranges.
+    // Build final state first: overlapping source/destination cells must only
+    // produce ONE persisted mutation and ONE undo history entry per coordinate.
     for (const source of sources) {
-      if (destinationKeys.has(`${source.row}:${source.column}`)) continue;
-      const oldCell = grid[source.row][source.column];
-      const empty = createEmptyScheduleCell();
-      nextGrid[source.row][source.column] = empty;
-      mutations.push({
-        ...mutationForCell(source.row, source.column, oldCell, empty),
-        stagedInScratch: !isScratchColumn(source.column) &&
-          destinations.every(({ target: cell }) => isScratchColumn(cell.column)),
-      });
+      nextGrid[source.row][source.column] = createEmptyScheduleCell();
     }
     for (const item of destinations) {
-      const sourceCell = grid[item.source.row][item.source.column];
-      const targetCell = grid[item.target.row][item.target.column];
       const scratch = isScratchColumn(item.target.column);
-      const stagedCell: DemoGridCell = {
-        ...sourceCell,
+      nextGrid[item.target.row][item.target.column] = {
+        ...grid[item.source.row][item.source.column],
         source: "MANUAL",
         locked: !scratch,
       };
-      nextGrid[item.target.row][item.target.column] = stagedCell;
-      mutations.push(mutationForCell(item.target.row, item.target.column, targetCell, stagedCell,
-        !scratch && targetCell.assignmentType === "UNAVAILABLE"));
+    }
+    for (const position of affected.values()) {
+      const oldCell = grid[position.row][position.column];
+      const newCell = nextGrid[position.row][position.column];
+      mutations.push({
+        ...mutationForCell(
+          position.row,
+          position.column,
+          oldCell,
+          newCell,
+          !isScratchColumn(position.column) && oldCell.assignmentType === "UNAVAILABLE" && newCell.assignmentType !== "EMPTY"
+        ),
+        stagedInScratch: movedEntirelyIntoScratch &&
+          sourceKeys.has(`${position.row}:${position.column}`) &&
+          !destinationKeys.has(`${position.row}:${position.column}`) &&
+          !isScratchColumn(position.column),
+      });
     }
     const saved = await commitMutations(
       nextGrid,
