@@ -57,6 +57,25 @@ const ScheduleTemplateSchema = new Schema(
       required: true,
       trim: true,
     },
+    sourceType: {
+      type: String,
+      enum: ["SAVED_SCHEDULE", "HISTORICAL_WORKBOOK", "MANUAL"],
+      default: "MANUAL",
+    },
+    sourceName: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    sourceDate: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    styleNotes: {
+      type: [String],
+      default: [],
+    },
     dayOfWeek: {
       type: String,
       enum: [
