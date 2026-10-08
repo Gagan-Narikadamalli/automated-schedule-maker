@@ -7,9 +7,9 @@ export default function OverviewPage() {
     <AppShell>
       <div className="section-page">
         <SectionHeader
-          eyebrow="WEEKLY OPERATIONS"
-          title="Weekly Overview"
-          description="Compare required client coverage with staff hours, attendance, absences, uncovered time, labor needs, and overall scheduling efficiency."
+          eyebrow="CLINIC OPERATIONS"
+          title="Schedule Overview"
+          description="Switch between daily and weekly views to review client coverage, staff availability, absences, uncovered time, and labor needs."
         />
 
         <OverviewDashboard />
