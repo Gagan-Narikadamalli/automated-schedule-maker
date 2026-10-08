@@ -109,9 +109,13 @@ export function AttendanceManager() {
   }), [people, group, search, filter, records]);
   const current = records.filter((entry) => entry.personType === group);
   const dirty = canonical(current) !== canonical(saved.filter((entry) => entry.personType === group));
-  const unsavedCount = new Set([...current, ...saved.filter((entry) => entry.personType === group)].map((entry) => entry.personId))
-    .size ? new Set([...current, ...saved.filter((entry) => entry.personType === group)].map((entry) => entry.personId))
-      .size : 0;
+  const savedGroup = saved.filter((entry) => entry.personType === group);
+  const unsavedCount = [...new Set([...current, ...savedGroup].map((entry) => entry.personId))]
+    .filter((personId) => {
+      const now = current.find((entry) => entry.personId === personId) ?? null;
+      const before = savedGroup.find((entry) => entry.personId === personId) ?? null;
+      return JSON.stringify(now) !== JSON.stringify(before);
+    }).length;
   const normalCount = people[group].length - current.length;
 
   async function save() {
@@ -153,7 +157,7 @@ export function AttendanceManager() {
           {locations.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
         </select></label>
         <label>Date<input type="date" value={date} onChange={(event) => setDate(event.target.value)} disabled={saving} /></label>
-        <a className={styles.back} href={`/?date=${encodeURIComponent(date)}`}>Back to schedule</a>
+        <a className={styles.back} href={`/?date=${encodeURIComponent(date)}&locationId=${encodeURIComponent(locationId)}`}>Back to schedule</a>
       </div>
     </section>
 
