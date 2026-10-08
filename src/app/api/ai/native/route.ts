@@ -225,6 +225,27 @@ export async function POST(request: Request) {
     const readTools = createSchedulerReadOnlyTools(context);
     const advisoryTools = createSchedulerAdvisoryTools(context);
     const websiteTools = createSchedulerWebsiteTools(context);
+    const readOnlyTemplateTool = {
+      ...websiteTools.manage_schedule_template,
+      execute: async (
+        input: Record<string, unknown>,
+        options?: unknown
+      ) => {
+        if (String(input?.action ?? "").toUpperCase() !== "LIST") {
+          return {
+            ok: false,
+            changed: false,
+            error:
+              "Template changes are disabled while Native Scheduler AI is in read-only mode. Template listing is still available.",
+          };
+        }
+
+        return websiteTools.manage_schedule_template.execute?.(
+          input as never,
+          options as never
+        );
+      },
+    };
     const schedulerTools = writeToolsEnabled
       ? {
           ...readTools,
@@ -238,6 +259,7 @@ export async function POST(request: Request) {
           ...advisoryTools,
           get_scheduler_configuration:
             websiteTools.get_scheduler_configuration,
+          manage_schedule_template: readOnlyTemplateTool,
         };
 
     const nativeResult = await runNativeSchedulerAi({
