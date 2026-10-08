@@ -84,6 +84,17 @@ export async function POST(request: Request) {
     }
 
     const template = templateResult as unknown as PlainRecord;
+
+    if (template.learningOnly === true) {
+      return NextResponse.json(
+        {
+          error:
+            "This workbook template is a learning/reference profile rather than a direct cell template. Auto Generate and Native Scheduler AI use it as same-weekday guidance; it cannot be applied cell-for-cell.",
+        },
+        { status: 400 }
+      );
+    }
+
     const protectedTarget = protectedTargetResult as unknown as PlainRecord[];
     const protectedCells = new Set(
       protectedTarget.map(
