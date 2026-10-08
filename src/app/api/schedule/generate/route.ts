@@ -1,4 +1,12 @@
 import { NextResponse } from "next/server";
+import {
+  forbiddenResponse,
+  requireApiSession,
+  sessionCanAccessLocation,
+  sessionHasAnyRole,
+  SCHEDULE_WRITE_ROLES,
+} from "@/lib/api/auth";
+
 
 import { auditFinalCoverage } from "@/features/scheduler/engine/auditFinalCoverage";
 import { getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
@@ -97,6 +105,9 @@ function applyFinalBreakMetrics(
 }
 
 export async function POST(request: Request) {
+  const auth = await requireApiSession();
+  if (auth.error) return auth.error;
+  if (!sessionHasAnyRole(auth.session, SCHEDULE_WRITE_ROLES)) return forbiddenResponse();
   try {
     const body = (await request.json()) as GenerateRequest;
     const locationId = body.locationId?.trim();
@@ -114,6 +125,10 @@ export async function POST(request: Request) {
         { error: "Date must use YYYY-MM-DD format." },
         { status: 400 }
       );
+    }
+
+    if (!sessionCanAccessLocation(auth.session, locationId)) {
+      return forbiddenResponse("You do not have access to this location.");
     }
 
     const dayData = await buildDaySchedulerInput(locationId, date);
