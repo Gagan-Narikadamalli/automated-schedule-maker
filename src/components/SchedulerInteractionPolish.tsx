@@ -64,6 +64,10 @@ export function SchedulerInteractionPolish() {
   const [hasUnplacedTray, setHasUnplacedTray] = useState(false);
   const [toolbarTarget, setToolbarTarget] = useState<HTMLElement | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [exportNotice, setExportNotice] = useState<{
+    message: string;
+    kind: "success" | "error";
+  } | null>(null);
 
   useEffect(() => {
     let draggingUnplaced = false;
@@ -182,21 +186,41 @@ export function SchedulerInteractionPolish() {
     };
   }, [unplacedOpen, toolbarTarget]);
 
+  function showExportNotice(
+    message: string,
+    kind: "success" | "error"
+  ) {
+    setExportNotice({ message, kind });
+    window.setTimeout(() => {
+      setExportNotice((current) =>
+        current?.message === message ? null : current
+      );
+    }, 4500);
+  }
+
   async function handleExport() {
     const context = readExportContext();
     if (!context) {
-      window.alert("Choose a clinic and date before exporting the Daily Schedule.");
+      showExportNotice(
+        "Choose a clinic and date before exporting the Daily Schedule.",
+        "error"
+      );
       return;
     }
 
     try {
       setExporting(true);
       await exportDailyScheduleXlsx(context);
+      showExportNotice(
+        `Daily Schedule for ${context.date} was exported successfully.`,
+        "success"
+      );
     } catch (error) {
-      window.alert(
+      showExportNotice(
         error instanceof Error
           ? error.message
-          : "The Daily Schedule Excel workbook could not be created."
+          : "The Daily Schedule Excel workbook could not be created.",
+        "error"
       );
     } finally {
       setExporting(false);
@@ -218,6 +242,27 @@ export function SchedulerInteractionPolish() {
           </button>,
           toolbarTarget
         )}
+
+      {exportNotice && (
+        <div
+          className={`${styles.exportNotice} ${
+            exportNotice.kind === "error"
+              ? styles.exportNoticeError
+              : styles.exportNoticeSuccess
+          }`}
+          role="status"
+          aria-live="polite"
+        >
+          <span>{exportNotice.message}</span>
+          <button
+            type="button"
+            onClick={() => setExportNotice(null)}
+            aria-label="Close export message"
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       {hasUnplacedTray && (
         <button
