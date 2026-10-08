@@ -470,7 +470,7 @@ export function ScheduleWorkspaceV3() {
     }
   }
 
-  async function loadCallOuts(requestedLocationId = locationId, requestedDate = selectedDate) {
+  async function loadCallOuts(requestedLocationId = locationId, requestedDate = selectedDate, dayStaff: ScheduleStaff[] = staff) {
     if (!requestedLocationId || requestedLocationId.startsWith("demo-")) {
       setCallOutStaffIds([]);
       setSavedCallOutStaffIds([]);
@@ -489,7 +489,7 @@ export function ScheduleWorkspaceV3() {
     const ids = data.selectedStaffIds ?? [];
     setCallOutStaffIds(ids);
     setSavedCallOutStaffIds(ids);
-    setFullDayCallOutStaffIds(data.fullDayStaffIds ?? []);
+    setFullDayCallOutStaffIds((data.fullDayStaffIds ?? []).filter((id) => dayStaff.some((person) => person.id === id && person.availableSlots.length === 0)));
     const clientResponse = await fetch(`/api/client-call-outs?locationId=${encodeURIComponent(requestedLocationId)}&date=${encodeURIComponent(requestedDate)}`, { cache: "no-store" });
     const clientData = await readJson<ClientCallOutResponse>(clientResponse);
     if (!clientResponse.ok) throw new Error(clientData.error || "Client call-outs could not be loaded.");
@@ -531,7 +531,7 @@ export function ScheduleWorkspaceV3() {
       setGridVersion((current) => current + 1);
       await Promise.all([
         loadUnplacedAssignments(requestedLocationId, requestedDate),
-        loadCallOuts(requestedLocationId, requestedDate),
+        loadCallOuts(requestedLocationId, requestedDate, nextStaff),
         loadAttendance(requestedLocationId, requestedDate),
       ]);
       const recentDates = data.recentSavedScheduleDates ?? [];
@@ -1053,7 +1053,7 @@ export function ScheduleWorkspaceV3() {
 
       <section className="toolbar-card" aria-label="Schedule actions">
         <div className="toolbar-group">
-          <button type="button" className="button button-secondary" disabled={working || loading || staff.length === 0} onClick={() => setShowCallOutPanel((open) => !open)}>Call Outs</button>
+          <button type="button" className="button button-secondary" disabled={working || loading || (rosterStaff.length === 0 && clients.length === 0)} onClick={() => setShowCallOutPanel((open) => !open)}>Call In / Call Out</button>
           <button type="button" className="button button-secondary" disabled={working || loading || staff.length === 0} onClick={() => void requestRepair()}>Repair Schedule</button>
           <button
             type="button"
