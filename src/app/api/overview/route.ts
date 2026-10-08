@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySchedulerInput";
+import { applyFixedNapSessions } from "@/features/scheduler/server/applyFixedNapSessions";
 import {
   forbiddenResponse,
   requireApiSession,
@@ -60,6 +61,9 @@ export async function GET(request: Request) {
     const dayInputs = await Promise.all(
       dates.map((date) => buildDaySchedulerInput(locationId, date))
     );
+    const effectiveInputs = await Promise.all(
+      dayInputs.map((input, index) => applyFixedNapSessions(locationId, dates[index], input.input))
+    );
     const assignmentsByDate = await Promise.all(
       dates.map((date) =>
         ScheduleAssignment.find({ locationId, date }).lean()
@@ -76,45 +80,31 @@ export async function GET(request: Request) {
       const dayData = dayInputs[index];
       const assignments = assignmentsByDate[index] as unknown as PlainRecord[];
       const slotHours = dayData.extendedRules.slotLengthMinutes / 60;
-      const requiredClientSlots = dayData.clients.reduce(
-        (total, client) => total + client.requiredSlots.length,
-        0
+      const requirements = new Set(
+        effectiveInputs[index].input.clients.flatMap((client) =>
+          client.requiredSlots.map((slot) => `${client.id}:${slot}`)
+        )
       );
       const coveredClientKeys = new Set(
-        assignments
-          .filter(
-            (assignment) =>
-              assignment.assignmentType === "CLIENT_1_TO_1" &&
-              assignment.clientId &&
-              assignment.startTime
-          )
-          .map(
-            (assignment) =>
-              `${String(assignment.clientId)}:${String(assignment.startTime)}`
-          )
+        assignments.filter((assignment) =>
+          assignment.assignmentType === "CLIENT_1_TO_1" &&
+          assignment.clientId && assignment.startTime &&
+          requirements.has(`${String(assignment.clientId)}:${String(assignment.startTime)}`)
+        ).map((assignment) =>
+          `${String(assignment.clientId)}:${String(assignment.startTime)}`
+        )
       );
       const scheduledStaffKeys = new Set(
-        assignments
-          .filter(
-            (assignment) =>
-              assignment.assignmentType === "CLIENT_1_TO_1" &&
-              assignment.staffId &&
-              assignment.startTime
-          )
-          .map(
-            (assignment) =>
-              `${String(assignment.staffId)}:${String(assignment.startTime)}`
-          )
+        assignments.filter((assignment) =>
+          assignment.assignmentType === "CLIENT_1_TO_1" &&
+          assignment.staffId && assignment.startTime
+        ).map((assignment) =>
+          `${String(assignment.staffId)}:${String(assignment.startTime)}`
+        )
       );
-      const coveredClientSlots = Math.min(
-        coveredClientKeys.size,
-        requiredClientSlots
-      );
-      const uncoveredSlots = Math.max(
-        requiredClientSlots - coveredClientSlots,
-        0
-      );
-
+      const requiredClientSlots = requirements.size;
+      const coveredClientSlots = coveredClientKeys.size;
+      const uncoveredSlots = Math.max(requiredClientSlots - coveredClientSlots, 0);
       return {
         date,
         day: formatDayName(date),
