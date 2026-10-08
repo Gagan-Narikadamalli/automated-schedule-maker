@@ -45,6 +45,20 @@ function shiftTime(startTime: string, minuteOffset: number): string | null {
   ).padStart(2, "0")}`;
 }
 
+function matchesExactTemplateReference(
+  assignment: SchedulerAssignment,
+  referenceAssignments: SchedulerAssignment[]
+): boolean {
+  return referenceAssignments.some(
+    (reference) =>
+      reference.source === "TEMPLATE" &&
+      reference.assignmentType === "CLIENT_1_TO_1" &&
+      reference.staffId === assignment.staffId &&
+      reference.clientId === assignment.clientId &&
+      reference.startTime === assignment.startTime
+  );
+}
+
 function isMutableClientAssignment(
   assignment: SchedulerAssignment | undefined
 ): assignment is SchedulerAssignment & { clientId: string } {
@@ -409,12 +423,14 @@ export function balanceScheduleLikeHuman({
   staff,
   clients,
   assignments: initialAssignments,
+  referenceAssignments = [],
   callOutStaffIds,
   rules,
 }: {
   staff: SchedulerStaff[];
   clients: SchedulerClient[];
   assignments: SchedulerAssignment[];
+  referenceAssignments?: SchedulerAssignment[];
   callOutStaffIds: string[];
   rules: SchedulerRules;
 }): HumanStyleBlockBalanceResult {
@@ -466,6 +482,16 @@ export function balanceScheduleLikeHuman({
     );
 
     for (const candidate of candidates) {
+      const containsExactTemplateMatch = candidate.pairs.some(
+        ({ left, right }) =>
+          matchesExactTemplateReference(left, referenceAssignments) ||
+          matchesExactTemplateReference(right, referenceAssignments)
+      );
+
+      if (containsExactTemplateMatch) {
+        continue;
+      }
+
       const swapped = trySwapCandidate(
         candidate,
         staffById,
