@@ -30,6 +30,9 @@ type RulesForm = {
   breakWindowEnd: string;
   preferSameTeam: boolean;
   preferStaffContinuity: boolean;
+  humanStyleBlockBalancingEnabled: boolean;
+  preferredClientsPerStaffPerDay: number;
+  preferredStaffPerClientPerDay: number;
   preserveManualOverrides: boolean;
   autoUseWeekdayTemplate: boolean;
   autoUsePreviousWeekdaySchedule: boolean;
@@ -73,6 +76,8 @@ type NumericRuleField =
   | "partTimeMaximumWeeklyHours"
   | "maximumClientsPerTechPerDay"
   | "maximumTechsPerClientPerDay"
+  | "preferredClientsPerStaffPerDay"
+  | "preferredStaffPerClientPerDay"
   | "minimumClientStaffAssignmentMinutes"
   | "maximumClientStaffConsecutiveHours"
   | "defaultBreakMinutes"
@@ -123,6 +128,8 @@ const DEFAULT_RULES: RulesForm = {
   partTimeMaximumWeeklyHours: 29,
   maximumClientsPerTechPerDay: 3,
   maximumTechsPerClientPerDay: 3,
+  preferredClientsPerStaffPerDay: 2,
+  preferredStaffPerClientPerDay: 2,
   minimumClientStaffAssignmentMinutes: 30,
   maximumClientStaffConsecutiveHours: 4,
   preventSameStaffClientRepeatSameDay: false,
@@ -134,6 +141,7 @@ const DEFAULT_RULES: RulesForm = {
   breakWindowEnd: "14:00",
   preferSameTeam: true,
   preferStaffContinuity: true,
+  humanStyleBlockBalancingEnabled: true,
   preserveManualOverrides: true,
   autoUseWeekdayTemplate: true,
   autoUsePreviousWeekdaySchedule: true,
@@ -310,6 +318,7 @@ export function SchedulingSettings() {
     field:
       | "preferSameTeam"
       | "preferStaffContinuity"
+      | "humanStyleBlockBalancingEnabled"
       | "preserveManualOverrides"
       | "minimalFixAllowProtectedRelocation"
       | "minimalFixAllowBreakRelocation"
@@ -389,6 +398,28 @@ export function SchedulingSettings() {
     ) {
       setMessage(
         "Maximum continuous client/staff time must be 3, 3.5, or 4 hours."
+      );
+      return;
+    }
+
+    if (
+      rules.preferredClientsPerStaffPerDay < 1 ||
+      rules.preferredClientsPerStaffPerDay >
+        rules.maximumClientsPerTechPerDay
+    ) {
+      setMessage(
+        "Preferred clients per staff must be at least 1 and cannot exceed the maximum clients per staff."
+      );
+      return;
+    }
+
+    if (
+      rules.preferredStaffPerClientPerDay < 1 ||
+      rules.preferredStaffPerClientPerDay >
+        rules.maximumTechsPerClientPerDay
+    ) {
+      setMessage(
+        "Preferred staff per client must be at least 1 and cannot exceed the maximum staff per client."
       );
       return;
     }
@@ -1394,6 +1425,67 @@ export function SchedulingSettings() {
               recalculate a valid break afterward. Turn this off to keep existing
               breaks fixed during automatic repair.
             </span>
+          </label>
+
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={rules.humanStyleBlockBalancingEnabled}
+              onChange={(event) =>
+                updateBooleanField(
+                  "humanStyleBlockBalancingEnabled",
+                  event.target.checked
+                )
+              }
+            />
+            <span>
+              Human-style block balancing. After client coverage and every staff
+              break are secured, Auto Generate may exchange whole continuous
+              client blocks between eligible staff when that creates a cleaner
+              day: usually 2-3 clients per staff, about 2 stable staff blocks per
+              long-day client, and fewer one-block handoffs. This is a soft
+              optimization and never overrides availability, restrictions,
+              protected cells, coverage, breaks, or the continuous-time maximum.
+            </span>
+          </label>
+
+          <label className="form-field">
+            <span>Preferred clients per staff per day</span>
+            <EditableNumberInput
+              min="1"
+              max={rules.maximumClientsPerTechPerDay}
+              value={rules.preferredClientsPerStaffPerDay}
+              onChange={(event) =>
+                updateNumberField(
+                  "preferredClientsPerStaffPerDay",
+                  event.target.value
+                )
+              }
+            />
+            <small>
+              Default 2. Three is still acceptable when coverage requires it.
+              This is a balancing target, not a hard assignment count.
+            </small>
+          </label>
+
+          <label className="form-field">
+            <span>Preferred staff blocks per client per day</span>
+            <EditableNumberInput
+              min="1"
+              max={rules.maximumTechsPerClientPerDay}
+              value={rules.preferredStaffPerClientPerDay}
+              onChange={(event) =>
+                updateNumberField(
+                  "preferredStaffPerClientPerDay",
+                  event.target.value
+                )
+              }
+            />
+            <small>
+              Default 2 for clients with long attendance. The scheduler prefers
+              two long continuous staff blocks rather than one person owning the
+              whole day or several short fragments.
+            </small>
           </label>
 
           <label className="form-field">
