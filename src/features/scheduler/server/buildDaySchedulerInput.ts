@@ -164,8 +164,8 @@ function removeBlockedSlots(
 
 function getDefaultRules(): ExtendedSchedulerRules {
   return {
-    maximumClientsPerTechPerDay: 6,
-    maximumTechsPerClientPerDay: 4,
+    maximumClientsPerTechPerDay: 3,
+    maximumTechsPerClientPerDay: 3,
     minimumClientStaffAssignmentMinutes: 30,
     maximumClientStaffConsecutiveHours: 4,
     preventSameStaffClientRepeatSameDay: true,
@@ -175,10 +175,10 @@ function getDefaultRules(): ExtendedSchedulerRules {
     slotLengthMinutes: 30,
     preferredStaffPriority: 100,
     sameTeamPriority: 40,
-    continuityPriority: 35,
+    continuityPriority: 200,
     rotationPriority: 60,
-    workloadBalancePriority: 10,
-    clientHandoffPenaltyPriority: 25,
+    workloadBalancePriority: 0,
+    clientHandoffPenaltyPriority: 200,
     staffScheduleCompactnessPriority: 8,
     minimalFixAllowProtectedRelocation: true,
     minimalFixAllowBreakRelocation: true,
