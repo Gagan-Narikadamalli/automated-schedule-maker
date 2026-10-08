@@ -158,7 +158,10 @@ export async function GET(request: Request) {
       staff: plainStaffDocuments
         .filter((staffMember) => {
           const schedulerMember = dayData.staff.find((record) => record.id === String(staffMember._id));
-          return Boolean(schedulerMember && (schedulerMember.availableSlots.length > 0 || (Array.isArray(staffMember.shiftPatterns) && staffMember.shiftPatterns.some((pattern: PlainDatabaseRecord) => patternMatchesDate(pattern.days ?? [], date))));
+          const hasShiftToday = Array.isArray(staffMember.shiftPatterns) && staffMember.shiftPatterns.some(
+            (pattern: PlainDatabaseRecord) => patternMatchesDate(pattern.days ?? [], date)
+          );
+          return Boolean(schedulerMember && (schedulerMember.availableSlots.length > 0 || hasShiftToday));
         })
         .map((staffMember) => ({
           id: String(staffMember._id),
