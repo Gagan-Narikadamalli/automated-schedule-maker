@@ -129,9 +129,9 @@ const DEFAULT_RULES: RulesForm = {
   allowSameStaffClientRepeatForCoverageException: true,
   breakSchedulingEnabled: true,
   defaultBreakMinutes: 30,
-  breakEligibilityHours: 6,
+  breakEligibilityHours: 0,
   breakWindowStart: "11:00",
-  breakWindowEnd: "13:30",
+  breakWindowEnd: "14:00",
   preferSameTeam: true,
   preferStaffContinuity: true,
   preserveManualOverrides: true,
@@ -342,9 +342,13 @@ export function SchedulingSettings() {
       return;
     }
 
-    if (rules.breakWindowEnd <= rules.breakWindowStart) {
+    if (
+      rules.breakWindowStart < "11:00" ||
+      rules.breakWindowEnd > "14:00" ||
+      rules.breakWindowEnd <= rules.breakWindowStart
+    ) {
       setMessage(
-        "Break window end must be later than break window start."
+        "Staff breaks must stay inside the 11:00 AM to 2:00 PM clinic break window."
       );
       return;
     }
@@ -665,30 +669,17 @@ export function SchedulingSettings() {
           that window after client coverage and nap/speech windows are considered.
         </p>
 
-        <div className="toggle-list">
-          <label className="toggle-row">
-            <input
-              type="checkbox"
-              checked={rules.breakSchedulingEnabled}
-              onChange={(event) =>
-                updateBooleanField(
-                  "breakSchedulingEnabled",
-                  event.target.checked
-                )
-              }
-            />
-            <span>
-              Use the break window during automatic scheduling. Turn this off to
-              stop Auto Generate and Repair from creating staff breaks.
-            </span>
-          </label>
-        </div>
+        <p className="helper-text">
+          Every scheduled staff member must receive one break when a legal
+          placement exists. Auto Generate first protects client coverage and
+          Speech, then uses Break + Speech and Break + Nap opportunities before
+          placing an ordinary Break.
+        </p>
 
         <div className="form-grid">
           <label className="form-field">
             <span>Usual break duration</span>
             <select
-              disabled={!rules.breakSchedulingEnabled}
               value={rules.defaultBreakMinutes}
               onChange={(event) =>
                 updateNumberField(
@@ -709,28 +700,12 @@ export function SchedulingSettings() {
           </label>
 
           <label className="form-field">
-            <span>Break required after shift hours</span>
-            <EditableNumberInput
-              
-              min="0"
-              max="24"
-              step="0.5"
-              disabled={!rules.breakSchedulingEnabled}
-              value={rules.breakEligibilityHours}
-              onChange={(event) =>
-                updateNumberField(
-                  "breakEligibilityHours",
-                  event.target.value
-                )
-              }
-            />
-          </label>
-
-          <label className="form-field">
             <span>Break placement window starts</span>
             <input
               type="time"
-              disabled={!rules.breakSchedulingEnabled}
+              min="11:00"
+              max="13:30"
+              step="1800"
               value={rules.breakWindowStart}
               onChange={(event) =>
                 setRules((currentRules) => ({
@@ -745,7 +720,9 @@ export function SchedulingSettings() {
             <span>Break placement window ends</span>
             <input
               type="time"
-              disabled={!rules.breakSchedulingEnabled}
+              min="11:30"
+              max="14:00"
+              step="1800"
               value={rules.breakWindowEnd}
               onChange={(event) =>
                 setRules((currentRules) => ({
@@ -1244,44 +1221,23 @@ export function SchedulingSettings() {
       </section>
 
       <section className="section-card">
-        <h2>Automatic Nap & Speech Windows</h2>
+        <h2>Speech, Nap & Break Priority</h2>
         <p>
-          Nap and Speech start/end times are placement windows. For example, a
-          12:00-1:00 nap window with a 30-minute duration means Auto Generate may
-          choose either 12:00-12:30 or 12:30-1:00. When windows overlap, the
-          scheduler spreads them when possible so one staff member can take a
-          Break/Nap first and another client can use the next half-hour.
+          Auto Generate follows the clinic order: protect Speech first, place
+          each present client&apos;s Nap next, use Break + Speech or Break + Nap
+          whenever possible, then place any remaining ordinary staff breaks.
         </p>
-
-        <div className="toggle-list">
-          <label className="toggle-row">
-            <input
-              type="checkbox"
-              checked={rules.napDurationRulesEnabled}
-              onChange={(event) =>
-                updateBooleanField(
-                  "napDurationRulesEnabled",
-                  event.target.checked
-                )
-              }
-            />
-            <span>
-              Use client nap windows during automatic scheduling. Turn this off
-              when nap windows should be ignored by Auto Generate and Repair.
-            </span>
-          </label>
-        </div>
 
         <div className="form-grid">
           <label className="form-field">
             <span>Usual nap duration</span>
             <select
-              disabled={!rules.napDurationRulesEnabled}
               value={rules.napPreferredMinutes}
               onChange={(event) => {
                 const value = Number(event.target.value);
                 setRules((currentRules) => ({
                   ...currentRules,
+                  napDurationRulesEnabled: true,
                   napMinimumMinutes: value,
                   napPreferredMinutes: value,
                   napMaximumMinutes: value,
@@ -1293,49 +1249,20 @@ export function SchedulingSettings() {
               <option value={90}>1.5 hours</option>
               <option value={120}>2 hours</option>
             </select>
+            <small>
+              Nap placement is flexible only between 11:30 AM and 2:00 PM.
+              Shared Nap special events can narrow that window for selected
+              clients.
+            </small>
           </label>
-        </div>
 
-        <div className="toggle-list">
-          <label className="toggle-row">
-            <input
-              type="checkbox"
-              checked={rules.speechDurationRulesEnabled}
-              onChange={(event) =>
-                updateBooleanField(
-                  "speechDurationRulesEnabled",
-                  event.target.checked
-                )
-              }
-            />
-            <span>
-              Use Speech windows during automatic scheduling. Turn this off when
-              Speech windows should not reserve automatic schedule time.
-            </span>
-          </label>
-        </div>
-
-        <div className="form-grid">
           <label className="form-field">
-            <span>Usual Speech duration</span>
-            <select
-              disabled={!rules.speechDurationRulesEnabled}
-              value={rules.speechPreferredMinutes}
-              onChange={(event) => {
-                const value = Number(event.target.value);
-                setRules((currentRules) => ({
-                  ...currentRules,
-                  speechMinimumMinutes: value,
-                  speechPreferredMinutes: value,
-                  speechMaximumMinutes: value,
-                }));
-              }}
-            >
-              <option value={30}>30 minutes</option>
-              <option value={60}>1 hour</option>
-              <option value={90}>1.5 hours</option>
-              <option value={120}>2 hours</option>
-            </select>
+            <span>Speech duration</span>
+            <input value="30 minutes" readOnly />
+            <small>
+              Speech is always one fixed 30-minute appointment for one client
+              and has priority over Nap and ordinary break placement.
+            </small>
           </label>
         </div>
       </section>
