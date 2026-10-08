@@ -509,7 +509,7 @@ export function balanceScheduleLikeHuman({
       }
     }
 
-    if (!bestAssignments || bestRawPenalty > currentPenalty + 30) {
+    if (!bestAssignments || bestRawPenalty >= currentPenalty) {
       break;
     }
 
