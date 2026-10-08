@@ -146,6 +146,18 @@ export async function GET(request: Request) {
       assignments: plainAssignments.map((assignment) =>
         serializeAssignment(assignment)
       ),
+      clientEvents: effectiveClients.flatMap((client) => [
+        ...client.napSlots.map((startTime) => ({
+          clientId: client.id,
+          startTime,
+          eventType: "NAP" as const,
+        })),
+        ...client.speechSlots.map((startTime) => ({
+          clientId: client.id,
+          startTime,
+          eventType: "SPEECH" as const,
+        })),
+      ]),
       requiredClientSlots: effectiveClients.reduce(
         (total, client) => total + client.requiredSlots.length,
         0
