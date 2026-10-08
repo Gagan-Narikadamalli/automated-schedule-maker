@@ -90,6 +90,9 @@ export type SchedulerRules = {
   allowSameStaffClientRepeatForCoverageException: boolean;
   preferSameTeam: boolean;
   preferStaffContinuity: boolean;
+  humanStyleBlockBalancingEnabled?: boolean;
+  preferredClientsPerStaffPerDay?: number;
+  preferredStaffPerClientPerDay?: number;
   slotLengthMinutes: number;
   preferredStaffPriority: number;
   sameTeamPriority: number;
