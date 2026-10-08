@@ -536,6 +536,33 @@ function findReliefSwap(
   return null;
 }
 
+function countClientStaffRuns(
+  clientId: string,
+  assignments: SchedulerAssignment[]
+): number {
+  const ordered = assignments
+    .filter(
+      (assignment) =>
+        assignment.clientId === clientId &&
+        assignment.assignmentType === "CLIENT_1_TO_1"
+    )
+    .sort((left, right) =>
+      left.startTime.localeCompare(right.startTime)
+    );
+
+  let runs = 0;
+  let previousStaffId: string | null = null;
+
+  for (const assignment of ordered) {
+    if (assignment.staffId !== previousStaffId) {
+      runs += 1;
+      previousStaffId = assignment.staffId;
+    }
+  }
+
+  return runs;
+}
+
 function smoothShortClientRuns(
   staff: SchedulerStaff[],
   clients: SchedulerClient[],
@@ -587,6 +614,11 @@ function smoothShortClientRuns(
           runs.push([assignment]);
         }
       }
+
+      const beforeRunCount = countClientStaffRuns(
+        client.id,
+        assignments
+      );
 
       for (let runIndex = 0; runIndex < runs.length; runIndex += 1) {
         const run = runs[runIndex];
@@ -682,6 +714,18 @@ function smoothShortClientRuns(
           }
 
           if (!valid) {
+            continue;
+          }
+
+          const afterRunCount = countClientStaffRuns(
+            client.id,
+            simulated
+          );
+
+          // Apply only changes that genuinely reduce the number of staff
+          // segments for this client. This makes smoothing converge instead of
+          // bouncing a short island back and forth between neighboring staff.
+          if (afterRunCount >= beforeRunCount) {
             continue;
           }
 
