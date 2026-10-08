@@ -168,7 +168,7 @@ export function OverviewDashboard() {
       "Client Hours Needed",
       "Client Hours Covered",
       "Staff Client Hours Scheduled",
-      "Additional Labor Hours Needed",
+      "Uncovered Client Hours",
       "Staff Present",
       "Staff Absent",
       "Uncovered Client Hours",
@@ -302,7 +302,7 @@ export function OverviewDashboard() {
           <strong>{overviewValues.staffHoursScheduled.toFixed(1)}</strong>
         </article>
         <article className="metric-card">
-          <span>Additional labor needed</span>
+          <span>Uncovered client hours</span>
           <strong>{overviewValues.additionalLaborHours.toFixed(1)}</strong>
         </article>
         <article className="metric-card">
@@ -320,7 +320,7 @@ export function OverviewDashboard() {
             <article className="metric-card"><span>Uncovered hours</span><strong>{selectedDay.uncoveredHours.toFixed(1)} h</strong></article>
             <article className="metric-card"><span>Coverage</span><strong>{dailyCoveragePercent.toFixed(1)}%</strong></article>
           </div>
-          <p>Coverage is calculated from the saved schedule for this selected day. Open the Daily Schedule page to adjust assignments.</p>
+          <p>Coverage counts each required client and time slot after nap, speech, and attendance adjustments. Uncovered client hours are coverage gaps, not necessarily additional staff hours needed. Open Daily Schedule to inspect unplaced assignments.</p>
         </section>
       )}
 
@@ -362,7 +362,7 @@ export function OverviewDashboard() {
                 <th>Client needed</th>
                 <th>Client covered</th>
                 <th>Staff client hours</th>
-                <th>Additional labor</th>
+                <th>Coverage gap</th>
                 <th>Staff present</th>
                 <th>Staff absent</th>
                 <th>Uncovered</th>
