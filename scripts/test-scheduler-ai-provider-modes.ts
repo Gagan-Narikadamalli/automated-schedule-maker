@@ -152,8 +152,13 @@ assert.equal(
 const nativeRoute = source(nativeEntry);
 assert.match(
   nativeRoute,
-  /manage_schedule_template:\s*websiteTools\.manage_schedule_template/,
-  "Native read-only mode must still support template listing."
+  /manage_schedule_template:\s*readOnlyTemplateTool/,
+  "Native read-only mode must still support template listing through the guarded read-only wrapper."
+);
+assert.match(
+  nativeRoute,
+  /toUpperCase\(\) !== "LIST"/,
+  "Native read-only template access must reject CREATE/APPLY/ARCHIVE actions."
 );
 
 const assistant = source("src/components/ScheduleAssistant.tsx");
