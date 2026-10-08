@@ -29,6 +29,7 @@ import {
 import { writeAuditLog } from "@/lib/api/audit";
 import { connectToDatabase } from "@/lib/db";
 import { CallOut } from "@/models/CallOut";
+import { AttendanceOverride } from "@/models/AttendanceOverride";
 import { ScheduleAssignment } from "@/models/ScheduleAssignment";
 import { UnplacedAssignment } from "@/models/UnplacedAssignment";
 
@@ -174,7 +175,7 @@ export async function POST(request: Request) {
     const body = (await request.json()) as RepairRequest;
     const locationId = body.locationId?.trim();
     const date = body.date?.trim();
-    const repairMode = body.mode === "COVERAGE" ? "COVERAGE" : "CALL_OUT";
+    let repairMode: "COVERAGE" | "CALL_OUT" = body.mode === "COVERAGE" ? "COVERAGE" : "CALL_OUT";
 
     if (!locationId || !date) {
       return NextResponse.json(
@@ -210,14 +211,14 @@ export async function POST(request: Request) {
       new Set(callOuts.map((callOut) => callOut.staffId))
     );
 
-    if (repairMode === "CALL_OUT" && affectedStaffIds.length === 0) {
-      return NextResponse.json(
-        {
-          error:
-            "There are no recorded call-outs for this date. Add the call-out first, then run Repair Schedule.",
-        },
-        { status: 400 }
-      );
+    // A call-in or client absence may require coverage adjustment without any
+    // staff call-out record. Use minimum-change coverage repair in that case.
+    const hasClientAttendanceChanges = await AttendanceOverride.exists({
+      locationId, date, personType: "client",
+    });
+    if (repairMode === "CALL_OUT" &&
+        (affectedStaffIds.length === 0 || Boolean(hasClientAttendanceChanges))) {
+      repairMode = "COVERAGE";
     }
 
     const dayData = await buildDaySchedulerInput(locationId, date);
