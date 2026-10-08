@@ -59,8 +59,7 @@ function isMutableClientAssignment(
 
 function clientRuns(
   clientId: string,
-  assignments: SchedulerAssignment[],
-  slotLengthMinutes: number
+  assignments: SchedulerAssignment[]
 ): SchedulerAssignment[][] {
   const ordered = assignments
     .filter(
@@ -76,11 +75,7 @@ function clientRuns(
     const current = runs[runs.length - 1];
     const previous = current?.[current.length - 1];
 
-    if (
-      previous &&
-      previous.staffId === assignment.staffId &&
-      shiftTime(previous.startTime, slotLengthMinutes) === assignment.startTime
-    ) {
+    if (previous && previous.staffId === assignment.staffId) {
       current.push(assignment);
     } else {
       runs.push([assignment]);
@@ -148,11 +143,7 @@ function schedulePenalty(
       continue;
     }
 
-    const runs = clientRuns(
-      client.id,
-      assignments,
-      rules.slotLengthMinutes
-    );
+    const runs = clientRuns(client.id, assignments);
     const distinctStaff = clientStaffIds(client.id, assignments).size;
     const isRotationClient =
       client.supportLevel === "ROTATION" ||
