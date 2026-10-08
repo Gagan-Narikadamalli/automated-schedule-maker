@@ -437,25 +437,31 @@ function sortRequirementsForClinicFlow(
       return timeComparison;
     }
 
-    // Keep ongoing 1:1 relationships moving before assigning staff to
-    // newly arriving clients in the same half-hour. Without this, a new client
-    // can accidentally take the technician who was already with another
-    // client, creating unnecessary handoffs such as ZiBo switching staff every
-    // block.
-    const leftHasPreviousPair = Boolean(
-      previousClientAssignment(
-        left,
-        assignments,
-        input.rules.slotLengthMinutes
-      )
-    );
-    const rightHasPreviousPair = Boolean(
-      previousClientAssignment(
-        right,
-        assignments,
-        input.rules.slotLengthMinutes
-      )
-    );
+    // Keep clients whose attendance continues from the previous half-hour
+    // ahead of newly arriving clients. This ordering is based on the client's
+    // required slots (not the assignments built so far), so it works even
+    // though the day's requirements are sorted before generation begins. A new
+    // arrival therefore cannot steal the technician from an ongoing client.
+    const leftMinutes = timeToMinutes(left.startTime);
+    const rightMinutes = timeToMinutes(right.startTime);
+    const leftPreviousSlot =
+      leftMinutes === null
+        ? null
+        : minutesToTime(
+            leftMinutes - input.rules.slotLengthMinutes
+          );
+    const rightPreviousSlot =
+      rightMinutes === null
+        ? null
+        : minutesToTime(
+            rightMinutes - input.rules.slotLengthMinutes
+          );
+    const leftHasPreviousPair =
+      leftPreviousSlot !== null &&
+      left.client.requiredSlots.includes(leftPreviousSlot);
+    const rightHasPreviousPair =
+      rightPreviousSlot !== null &&
+      right.client.requiredSlots.includes(rightPreviousSlot);
 
     if (leftHasPreviousPair !== rightHasPreviousPair) {
       return leftHasPreviousPair ? -1 : 1;
