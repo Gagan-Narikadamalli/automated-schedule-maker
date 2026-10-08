@@ -294,6 +294,17 @@ function buildPreferredContinuousPairingPlan(
     }
 
     if (
+      exactReferenceConflictsWithPair(
+        staffMember.id,
+        requirement.client.id,
+        slot,
+        input.referenceAssignments
+      )
+    ) {
+      break;
+    }
+
+    if (
       requirementIsAlreadyCovered(
         { client: requirement.client, startTime: slot },
         simulated
@@ -512,6 +523,71 @@ function supportPriority(client: SchedulerClient): number {
   }
 
   return 1;
+}
+
+function exactReferenceMatchStrength(
+  staffId: string,
+  clientId: string,
+  startTime: string,
+  referenceAssignments: SchedulerAssignment[]
+): number {
+  return referenceAssignments.reduce((score, assignment) => {
+    if (
+      assignment.assignmentType !== "CLIENT_1_TO_1" ||
+      assignment.staffId !== staffId ||
+      assignment.clientId !== clientId ||
+      assignment.startTime !== startTime
+    ) {
+      return score;
+    }
+
+    // A saved weekday template is the strongest reusable instruction. Previous
+    // same-weekday schedules remain strong evidence, but one stale generated
+    // day should not override an explicit weekday template.
+    if (assignment.source === "TEMPLATE") return score + 100;
+    if (assignment.source === "COPIED") return score + 10;
+    return score;
+  }, 0);
+}
+
+function exactReferenceConflictsWithPair(
+  staffId: string,
+  clientId: string,
+  startTime: string,
+  referenceAssignments: SchedulerAssignment[]
+): boolean {
+  const relevant = referenceAssignments.filter(
+    (assignment) =>
+      assignment.assignmentType === "CLIENT_1_TO_1" &&
+      assignment.startTime === startTime &&
+      (assignment.source === "TEMPLATE" ||
+        assignment.source === "COPIED") &&
+      (assignment.staffId === staffId ||
+        assignment.clientId === clientId)
+  );
+
+  if (relevant.length === 0) return false;
+
+  const proposedStrength = exactReferenceMatchStrength(
+    staffId,
+    clientId,
+    startTime,
+    referenceAssignments
+  );
+
+  const strongestConflict = relevant.reduce((strength, assignment) => {
+    if (
+      assignment.staffId === staffId &&
+      assignment.clientId === clientId
+    ) {
+      return strength;
+    }
+
+    const weight = assignment.source === "TEMPLATE" ? 100 : 10;
+    return Math.max(strength, weight);
+  }, 0);
+
+  return strongestConflict > proposedStrength;
 }
 
 function coverageRoleTier(staffMember: SchedulerStaff): number {
@@ -747,6 +823,27 @@ function findBestStaffMember(
       } => candidate !== null
     )
     .sort((left, right) => {
+      const leftReferenceStrength = exactReferenceMatchStrength(
+        left.staffMember.id,
+        requirement.client.id,
+        requirement.startTime,
+        input.referenceAssignments
+      );
+      const rightReferenceStrength = exactReferenceMatchStrength(
+        right.staffMember.id,
+        requirement.client.id,
+        requirement.startTime,
+        input.referenceAssignments
+      );
+
+      // Reuse the exact weekday-template / previous-same-weekday pairing first
+      // whenever both the staff member and client are valid today. Hard
+      // eligibility was already checked above, so call-outs, availability,
+      // attendance, restrictions, hour limits, and occupied cells still win.
+      if (leftReferenceStrength !== rightReferenceStrength) {
+        return rightReferenceStrength - leftReferenceStrength;
+      }
+
       const previousAssignment = previousClientAssignment(
         requirement,
         assignments,
