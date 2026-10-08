@@ -160,7 +160,19 @@ function mergeSegments(assignments: EnrichedAssignment[]) {
     });
   }
 
-  return segments;
+  return segments.sort((left, right) => {
+    const timeCompare = left.startTime.localeCompare(right.startTime);
+    if (timeCompare !== 0) return timeCompare;
+    const staffCompare = (left.staffName ?? "").localeCompare(
+      right.staffName ?? ""
+    );
+    if (staffCompare !== 0) return staffCompare;
+    const clientCompare = (left.clientCode ?? "").localeCompare(
+      right.clientCode ?? ""
+    );
+    if (clientCompare !== 0) return clientCompare;
+    return left.assignmentType.localeCompare(right.assignmentType);
+  });
 }
 
 async function loadAssignments(locationId: string, date: string): Promise<DatabaseRecord[]> {
