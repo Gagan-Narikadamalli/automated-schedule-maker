@@ -82,7 +82,7 @@ export async function buildNativeHistoricalKnowledge(args: {
         dayOfWeek: targetWeekday,
       })
         .select(
-          "name dayOfWeek assignments sourceType sourceName sourceDate styleNotes"
+          "name dayOfWeek assignments sourceType sourceName sourceDate styleNotes learningOnly learningProfile"
         )
         .sort({ name: 1 })
         .lean(),
@@ -324,7 +324,16 @@ export async function buildNativeHistoricalKnowledge(args: {
             const notes = Array.isArray(item.styleNotes)
               ? item.styleNotes.filter(Boolean).slice(0, 3).join("; ")
               : "";
-            return `${item.name} (${item.assignments?.length || 0} blocks${source ? `,${source}` : ""})${notes ? ` — style: ${notes}` : ""}`;
+            const profile =
+              item.learningProfile &&
+              typeof item.learningProfile === "object"
+                ? item.learningProfile
+                : null;
+            const learning =
+              item.learningOnly === true
+                ? ` learning-only profile; preferred clients/staff=${profile?.preferredClientsPerStaffPerDay ?? 2}; preferred staff/client=${profile?.preferredStaffPerClientPerDay ?? 2}; continuity=${profile?.continuityPriority ?? "default"}; handoff penalty=${profile?.clientHandoffPenaltyPriority ?? "default"}`
+                : "";
+            return `${item.name} (${item.assignments?.length || 0} blocks${source ? `,${source}` : ""}${learning ? `,${learning}` : ""})${notes ? ` — style: ${notes}` : ""}`;
           })
           .join(", ")
       }`
