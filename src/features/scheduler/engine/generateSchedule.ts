@@ -592,6 +592,50 @@ function exactReferenceConflictsWithPair(
   return strongestConflict > proposedStrength;
 }
 
+function staffReservedForAnotherExactTemplateClient(
+  staffId: string,
+  proposedClientId: string,
+  startTime: string,
+  input: SchedulerInput,
+  assignments: SchedulerAssignment[]
+): boolean {
+  const reservedReferences = input.referenceAssignments.filter(
+    (assignment) =>
+      assignment.source === "TEMPLATE" &&
+      assignment.assignmentType === "CLIENT_1_TO_1" &&
+      assignment.staffId === staffId &&
+      assignment.clientId &&
+      assignment.clientId !== proposedClientId &&
+      assignment.startTime === startTime
+  );
+
+  for (const reference of reservedReferences) {
+    const referencedClient = input.clients.find(
+      (client) => client.id === reference.clientId
+    );
+
+    if (
+      !referencedClient ||
+      !referencedClient.requiredSlots.includes(startTime)
+    ) {
+      continue;
+    }
+
+    const alreadyCovered = assignments.some(
+      (assignment) =>
+        assignment.assignmentType === "CLIENT_1_TO_1" &&
+        assignment.clientId === referencedClient.id &&
+        assignment.startTime === startTime
+    );
+
+    if (!alreadyCovered) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function coverageRoleTier(staffMember: SchedulerStaff): number {
   switch (staffMember.role) {
     case "BT":
@@ -844,6 +888,35 @@ function findBestStaffMember(
       // hard eligibility has passed.
       if (leftTemplateStrength !== rightTemplateStrength) {
         return rightTemplateStrength - leftTemplateStrength;
+      }
+
+      const leftReservedForOtherTemplate =
+        staffReservedForAnotherExactTemplateClient(
+          left.staffMember.id,
+          requirement.client.id,
+          requirement.startTime,
+          input,
+          assignments
+        );
+      const rightReservedForOtherTemplate =
+        staffReservedForAnotherExactTemplateClient(
+          right.staffMember.id,
+          requirement.client.id,
+          requirement.startTime,
+          input,
+          assignments
+        );
+
+      // When a template staff member is still available for their own
+      // template client at this slot, keep that pairing intact before using
+      // them as fallback coverage for a client whose original template staff
+      // is absent. If no unreserved candidate exists, the reserved staff
+      // member can still be used so client coverage remains the final safety
+      // priority.
+      if (
+        leftReservedForOtherTemplate !== rightReservedForOtherTemplate
+      ) {
+        return leftReservedForOtherTemplate ? 1 : -1;
       }
 
       const roleDifference =
