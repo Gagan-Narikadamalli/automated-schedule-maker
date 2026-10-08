@@ -157,7 +157,7 @@ export async function POST(request: Request) {
     const sourceType =
       body.sourceType === "HISTORICAL_WORKBOOK"
         ? "HISTORICAL_WORKBOOK"
-        : body.sourceType === "SAVED_SCHEDULE"
+        : body.sourceType === "SAVED_SCHEDULE" || sourceDate
           ? "SAVED_SCHEDULE"
           : "MANUAL";
     const sourceName =
