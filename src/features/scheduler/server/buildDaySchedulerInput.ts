@@ -18,6 +18,7 @@ import { connectToDatabase } from "@/lib/db";
 import { CallOut } from "@/models/CallOut";
 import { ClientCallOut } from "@/models/ClientCallOut";
 import { AttendanceOverride } from "@/models/AttendanceOverride";
+import { applyAttendanceWindow, type AttendanceWindow } from "@/features/scheduler/engine/attendanceWindows";
 import { Client } from "@/models/Client";
 import { ScheduleAssignment } from "@/models/ScheduleAssignment";
 import { ScheduleTemplate } from "@/models/ScheduleTemplate";
@@ -151,16 +152,6 @@ function getPatternSlots(
   }
 
   return [...slots].sort();
-}
-
-type AttendanceWindow = { mode: "IN" | "OUT"; startTime: string; endTime: string };
-
-function applyAttendanceWindow(slots: string[], window?: AttendanceWindow): string[] {
-  if (!window) return slots;
-  const overrideSlots = getSlotsInsideTimeRange(window.startTime, window.endTime);
-  if (window.mode === "IN") return [...new Set([...slots, ...overrideSlots])].sort();
-  const blocked = new Set(overrideSlots);
-  return slots.filter((slot) => !blocked.has(slot));
 }
 
 function removeBlockedSlots(
