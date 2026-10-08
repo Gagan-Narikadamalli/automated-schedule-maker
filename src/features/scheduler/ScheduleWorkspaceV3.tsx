@@ -344,6 +344,8 @@ export function ScheduleWorkspaceV3() {
   const [working, setWorking] = useState(false);
   const [manualMode, setManualMode] = useState(false);
   const [statusMessage, setStatusMessage] = useState("Loading the clinic schedule...");
+  const [schedulerWarnings, setSchedulerWarnings] = useState<string[]>([]);
+  const [showSchedulerWarnings, setShowSchedulerWarnings] = useState(false);
   const [unplacedAssignments, setUnplacedAssignments] = useState<UnplacedRecord[]>([]);
   const [placementRecord, setPlacementRecord] = useState<UnplacedRecord | null>(null);
   const [detailsRecord, setDetailsRecord] = useState<UnplacedRecord | null>(null);
@@ -894,7 +896,17 @@ export function ScheduleWorkspaceV3() {
       const data = await readJson<GenerateResponse>(response);
       if (!response.ok) throw new Error(data.error || "The schedule could not be generated.");
       await loadSchedule();
-      setStatusMessage(`Auto Generate finished. ${formatMetrics(data.metrics)}${data.warnings?.length ? ` ${data.warnings.length} scheduler warning(s) need review.` : ""}`);
+      const warningTexts = (data.warnings ?? []).map((warning) => {
+        if (typeof warning === "string") return warning;
+        if (warning && typeof warning === "object") {
+          const record = warning as { message?: string; code?: string; clientCode?: string; startTime?: string };
+          return [record.code, record.clientCode, record.startTime, record.message].filter(Boolean).join(" — ") || JSON.stringify(warning);
+        }
+        return String(warning);
+      });
+      setSchedulerWarnings(warningTexts);
+      setShowSchedulerWarnings(warningTexts.length > 0);
+      setStatusMessage(`Auto Generate finished. ${formatMetrics(data.metrics)}${warningTexts.length ? ` ${warningTexts.length} scheduler warning(s) listed below.` : ""}`);
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "The schedule could not be generated.");
     } finally {
@@ -1166,6 +1178,27 @@ export function ScheduleWorkspaceV3() {
             </label>)}
           </div>}
           <button type="button" className="button button-primary" disabled={working} onClick={() => void (callOutTab === "staff" ? saveCallOuts() : saveClientCallOuts())}>{working ? "Saving..." : `Save ${callOutTab === "staff" ? "Staff" : "Client"} Call Outs`}</button>
+        </section>
+      )}
+
+      {schedulerWarnings.length > 0 && (
+        <section className="section-card" aria-label="Scheduler warnings" style={{ marginBottom: 12 }}>
+          <div className="panel-heading-row">
+            <div>
+              <h2>Scheduler Warnings ({schedulerWarnings.length})</h2>
+              <p>Review the exact issues from the most recent Auto Generate Day run.</p>
+            </div>
+            <button type="button" className="button button-secondary"
+              aria-expanded={showSchedulerWarnings}
+              onClick={() => setShowSchedulerWarnings((open) => !open)}>
+              {showSchedulerWarnings ? "Hide Warnings" : "View Warnings"}
+            </button>
+          </div>
+          {showSchedulerWarnings && (
+            <ol style={{ margin: "12px 0", paddingLeft: 28, lineHeight: 1.7 }}>
+              {schedulerWarnings.map((warning, index) => <li key={index}>{warning}</li>)}
+            </ol>
+          )}
         </section>
       )}
 
