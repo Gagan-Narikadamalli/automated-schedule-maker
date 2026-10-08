@@ -94,6 +94,7 @@ const naturalStaffClientLookup = plan(
 assert.equal(naturalStaffClientLookup.intent, "STAFF_LOOKUP");
 assert.equal(naturalStaffClientLookup.toolName, "lookup_schedule");
 assert.equal(naturalStaffClientLookup.input.staffName, "Anias");
+assert.equal(naturalStaffClientLookup.input.includeBreaks, false);
 
 const clientLookup = plan("who is covering CaMe at 10 am");
 assert.equal(clientLookup.toolName, "lookup_schedule");
