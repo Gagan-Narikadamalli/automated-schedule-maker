@@ -52,7 +52,7 @@ const SchedulingRulesSchema = new Schema(
     },
     preventSameStaffClientRepeatSameDay: {
       type: Boolean,
-      default: true,
+      default: false,
     },
     allowSameStaffClientRepeatForCoverageException: {
       type: Boolean,
