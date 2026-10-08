@@ -30,12 +30,12 @@ const SchedulingRulesSchema = new Schema(
     },
     maximumClientsPerTechPerDay: {
       type: Number,
-      default: 6,
+      default: 3,
       min: 1,
     },
     maximumTechsPerClientPerDay: {
       type: Number,
-      default: 4,
+      default: 3,
       min: 1,
     },
     minimumClientStaffAssignmentMinutes: {
@@ -120,7 +120,7 @@ const SchedulingRulesSchema = new Schema(
     },
     continuityPriority: {
       type: Number,
-      default: 35,
+      default: 200,
       min: 0,
       max: 200,
     },
@@ -132,13 +132,13 @@ const SchedulingRulesSchema = new Schema(
     },
     workloadBalancePriority: {
       type: Number,
-      default: 10,
+      default: 0,
       min: 0,
       max: 200,
     },
     clientHandoffPenaltyPriority: {
       type: Number,
-      default: 25,
+      default: 200,
       min: 0,
       max: 200,
     },
