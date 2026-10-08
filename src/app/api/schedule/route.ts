@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
+import { getEndTimeForSlot, patternMatchesDate } from "@/features/scheduler/engine/dateUtils";
 import { applyFixedNapSessions } from "@/features/scheduler/server/applyFixedNapSessions";
 import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySchedulerInput";
 import {
@@ -99,7 +99,7 @@ export async function GET(request: Request) {
     ] = await Promise.all([
       buildDaySchedulerInput(locationId, date),
       Staff.find({ locationId, active: true })
-        .select("fullName role color teamId")
+        .select("fullName role color teamId shiftPatterns startDate endDate")
         .sort({ fullName: 1 })
         .lean(),
       Client.find({ locationId, active: true })
@@ -156,10 +156,10 @@ export async function GET(request: Request) {
       locationId,
       recentSavedScheduleDates,
       staff: plainStaffDocuments
-        .filter(
-          (staffMember) =>
-            (availableSlotMap.get(String(staffMember._id))?.length ?? 0) > 0
-        )
+        .filter((staffMember) => {
+          const schedulerMember = dayData.staff.find((record) => record.id === String(staffMember._id));
+          return Boolean(schedulerMember && (schedulerMember.availableSlots.length > 0 || (Array.isArray(staffMember.shiftPatterns) && staffMember.shiftPatterns.some((pattern: PlainDatabaseRecord) => patternMatchesDate(pattern.days ?? [], date))));
+        })
         .map((staffMember) => ({
           id: String(staffMember._id),
           name: firstNameOnly(staffMember.fullName),
