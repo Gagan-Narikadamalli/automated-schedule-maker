@@ -500,7 +500,7 @@ export function ScheduleGridEnhanced({
     row: number,
     column: number
   ) {
-    if (saving) return;
+    if (saving || event.button !== 0) return;
     focusGrid();
 
     if (placementCell) {
@@ -520,12 +520,22 @@ export function ScheduleGridEnhanced({
       return;
     }
 
+    // Preserve an existing rectangular selection when the user starts dragging
+    // one of its occupied cells, rather than collapsing it to a single cell.
+    if (manualMode && isCellSelected(row, column) &&
+        !["EMPTY", "OPEN", "UNAVAILABLE"].includes(grid[row][column].assignmentType)) {
+      setDragSelecting(false);
+      return;
+    }
     setDragSelecting(true);
     selectSingleCell(row, column);
   }
 
-  function handleCellMouseEnter(row: number, column: number) {
-    if (!dragSelecting || moveSource || placementCell || saving) return;
+  function handleCellMouseEnter(event: MouseEvent<HTMLTableCellElement>, row: number, column: number) {
+    if (!dragSelecting || !(event.buttons & 1) || moveSource || placementCell || saving) {
+      if (!(event.buttons & 1)) setDragSelecting(false);
+      return;
+    }
     setSelection((current) => ({ ...current, focus: { row, column } }));
   }
 
@@ -536,8 +546,11 @@ export function ScheduleGridEnhanced({
     selectEntireRow(row, event.shiftKey);
   }
 
-  function handleRowHeaderMouseEnter(row: number) {
-    if (!dragSelecting || moveSource || placementCell || saving) return;
+  function handleRowHeaderMouseEnter(event: MouseEvent<HTMLTableCellElement>, row: number) {
+    if (!dragSelecting || !(event.buttons & 1) || moveSource || placementCell || saving) {
+      if (!(event.buttons & 1)) setDragSelecting(false);
+      return;
+    }
     setSelection((current) => ({
       anchor: { row: current.anchor.row, column: 0 },
       focus: { row, column: columns.length - 1 },
@@ -1196,13 +1209,6 @@ export function ScheduleGridEnhanced({
   ) {
     if (!manualMode || sources.length === 0) return;
 
-    if (!isScratchColumn(target.column)) {
-      onConflict(
-        "For a multi-block drag, drop the selection into Scratch space. Use Ctrl+X and Ctrl+V to move a selected block range directly to another schedule area."
-      );
-      return;
-    }
-
     const firstRow = Math.min(
       ...sources.map((position) => position.row)
     );
@@ -1224,69 +1230,57 @@ export function ScheduleGridEnhanced({
           destination.row < 0 ||
           destination.row >= DAILY_TIME_SLOTS.length ||
           destination.column < 0 ||
-          destination.column >= columns.length ||
-          !isScratchColumn(destination.column)
+          destination.column >= columns.length
       )
     ) {
       onConflict(
-        "The selected blocks do not fit in the remaining Scratch columns/rows. Drop them closer to the top-left of Scratch space."
+        "The selected blocks do not fit at the destination. Drop them closer to the top-left of the grid."
       );
       return;
     }
 
-    if (
-      destinations.some(({ target: destination }) =>
-        isOccupied(
-          grid[destination.row][destination.column]
-        )
-      )
-    ) {
-      onConflict(
-        "One or more Scratch destination cells are occupied. Choose an empty Scratch area."
-      );
+    const sourceKeys = new Set(sources.map(({ row, column }) => `${row}:${column}`));
+    const destinationKeys = new Set(destinations.map(({ target: cell }) => `${cell.row}:${cell.column}`));
+    const replacing = destinations.filter(({ target: cell }) =>
+      !sourceKeys.has(`${cell.row}:${cell.column}`) && isOccupied(grid[cell.row][cell.column])
+    );
+    const unavailable = destinations.filter(({ target: cell }) =>
+      !isScratchColumn(cell.column) && grid[cell.row][cell.column].assignmentType === "UNAVAILABLE"
+    );
+    if (replacing.some(({ target: cell }) => isScratchColumn(cell.column))) {
+      onConflict("A Scratch destination is occupied. Choose empty Scratch cells.");
       return;
     }
-
+    if (!(await confirmManualOverride(replacing.length, unavailable.length, "replaced by the moved selection"))) return;
     const nextGrid = cloneGrid(grid);
     const mutations: ScheduleGridMutation[] = [];
 
+    // Clear every source first, then place the exact same block pattern at
+    // the destination. This supports overlapping source/destination ranges.
+    for (const source of sources) {
+      if (destinationKeys.has(`${source.row}:${source.column}`)) continue;
+      const oldCell = grid[source.row][source.column];
+      const empty = createEmptyScheduleCell();
+      nextGrid[source.row][source.column] = empty;
+      mutations.push({
+        ...mutationForCell(source.row, source.column, oldCell, empty),
+        stagedInScratch: !isScratchColumn(source.column) &&
+          destinations.every(({ target: cell }) => isScratchColumn(cell.column)),
+      });
+    }
     for (const item of destinations) {
-      const sourceCell =
-        grid[item.source.row][item.source.column];
-      const targetCell =
-        grid[item.target.row][item.target.column];
+      const sourceCell = grid[item.source.row][item.source.column];
+      const targetCell = grid[item.target.row][item.target.column];
+      const scratch = isScratchColumn(item.target.column);
       const stagedCell: DemoGridCell = {
         ...sourceCell,
         source: "MANUAL",
-        locked: false,
+        locked: !scratch,
       };
-      const empty = createEmptyScheduleCell();
-
-      nextGrid[item.target.row][item.target.column] =
-        stagedCell;
-      nextGrid[item.source.row][item.source.column] =
-        empty;
-
-      mutations.push(
-        mutationForCell(
-          item.target.row,
-          item.target.column,
-          targetCell,
-          stagedCell
-        )
-      );
-      mutations.push({
-        ...mutationForCell(
-          item.source.row,
-          item.source.column,
-          sourceCell,
-          empty
-        ),
-        stagedInScratch:
-          !isScratchColumn(item.source.column),
-      });
+      nextGrid[item.target.row][item.target.column] = stagedCell;
+      mutations.push(mutationForCell(item.target.row, item.target.column, targetCell, stagedCell,
+        !scratch && targetCell.assignmentType === "UNAVAILABLE"));
     }
-
     const saved = await commitMutations(
       nextGrid,
       mutations,
@@ -1301,7 +1295,7 @@ export function ScheduleGridEnhanced({
         focus: { ...lastDestination },
       });
       onConflict(
-        `${sources.length} selected block${sources.length === 1 ? "" : "s"} moved into temporary Scratch space. Their original schedule cells were cleared.`
+        `${sources.length} selected blocks moved together to the new grid position.`
       );
     }
   }
@@ -1400,10 +1394,7 @@ export function ScheduleGridEnhanced({
         : [draggedCell];
 
     if (sources.length > 1) {
-      void moveSelectedAssignmentsToScratch(
-        sources,
-        { row, column }
-      );
+      void moveSelectedAssignmentsToScratch(sources, { row, column });
     } else {
       void moveAssignment(sources[0], { row, column });
     }
@@ -1570,7 +1561,7 @@ export function ScheduleGridEnhanced({
                   className={`schedule-time-column ${isEntireRowSelected(rowIndex) ? styles.selectedRowHeader : ""}`}
                   title="Click to select the whole row. Shift-click another time to select multiple rows."
                   onMouseDown={(event) => handleRowHeaderMouseDown(event, rowIndex)}
-                  onMouseEnter={() => handleRowHeaderMouseEnter(rowIndex)}
+                  onMouseEnter={(event) => handleRowHeaderMouseEnter(event, rowIndex)}
                 >
                   {timeSlot.label}
                 </th>
@@ -1594,7 +1585,7 @@ export function ScheduleGridEnhanced({
                         !["EMPTY", "OPEN", "UNAVAILABLE"].includes(cell.assignmentType)
                       }
                       onMouseDown={(event) => handleCellMouseDown(event, rowIndex, columnIndex)}
-                      onMouseEnter={() => handleCellMouseEnter(rowIndex, columnIndex)}
+                      onMouseEnter={(event) => handleCellMouseEnter(event, rowIndex, columnIndex)}
                       onDoubleClick={() => {
                         if (saving || placementCell) return;
                         if (cell.assignmentType === "UNAVAILABLE" && !manualMode) {
