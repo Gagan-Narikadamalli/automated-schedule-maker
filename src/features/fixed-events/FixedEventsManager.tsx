@@ -12,7 +12,7 @@ type NapPriorityCategory = "YOUNGER" | "OLDER";
 type ScheduleMode = "ONE_TIME" | "WEEKLY";
 
 type LocationOption = { id: string; name: string };
-type ClientOption = { id: string; fullName: string; displayCode: string; color: string };
+type ClientOption = { id: string; displayCode: string; color: string };
 
 type ClientEvent = {
   id: string;
@@ -69,6 +69,7 @@ export function FixedEventsManager() {
   const [modalOpen, setModalOpen] = useState(false);
   const [eventType, setEventType] = useState<EventType>("SPEECH");
   const [clientId, setClientId] = useState("");
+  const [selectedNapClientIds, setSelectedNapClientIds] = useState<string[]>([]);
   const [mode, setMode] = useState<ScheduleMode>("ONE_TIME");
   const [date, setDate] = useState(localToday);
   const [seriesStartDate, setSeriesStartDate] = useState(localToday);
@@ -151,6 +152,11 @@ export function FixedEventsManager() {
           ? currentClientId
           : nextClients[0]?.id ?? ""
       );
+      setSelectedNapClientIds((currentIds) =>
+        currentIds.filter((id) =>
+          nextClients.some((client) => client.id === id)
+        )
+      );
 
       const speechEvents: ClientEvent[] = (speechData.speechSessions ?? []).map((event) => ({ ...event, eventType: "SPEECH" }));
       const napEvents: ClientEvent[] = (napData.napSessions ?? []).map((event) => ({ ...event, eventType: "NAP" }));
@@ -174,6 +180,7 @@ export function FixedEventsManager() {
     setSeriesStartDate(localToday());
     setSeriesEndDate(localToday());
     setSelectedDays([]);
+    setSelectedNapClientIds([]);
     setPriorityCategory("YOUNGER");
     setNote("");
     if (type === "NAP") {
@@ -191,7 +198,26 @@ export function FixedEventsManager() {
     if (type === "NAP") {
       setStartTime("11:30");
       setEndTime("12:30");
+    } else {
+      setStartTime("10:00");
+      setEndTime("10:30");
     }
+  }
+
+  function toggleNapClient(id: string) {
+    setSelectedNapClientIds((current) =>
+      current.includes(id)
+        ? current.filter((value) => value !== id)
+        : [...current, id]
+    );
+  }
+
+  function toggleAllNapClients() {
+    setSelectedNapClientIds((current) =>
+      current.length === clients.length
+        ? []
+        : clients.map((client) => client.id)
+    );
   }
 
   function toggleDay(day: string) {
@@ -199,16 +225,26 @@ export function FixedEventsManager() {
   }
 
   async function saveEvent() {
-    if (!locationId || !clientId) {
-      setMessage("Choose a location and client first.");
+    if (!locationId) {
+      setMessage("Choose a location first.");
+      return;
+    }
+
+    if (eventType === "SPEECH" && !clientId) {
+      setMessage("Choose a client for Speech.");
+      return;
+    }
+
+    if (eventType === "NAP" && selectedNapClientIds.length === 0) {
+      setMessage("Select at least one client for the shared nap window.");
       return;
     }
     if (endTime <= startTime) {
       setMessage("Event end time must be later than start time.");
       return;
     }
-    if (eventType === "NAP" && (startTime < "11:00" || endTime > "14:00")) {
-      setMessage("Nap time must stay inside the 11:00 AM to 2:00 PM window.");
+    if (eventType === "NAP" && (startTime < "11:30" || endTime > "14:00")) {
+      setMessage("Nap time must stay inside the 11:30 AM to 2:00 PM window.");
       return;
     }
     if (mode === "WEEKLY" && selectedDays.length === 0) {
@@ -218,20 +254,51 @@ export function FixedEventsManager() {
 
     try {
       setWorking(true);
-      const payload = mode === "ONE_TIME"
-        ? { locationId, clientId, date, startTime, endTime, note, ...(eventType === "NAP" ? { priorityCategory } : {}) }
-        : { locationId, clientId, seriesStartDate, seriesEndDate, daysOfWeek: selectedDays, startTime, endTime, note, ...(eventType === "NAP" ? { priorityCategory } : {}) };
+      const eventClients =
+        eventType === "NAP"
+          ? { clientIds: selectedNapClientIds }
+          : { clientId };
+      const payload =
+        mode === "ONE_TIME"
+          ? {
+              locationId,
+              ...eventClients,
+              date,
+              startTime,
+              endTime,
+              note,
+              ...(eventType === "NAP" ? { priorityCategory } : {}),
+            }
+          : {
+              locationId,
+              ...eventClients,
+              seriesStartDate,
+              seriesEndDate,
+              daysOfWeek: selectedDays,
+              startTime,
+              endTime,
+              note,
+              ...(eventType === "NAP" ? { priorityCategory } : {}),
+            };
       const endpoint = eventType === "NAP" ? "/api/nap-sessions" : "/api/speech-sessions";
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const data = (await response.json()) as { createdCount?: number; error?: string };
+      const data = (await response.json()) as {
+        createdCount?: number;
+        clientCount?: number;
+        error?: string;
+      };
       if (!response.ok) throw new Error(data.error || `${formatEventType(eventType)} event could not be saved.`);
       setModalOpen(false);
       await loadLocationData(locationId, month);
-      setMessage(`${data.createdCount ?? 1} ${formatEventType(eventType).toLowerCase()} event(s) saved. The automatic scheduler will protect this time before placing staff breaks.`);
+      setMessage(
+        eventType === "NAP"
+          ? `Nap window saved for ${data.clientCount ?? selectedNapClientIds.length} client(s). Auto Generate will stagger their naps inside the window and use Nap/Break opportunities before ordinary breaks.`
+          : `${data.createdCount ?? 1} speech event(s) saved. Speech is protected before nap and staff-break placement.`
+      );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Event could not be saved.");
     } finally {
@@ -379,7 +446,7 @@ export function FixedEventsManager() {
         open={modalOpen}
         title="Add Client Event"
         eyebrow="SPEECH / NAP"
-        description="Choose Speech or Nap. Nap events are limited to 11:00 AM–2:00 PM and are used first when the scheduler looks for staff break opportunities."
+        description="Speech is protected first. Nap can be applied to one or many kids at once. Nap windows must stay between 11:30 AM and 2:00 PM, and the actual nap duration comes from Clinic Settings."
         onClose={() => setModalOpen(false)}
         footer={
           <>
@@ -389,7 +456,23 @@ export function FixedEventsManager() {
                 Add Client
               </Link>
             ) : (
-              <button type="button" className="button button-primary" disabled={working || !clientId} onClick={() => void saveEvent()}>{working ? "Saving..." : "Save Event"}</button>
+              <button
+                type="button"
+                className="button button-primary"
+                disabled={
+                  working ||
+                  (eventType === "SPEECH"
+                    ? !clientId
+                    : selectedNapClientIds.length === 0)
+                }
+                onClick={() => void saveEvent()}
+              >
+                {working
+                  ? "Saving..."
+                  : eventType === "NAP"
+                    ? `Save Nap for ${selectedNapClientIds.length} client(s)`
+                    : "Save Event"}
+              </button>
             )}
           </>
         }
@@ -424,27 +507,61 @@ export function FixedEventsManager() {
             </div>
           ) : null}
           <div className="form-grid">
-            <label className="form-field form-field-wide">
-              <span>Client / kid</span>
-              <select
-                value={clientId}
-                disabled={clients.length === 0}
-                onChange={(event) => setClientId(event.target.value)}
-              >
-                {clients.length === 0 ? (
-                  <option value="">No active clients available</option>
-                ) : (
-                  clients.map((client) => (
-                    <option key={client.id} value={client.id}>
-                      {client.displayCode}
-                    </option>
-                  ))
-                )}
-              </select>
-            </label>
+            {eventType === "SPEECH" ? (
+              <label className="form-field form-field-wide">
+                <span>Client / kid</span>
+                <select
+                  value={clientId}
+                  disabled={clients.length === 0}
+                  onChange={(event) => setClientId(event.target.value)}
+                >
+                  {clients.length === 0 ? (
+                    <option value="">No active clients available</option>
+                  ) : (
+                    clients.map((client) => (
+                      <option key={client.id} value={client.id}>
+                        {client.displayCode}
+                      </option>
+                    ))
+                  )}
+                </select>
+              </label>
+            ) : (
+              <div className="form-field form-field-wide">
+                <span>Clients / kids for this nap window</span>
+                <div className="day-selector">
+                  <label className="checkbox-card">
+                    <input
+                      type="checkbox"
+                      checked={
+                        clients.length > 0 &&
+                        selectedNapClientIds.length === clients.length
+                      }
+                      onChange={toggleAllNapClients}
+                    />
+                    <span>Select all</span>
+                  </label>
+                  {clients.map((client) => (
+                    <label key={client.id} className="checkbox-card">
+                      <input
+                        type="checkbox"
+                        checked={selectedNapClientIds.includes(client.id)}
+                        onChange={() => toggleNapClient(client.id)}
+                      />
+                      <span>{client.displayCode}</span>
+                    </label>
+                  ))}
+                </div>
+                <small>
+                  Select every kid who shares this nap placement window. Each
+                  selected kid still receives one nap block per day; Auto
+                  Generate staggers the blocks to create Break/Nap opportunities.
+                </small>
+              </div>
+            )}
             <label className="form-field"><span>Schedule type</span><select value={mode} onChange={(event) => setMode(event.target.value as ScheduleMode)}><option value="ONE_TIME">One-time date</option><option value="WEEKLY">Recurring weekly</option></select></label>
-            <label className="form-field"><span>Starts</span><input type="time" min={eventType === "NAP" ? "11:00" : undefined} max={eventType === "NAP" ? "13:30" : undefined} step="1800" value={startTime} onChange={(event) => setStartTime(event.target.value)} /></label>
-            <label className="form-field"><span>Ends</span><input type="time" min={eventType === "NAP" ? "11:30" : undefined} max={eventType === "NAP" ? "14:00" : undefined} step="1800" value={endTime} onChange={(event) => setEndTime(event.target.value)} /></label>
+            <label className="form-field"><span>{eventType === "NAP" ? "Window starts" : "Starts"}</span><input type="time" min={eventType === "NAP" ? "11:30" : undefined} max={eventType === "NAP" ? "13:30" : undefined} step="1800" value={startTime} onChange={(event) => setStartTime(event.target.value)} /></label>
+            <label className="form-field"><span>{eventType === "NAP" ? "Window ends" : "Ends"}</span><input type="time" min={eventType === "NAP" ? "12:00" : undefined} max={eventType === "NAP" ? "14:00" : undefined} step="1800" value={endTime} onChange={(event) => setEndTime(event.target.value)} /></label>
             {eventType === "NAP" && (
               <label className="form-field"><span>Nap category</span><select value={priorityCategory} onChange={(event) => setPriorityCategory(event.target.value as NapPriorityCategory)}><option value="YOUNGER">Younger child — schedule first</option><option value="OLDER">Older child — schedule second</option></select></label>
             )}
