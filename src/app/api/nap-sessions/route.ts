@@ -19,6 +19,7 @@ type NapPriorityCategory = "YOUNGER" | "OLDER";
 type NapSessionRequest = {
   locationId?: string;
   clientId?: string;
+  clientIds?: string[];
   date?: string;
   startTime?: string;
   endTime?: string;
@@ -191,15 +192,32 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json()) as NapSessionRequest;
     const locationId = body.locationId?.trim();
-    const clientId = body.clientId?.trim();
+    const selectedClientIds = [
+      ...new Set(
+        [
+          ...(Array.isArray(body.clientIds) ? body.clientIds : []),
+          body.clientId,
+        ]
+          .map((value) => value?.trim() ?? "")
+          .filter(Boolean)
+      ),
+    ];
     const startTime = body.startTime?.trim();
     const endTime = body.endTime?.trim();
     const priorityCategory: NapPriorityCategory =
       body.priorityCategory === "YOUNGER" ? "YOUNGER" : "OLDER";
 
-    if (!locationId || !clientId || !startTime || !endTime) {
+    if (
+      !locationId ||
+      selectedClientIds.length === 0 ||
+      !startTime ||
+      !endTime
+    ) {
       return NextResponse.json(
-        { error: "Location, client, nap start time, and nap end time are required." },
+        {
+          error:
+            "Location, at least one client, nap window start, and nap window end are required.",
+        },
         { status: 400 }
       );
     }
@@ -208,9 +226,12 @@ export async function POST(request: Request) {
       return forbiddenResponse("You do not have access to this location.");
     }
 
-    if (!isThirtyMinuteBoundary(startTime) || !isThirtyMinuteBoundary(endTime)) {
+    if (
+      !isThirtyMinuteBoundary(startTime) ||
+      !isThirtyMinuteBoundary(endTime)
+    ) {
       return NextResponse.json(
-        { error: "Nap times must use 30-minute schedule boundaries." },
+        { error: "Nap windows must use 30-minute schedule boundaries." },
         { status: 400 }
       );
     }
@@ -223,7 +244,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           error:
-            "Nap time must start and finish inside the 11:00 AM to 2:00 PM nap window.",
+            "Nap window must start and finish inside 11:00 AM-2:00 PM.",
         },
         { status: 400 }
       );
@@ -231,15 +252,20 @@ export async function POST(request: Request) {
 
     await connectToDatabase();
 
-    const client = await Client.findOne({
-      _id: clientId,
+    const clients = await Client.find({
+      _id: { $in: selectedClientIds },
       locationId,
       active: true,
-    });
+    })
+      .select("_id displayCode")
+      .lean();
 
-    if (!client) {
+    if (clients.length !== selectedClientIds.length) {
       return NextResponse.json(
-        { error: "The selected active client was not found at this location." },
+        {
+          error:
+            "One or more selected active clients were not found at this location.",
+        },
         { status: 404 }
       );
     }
@@ -290,45 +316,56 @@ export async function POST(request: Request) {
       );
     }
 
-    if (dates.length > 100) {
+    if (dates.length * selectedClientIds.length > 500) {
       return NextResponse.json(
-        { error: "A recurring series cannot create more than 100 nap sessions at once." },
+        {
+          error:
+            "One save can create at most 500 client nap occurrences. Reduce the date range or number of selected clients.",
+        },
         { status: 400 }
       );
     }
 
     const createdIds: string[] = [];
 
-    for (const sessionDate of dates) {
-      const session = await NapSession.findOneAndUpdate(
-        {
-          locationId,
-          clientId,
-          date: sessionDate,
-          startTime,
-          endTime,
-        },
-        {
-          $set: {
+    for (const clientId of selectedClientIds) {
+      for (const sessionDate of dates) {
+        // One nap definition per child/day. Saving another shared Nap event for
+        // the same child/day updates the window instead of creating duplicate
+        // naps for that child.
+        const session = await NapSession.findOneAndUpdate(
+          {
             locationId,
             clientId,
             date: sessionDate,
-            startTime,
-            endTime,
-            priorityCategory,
-            recurringSeriesId,
-            note: body.note?.trim() || "",
           },
-        },
-        {
-          new: true,
-          upsert: true,
-          runValidators: true,
-        }
-      );
+          {
+            $set: {
+              locationId,
+              clientId,
+              date: sessionDate,
+              startTime,
+              endTime,
+              priorityCategory,
+              recurringSeriesId,
+              note: body.note?.trim() || "",
+            },
+          },
+          {
+            new: true,
+            upsert: true,
+            runValidators: true,
+          }
+        );
 
-      createdIds.push(String(session._id));
+        createdIds.push(String(session._id));
+      }
     }
+
+    const displayCodes = clients
+      .map((client) => String((client as PlainRecord).displayCode ?? ""))
+      .filter(Boolean)
+      .sort();
 
     await writeAuditLog({
       locationId,
@@ -336,11 +373,14 @@ export async function POST(request: Request) {
       action: hasSeriesRequest ? "CREATE_NAP_SERIES" : "CREATE_NAP_SESSION",
       entityType: "NAP_SESSION",
       entityId: recurringSeriesId || createdIds[0],
-      summary: hasSeriesRequest
-        ? `Added ${dates.length} recurring nap sessions for ${client.displayCode}.`
-        : `Added nap for ${client.displayCode} on ${dates[0]} at ${startTime}.`,
+      summary:
+        selectedClientIds.length > 1
+          ? `Applied ${startTime}-${endTime} nap window to ${selectedClientIds.length} clients across ${dates.length} date(s).`
+          : hasSeriesRequest
+            ? `Added ${dates.length} recurring nap windows for ${displayCodes[0] ?? "client"}.`
+            : `Added nap window for ${displayCodes[0] ?? "client"} on ${dates[0]} at ${startTime}.`,
       after: {
-        clientId,
+        clientIds: selectedClientIds,
         dates,
         startTime,
         endTime,
@@ -352,7 +392,9 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         success: true,
-        createdCount: dates.length,
+        createdCount: createdIds.length,
+        clientCount: selectedClientIds.length,
+        dateCount: dates.length,
         recurringSeriesId,
       },
       { status: 201 }
