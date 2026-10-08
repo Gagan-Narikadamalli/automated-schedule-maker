@@ -88,6 +88,13 @@ assert.equal(staffLookup.input.staffName, "Ania");
 assert.equal(staffLookup.input.startTime, "08:00");
 assert.equal(staffLookup.input.endTime, "14:00");
 
+const naturalStaffClientLookup = plan(
+  "On October 6th for Anias who is the client?"
+);
+assert.equal(naturalStaffClientLookup.intent, "STAFF_LOOKUP");
+assert.equal(naturalStaffClientLookup.toolName, "lookup_schedule");
+assert.equal(naturalStaffClientLookup.input.staffName, "Anias");
+
 const clientLookup = plan("who is covering CaMe at 10 am");
 assert.equal(clientLookup.toolName, "lookup_schedule");
 assert.equal(clientLookup.input.clientCode, "CaMe");
