@@ -8,6 +8,16 @@ type PersonType = "staff" | "client";
 type Attendance = { personType: PersonType; personId: string; mode: Mode; startTime: string; endTime: string };
 type Person = { id: string; name: string };
 type Location = { id: string; name: string };
+function initials(name: string): string {
+  return name.trim().split(/\s+/).slice(0, 2).map((word) => word.charAt(0).toUpperCase()).join("") || "?";
+}
+function friendlyTime(time: string): string {
+  const [hour, minute] = time.split(":").map(Number);
+  return `${hour % 12 || 12}:${String(minute).padStart(2, "0")} ${hour >= 12 ? "PM" : "AM"}`;
+}
+function canonical(records: Attendance[]): string {
+  return JSON.stringify([...records].sort((a, b) => a.personType.localeCompare(b.personType) || a.personId.localeCompare(b.personId)));
+}
 
 function today() {
   const now = new Date();
@@ -89,10 +99,17 @@ export function AttendanceManager() {
     if (!person.name.toLowerCase().includes(search.toLowerCase())) return false;
     const record = records.find((entry) => entry.personId === person.id && entry.personType === group);
     return filter === "ALL" || (filter === "CHANGED" && Boolean(record)) || record?.mode === filter;
+  }).sort((left, right) => {
+    const changedLeft = Number(records.some((entry) => entry.personType === group && entry.personId === left.id));
+    const changedRight = Number(records.some((entry) => entry.personType === group && entry.personId === right.id));
+    return changedRight - changedLeft || left.name.localeCompare(right.name);
   }), [people, group, search, filter, records]);
   const current = records.filter((entry) => entry.personType === group);
-  const dirty = JSON.stringify([...current].sort((a, b) => a.personId.localeCompare(b.personId))) !==
-    JSON.stringify(saved.filter((entry) => entry.personType === group).sort((a, b) => a.personId.localeCompare(b.personId)));
+  const dirty = canonical(current) !== canonical(saved.filter((entry) => entry.personType === group));
+  const unsavedCount = new Set([...current, ...saved.filter((entry) => entry.personType === group)].map((entry) => entry.personId))
+    .size ? new Set([...current, ...saved.filter((entry) => entry.personType === group)].map((entry) => entry.personId))
+      .size : 0;
+  const normalCount = people[group].length - current.length;
 
   async function save() {
     try {
@@ -155,9 +172,14 @@ export function AttendanceManager() {
       </div>
       <div className={styles.summary}>
         <span>{people[group].length} total</span>
+        <span>{normalCount} normal</span>
         <span>{current.filter((item) => item.mode === "IN").length} called in</span>
         <span>{current.filter((item) => item.mode === "OUT").length} called out</span>
-        {dirty && <strong>Unsaved changes</strong>}
+        {dirty && <strong>Unsaved attendance changes</strong>}
+        <button type="button" className={styles.summaryAction} onClick={() => setExpanded(
+          filtered.find((person) => getRecord(person.id))?.id ?? null
+        )} disabled={!current.length}>Expand first changed</button>
+        <button type="button" className={styles.summaryAction} onClick={() => setExpanded(null)}>Collapse all</button>
       </div>
 
       {loading ? <p className={styles.message}>Loading attendance…</p> :
@@ -166,15 +188,22 @@ export function AttendanceManager() {
           const record = getRecord(person.id);
           const open = expanded === person.id;
           const wholeDay = record?.startTime === "08:00" && record?.endTime === "17:00";
-          return <article key={person.id} className={`${styles.card} ${open ? styles.open : ""}`}>
+          return <article key={person.id} className={`${styles.card} ${open ? styles.open : ""} ${record?.mode === "IN" ? styles.cardIn : record?.mode === "OUT" ? styles.cardOut : ""}`}>
             <button type="button" className={styles.cardHeader} aria-expanded={open} onClick={() => setExpanded(open ? null : person.id)}>
-              <span className={styles.personName}>{person.name}</span>
+              <span className={styles.avatar} aria-hidden="true">{initials(person.name)}</span>
+              <span className={styles.personInfo}>
+                <span className={styles.personName}>{person.name}</span>
+                <span className={styles.personMeta}>{record
+                  ? `${record.mode === "IN" ? "Available" : "Away"} · ${record.startTime === "08:00" && record.endTime === "17:00" ? "Whole day" : `${friendlyTime(record.startTime)} – ${friendlyTime(record.endTime)}`}`
+                  : "Regular attendance schedule"}</span>
+              </span>
               <span className={`${styles.status} ${record?.mode === "IN" ? styles.calledIn : record?.mode === "OUT" ? styles.calledOut : ""}`}>
                 {record?.mode === "IN" ? "Call In" : record?.mode === "OUT" ? "Call Out" : "Normal"}
               </span>
-              <span aria-hidden="true">{open ? "−" : "+"}</span>
+              <span className={styles.editHint}>{open ? "Close" : "Edit"} <span aria-hidden="true">{open ? "▴" : "▾"}</span></span>
             </button>
             {open && <div className={styles.details}>
+              <p className={styles.fieldTitle}>Attendance status</p>
               <div className={styles.modeButtons}>
                 {(["NONE", "IN", "OUT"] as const).map((mode) =>
                   <button type="button" key={mode} className={(record?.mode ?? "NONE") === mode ? styles.selected : ""}
@@ -184,6 +213,7 @@ export function AttendanceManager() {
                   </button>)}
               </div>
               {record && <>
+                <p className={styles.helperText}>This applies only to {date}. It does not change the recurring schedule.</p>
                 <label className={styles.wholeDay}><input type="checkbox" checked={wholeDay}
                   onChange={(event) => update(person.id, { ...record, startTime: "08:00", endTime: event.target.checked ? "17:00" : "12:00" })} />
                   Whole day · 8:00 AM–5:00 PM</label>
@@ -193,6 +223,7 @@ export function AttendanceManager() {
                   <label>To<input type="time" min="08:30" max="17:00" step={1800} value={record.endTime}
                     onChange={(event) => update(person.id, { ...record, endTime: event.target.value })} /></label>
                 </div>}
+                <p className={styles.previewLine}>{record.mode === "IN" ? "Available for scheduling" : "Unavailable for scheduling"} from {friendlyTime(record.startTime)} to {friendlyTime(record.endTime)}.</p>
               </>}
             </div>}
           </article>;
@@ -201,9 +232,12 @@ export function AttendanceManager() {
       </div>}
       <div className={styles.footer}>
         <p role="status">{message || "Call-ins add availability; call-outs block it. Saving will refresh this day's schedule."}</p>
-        <button className={styles.save} type="button" disabled={loading || saving || !dirty} onClick={() => void save()}>
+        <div className={styles.saveGroup}>
+          {dirty && <span className={styles.unsavedLabel}>Unsaved changes · {unsavedCount} affected record(s)</span>}
+          <button className={styles.save} type="button" disabled={loading || saving || !dirty} onClick={() => void save()}>
           {saving ? "Saving…" : `Save ${group === "staff" ? "Staff" : "Client"} Attendance`}
-        </button>
+          </button>
+        </div>
       </div>
     </section>
   </div>;
