@@ -722,7 +722,7 @@ export function planNativeSchedulerAction(args: {
   }
 
   if (
-    /\b(?:historically|history|historical|normally|usually|typically|past|previous|last\s+year|pattern|patterns)\b/i.test(
+    /\b(?:historically|history|historical|normally|usually|typically|past|previous|last\s+year|pattern|patterns|workbook|excel|training\s+data|learned\s+schedule)\b/i.test(
       raw
     )
   ) {
@@ -1450,5 +1450,20 @@ export async function runNativeSchedulerAi(args: {
     tools: args.tools,
     date: args.date,
   });
+
+  if (plan.intent === "IMPROVEMENTS") {
+    const knowledge = await buildNativeHistoricalKnowledge({
+      locationId: args.locationId,
+      date: args.date,
+      query: expandedMessage,
+    });
+
+    return {
+      ...executed.result,
+      text:
+        `${executed.result.text}\n\nWorkbook/template context used by Native Scheduler AI:\n${knowledge}`,
+    };
+  }
+
   return executed.result;
 }
