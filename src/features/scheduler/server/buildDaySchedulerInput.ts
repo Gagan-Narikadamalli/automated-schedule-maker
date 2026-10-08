@@ -17,6 +17,7 @@ import type {
 import { connectToDatabase } from "@/lib/db";
 import { CallOut } from "@/models/CallOut";
 import { ClientCallOut } from "@/models/ClientCallOut";
+import { AttendanceOverride } from "@/models/AttendanceOverride";
 import { Client } from "@/models/Client";
 import { ScheduleAssignment } from "@/models/ScheduleAssignment";
 import { ScheduleTemplate } from "@/models/ScheduleTemplate";
@@ -150,6 +151,16 @@ function getPatternSlots(
   }
 
   return [...slots].sort();
+}
+
+type AttendanceWindow = { mode: "IN" | "OUT"; startTime: string; endTime: string };
+
+function applyAttendanceWindow(slots: string[], window?: AttendanceWindow): string[] {
+  if (!window) return slots;
+  const overrideSlots = getSlotsInsideTimeRange(window.startTime, window.endTime);
+  if (window.mode === "IN") return [...new Set([...slots, ...overrideSlots])].sort();
+  const blocked = new Set(overrideSlots);
+  return slots.filter((slot) => !blocked.has(slot));
 }
 
 function removeBlockedSlots(
@@ -604,6 +615,7 @@ function buildWeeklyClientHoursByStaff(
 function mapStaff(
   staffDocuments: DatabaseRecord[],
   callOuts: DaySchedulerData["partialCallOuts"],
+  attendanceOverrides: Map<string, AttendanceWindow>,
   date: string,
   weeklyClientHoursByStaff: Map<string, number>,
   rules: ExtendedSchedulerRules
@@ -629,9 +641,9 @@ function mapStaff(
         staffMember.shiftPatterns,
         date
       );
-      const availableSlots = removeBlockedSlots(
-        normalAvailableSlots,
-        unavailableRanges
+      const availableSlots = applyAttendanceWindow(
+        removeBlockedSlots(normalAvailableSlots, unavailableRanges),
+        attendanceOverrides.get(staffId)
       );
       const employeeType = String(
         staffMember.employeeType ?? "FULL_TIME"
@@ -688,6 +700,7 @@ function mapStaff(
 function mapClients(
   clientDocuments: DatabaseRecord[],
   speechSessions: DatabaseRecord[],
+  attendanceOverrides: Map<string, AttendanceWindow>,
   date: string
 ): SchedulerClient[] {
   const activeClients = clientDocuments.filter((client) => {
@@ -725,9 +738,9 @@ function mapClients(
 
   return activeClients.map((client) => {
     const clientId = String(client._id);
-    const attendanceSlots = getPatternSlots(
-      client.attendancePatterns,
-      date
+    const attendanceSlots = applyAttendanceWindow(
+      getPatternSlots(client.attendancePatterns, date),
+      attendanceOverrides.get(clientId)
     );
     const napSlots: string[] = [];
     const speechSlots = [
@@ -899,6 +912,7 @@ export async function buildDaySchedulerInput(
     rawClients,
     rawCallOuts,
     rawClientCallOuts,
+    rawAttendanceOverrides,
     rawSpeechSessions,
     rawAssignments,
     rawRules,
@@ -914,6 +928,7 @@ export async function buildDaySchedulerInput(
       .lean(),
     CallOut.find({ locationId, date }).lean(),
     ClientCallOut.find({ locationId, date }).select('clientId').lean(),
+    AttendanceOverride.find({ locationId, date }).lean(),
     SpeechSession.find({ locationId, date }).lean(),
     ScheduleAssignment.find({ locationId, date }).lean(),
     SchedulingRules.findOne({ locationId }).lean(),
@@ -960,9 +975,20 @@ export async function buildDaySchedulerInput(
     templateDocuments
   );
 
+  const staffAttendanceOverrides = new Map<string, AttendanceWindow>();
+  const clientAttendanceOverrides = new Map<string, AttendanceWindow>();
+  for (const record of rawAttendanceOverrides as unknown as DatabaseRecord[]) {
+    const entry: AttendanceWindow = {
+      mode: record.mode === "IN" ? "IN" : "OUT",
+      startTime: String(record.startTime),
+      endTime: String(record.endTime),
+    };
+    if (record.personType === "staff") staffAttendanceOverrides.set(String(record.personId), entry);
+    if (record.personType === "client") clientAttendanceOverrides.set(String(record.personId), entry);
+  }
   const partialCallOuts = (
     rawCallOuts as unknown as DatabaseRecord[]
-  ).map((callOut) => ({
+  ).filter((record) => !staffAttendanceOverrides.has(String(record.staffId))).map((callOut) => ({
     staffId: String(callOut.staffId),
     startTime: String(callOut.startTime),
     endTime: String(callOut.endTime),
@@ -975,14 +1001,18 @@ export async function buildDaySchedulerInput(
   const staff = mapStaff(
     staffDocuments,
     partialCallOuts,
+    staffAttendanceOverrides,
     date,
     weeklyClientHoursByStaff,
     extendedRules
   );
-  const absentClientIds = new Set((rawClientCallOuts as unknown as DatabaseRecord[]).map((row) => String(row.clientId)));
+  const absentClientIds = new Set((rawClientCallOuts as unknown as DatabaseRecord[])
+    .map((row) => String(row.clientId))
+    .filter((id) => !clientAttendanceOverrides.has(id)));
   const clients = mapClients(
     clientDocuments.filter((row) => !absentClientIds.has(String(row._id))),
     speechSessions,
+    clientAttendanceOverrides,
     date
   );
   const existingAssignments = mapExistingAssignments(
@@ -1040,14 +1070,10 @@ export async function buildDaySchedulerInput(
         )
       : [];
 
-  const fullDayCallOutStaffIds = partialCallOuts
-    .filter((callOut) => {
-      return (
-        callOut.startTime <= extendedRules.scheduleStartTime &&
-        callOut.endTime >= extendedRules.scheduleEndTime
-      );
-    })
-    .map((callOut) => callOut.staffId);
+  const fullDayCallOutStaffIds = [
+    ...partialCallOuts.filter((record) => record.startTime <= "08:00" && record.endTime >= "17:00").map((record) => record.staffId),
+    ...[...staffAttendanceOverrides.entries()].filter(([, record]) => record.mode === "OUT" && record.startTime <= "08:00" && record.endTime >= "17:00").map(([id]) => id),
+  ];
 
   const input: SchedulerInput = {
     staff,
