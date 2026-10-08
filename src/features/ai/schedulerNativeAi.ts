@@ -420,17 +420,24 @@ export function planNativeSchedulerAction(args: {
   }
 
   if (
-    /\b(?:recommend|recommendation|suggest|suggestion|improve|improvement|optimi[sz]e|better\s+schedule|how\s+can\s+(?:we|i)\s+(?:cover|fit|improve)|how\s+to\s+(?:cover|fit))\b/i.test(
+    /\b(?:recommend|recommendation|suggest|suggestion|improve|improvement|optimi[sz]e|better\s+schedule|smooth|smoother|continuous|continuity|handoffs?|fragmented|jumbled|rebalance|human[- ]?style|how\s+can\s+(?:we|i)\s+(?:cover|fit|improve)|how\s+to\s+(?:cover|fit))\b/i.test(
       raw
     )
   ) {
+    const continuityRequested =
+      /\b(?:smooth|smoother|continuous|continuity|handoffs?|fragmented|jumbled|rebalance|human[- ]?style|same\s+staff|different\s+staff|2\s*(?:-|to)\s*3\s+clients?)\b/i.test(
+        raw
+      );
     const focus =
-      /\bbreaks?\b/i.test(raw) && !/\b(?:coverage|cover|gaps?|uncovered)\b/i.test(raw)
-        ? "BREAKS"
-        : /\b(?:coverage|cover|gaps?|uncovered)\b/i.test(raw) &&
-            !/\bbreaks?\b/i.test(raw)
-          ? "COVERAGE"
-          : "ALL";
+      continuityRequested &&
+      !/\b(?:coverage|cover|gaps?|uncovered|breaks?)\b/i.test(raw)
+        ? "CONTINUITY"
+        : /\bbreaks?\b/i.test(raw) && !/\b(?:coverage|cover|gaps?|uncovered)\b/i.test(raw)
+          ? "BREAKS"
+          : /\b(?:coverage|cover|gaps?|uncovered)\b/i.test(raw) &&
+              !/\bbreaks?\b/i.test(raw)
+            ? "COVERAGE"
+            : "ALL";
     return {
       intent: "IMPROVEMENTS",
       toolName: "suggest_schedule_improvements",
