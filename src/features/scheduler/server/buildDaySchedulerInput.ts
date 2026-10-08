@@ -16,6 +16,7 @@ import type {
 } from "@/features/scheduler/engine/types";
 import { connectToDatabase } from "@/lib/db";
 import { CallOut } from "@/models/CallOut";
+import { ClientCallOut } from "@/models/ClientCallOut";
 import { Client } from "@/models/Client";
 import { ScheduleAssignment } from "@/models/ScheduleAssignment";
 import { ScheduleTemplate } from "@/models/ScheduleTemplate";
@@ -897,6 +898,7 @@ export async function buildDaySchedulerInput(
     rawStaff,
     rawClients,
     rawCallOuts,
+    rawClientCallOuts,
     rawSpeechSessions,
     rawAssignments,
     rawRules,
@@ -911,6 +913,7 @@ export async function buildDaySchedulerInput(
       .sort({ displayCode: 1 })
       .lean(),
     CallOut.find({ locationId, date }).lean(),
+    ClientCallOut.find({ locationId, date }).select('clientId').lean(),
     SpeechSession.find({ locationId, date }).lean(),
     ScheduleAssignment.find({ locationId, date }).lean(),
     SchedulingRules.findOne({ locationId }).lean(),
@@ -976,8 +979,9 @@ export async function buildDaySchedulerInput(
     weeklyClientHoursByStaff,
     extendedRules
   );
+  const absentClientIds = new Set((rawClientCallOuts as unknown as DatabaseRecord[]).map((row) => String(row.clientId)));
   const clients = mapClients(
-    clientDocuments,
+    clientDocuments.filter((row) => !absentClientIds.has(String(row._id))),
     speechSessions,
     date
   );
