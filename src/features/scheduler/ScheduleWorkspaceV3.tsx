@@ -1065,7 +1065,7 @@ export function ScheduleWorkspaceV3() {
 
       <section className="toolbar-card" aria-label="Schedule actions">
         <div className="toolbar-group">
-          <button type="button" className="button button-secondary" disabled={working || loading || (rosterStaff.length === 0 && clients.length === 0)} onClick={() => setShowCallOutPanel((open) => !open)}>Call In / Call Out</button>
+          <button type="button" className="button button-secondary" disabled={working || loading || (rosterStaff.length === 0 && clients.length === 0)} onClick={() => { window.location.href = `/attendance?locationId=${encodeURIComponent(locationId)}&date=${encodeURIComponent(selectedDate)}`; }}>Call In / Call Out</button>
           <button type="button" className="button button-secondary" disabled={working || loading || staff.length === 0} onClick={() => void requestRepair()}>Repair Schedule</button>
           <button
             type="button"
