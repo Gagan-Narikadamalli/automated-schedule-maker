@@ -1,13 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import styles from "./AttendanceManager.module.css";
 
 type Mode = "IN" | "OUT";
 type PersonType = "staff" | "client";
 type Attendance = { personType: PersonType; personId: string; mode: Mode; startTime: string; endTime: string };
-type Person = { id: string; name: string };
+type Person = { id: string; name: string; color?: string };
 type Location = { id: string; name: string };
+function validColor(color: string | undefined): string {
+  return color && /^#[0-9a-fA-F]{6}$/.test(color) ? color : "#DCE9F8";
+}
 function initials(name: string): string {
   return name.trim().split(/\s+/).slice(0, 2).map((word) => word.charAt(0).toUpperCase()).join("") || "?";
 }
@@ -70,16 +73,16 @@ export function AttendanceManager() {
           fetch(`/api/attendance-overrides?${query}`, { cache: "no-store" })
         ]);
         const schedule = await scheduleResponse.json() as {
-          rosterStaff?: Array<{ id: string; name: string }>;
-          clients?: Array<{ id: string; name: string; code: string }>;
+          rosterStaff?: Array<{ id: string; name: string; color?: string }>;
+          clients?: Array<{ id: string; name: string; code: string; color?: string }>;
           error?: string;
         };
         const overrides = await attendanceResponse.json() as { overrides?: Attendance[]; error?: string };
         if (!scheduleResponse.ok || !attendanceResponse.ok) throw Error(schedule.error || overrides.error || "Unable to load attendance");
         if (cancelled) return;
         setPeople({
-          staff: (schedule.rosterStaff ?? []).map((item) => ({ id: item.id, name: item.name })),
-          client: (schedule.clients ?? []).map((item) => ({ id: item.id, name: item.code || item.name })),
+          staff: (schedule.rosterStaff ?? []).map((item) => ({ id: item.id, name: item.name, color: item.color })),
+          client: (schedule.clients ?? []).map((item) => ({ id: item.id, name: item.code || item.name, color: item.color })),
         });
         setRecords(overrides.overrides ?? []);
         setSaved(overrides.overrides ?? []);
@@ -188,7 +191,8 @@ export function AttendanceManager() {
           const record = getRecord(person.id);
           const open = expanded === person.id;
           const wholeDay = record?.startTime === "08:00" && record?.endTime === "17:00";
-          return <article key={person.id} className={`${styles.card} ${open ? styles.open : ""} ${record?.mode === "IN" ? styles.cardIn : record?.mode === "OUT" ? styles.cardOut : ""}`}>
+          const personStyle = { "--person-color": validColor(person.color) } as CSSProperties;
+          return <article key={person.id} style={personStyle} className={`${styles.card} ${open ? styles.open : ""} ${record?.mode === "IN" ? styles.cardIn : record?.mode === "OUT" ? styles.cardOut : ""}`}>
             <button type="button" className={styles.cardHeader} aria-expanded={open} onClick={() => setExpanded(open ? null : person.id)}>
               <span className={styles.avatar} aria-hidden="true">{initials(person.name)}</span>
               <span className={styles.personInfo}>
