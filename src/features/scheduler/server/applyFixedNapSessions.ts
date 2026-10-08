@@ -6,6 +6,7 @@ import type {
 } from "@/features/scheduler/engine/types";
 import { connectToDatabase } from "@/lib/db";
 import { ClientAttendanceException } from "@/models/ClientAttendanceException";
+import { AttendanceOverride } from "@/models/AttendanceOverride";
 import { NapSession } from "@/models/NapSession";
 
 type DatabaseRecord = Record<string, any>;
@@ -30,17 +31,19 @@ export async function applyFixedNapSessions(
 ): Promise<FixedNapApplicationResult> {
   await connectToDatabase();
 
-  const [rawSessions, rawAttendanceChanges] = await Promise.all([
+  const [rawSessions, rawAttendanceChanges, rawOverrides] = await Promise.all([
     NapSession.find({ locationId, date })
       .sort({ priorityCategory: 1, startTime: 1 })
       .lean(),
     ClientAttendanceException.find({ locationId, date })
       .sort({ startTime: 1 })
       .lean(),
+    AttendanceOverride.find({ locationId, date, personType: "client" }).lean(),
   ]);
 
   const sessions = rawSessions as unknown as DatabaseRecord[];
   const attendanceChanges = rawAttendanceChanges as unknown as DatabaseRecord[];
+  const clientOverrides = new Map((rawOverrides as unknown as DatabaseRecord[]).map((entry) => [String(entry.personId), entry]));
   const sessionsByClient = new Map<string, DatabaseRecord[]>();
   const attendanceChangesByClient = new Map<string, DatabaseRecord[]>();
 
@@ -194,6 +197,26 @@ export async function applyFixedNapSessions(
       };
     }
 
+    // A new date-specific call-in/out is the final attendance authority.
+    // Apply after legacy client attendance exceptions and nap resolution.
+    const override = clientOverrides.get(client.id);
+    if (override) {
+      const changedSlots = new Set(getSlotsInsideTimeRange(String(override.startTime), String(override.endTime)));
+      if (override.mode === "OUT") {
+        nextClient = {
+          ...nextClient,
+          requiredSlots: nextClient.requiredSlots.filter((slot) => !changedSlots.has(slot)),
+          napSlots: nextClient.napSlots.filter((slot) => !changedSlots.has(slot)),
+          speechSlots: nextClient.speechSlots.filter((slot) => !changedSlots.has(slot)),
+        };
+      } else if (override.mode === "IN") {
+        const required = new Set(nextClient.requiredSlots);
+        for (const slot of changedSlots) {
+          if (!nextClient.napSlots.includes(slot) && !nextClient.speechSlots.includes(slot)) required.add(slot);
+        }
+        nextClient = { ...nextClient, requiredSlots: [...required].sort() };
+      }
+    }
     return nextClient;
   });
 
