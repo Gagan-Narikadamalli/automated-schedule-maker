@@ -2,6 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import { ManagementModal } from "@/components/ManagementModal";
+
+import { TemplateEditorModal } from "./TemplateEditorModal";
+
 type LocationOption = {
   id: string;
   name: string;
@@ -112,7 +116,10 @@ export function TemplateManager() {
   const [inspectingWorkbook, setInspectingWorkbook] = useState(false);
   const [copySourceDate, setCopySourceDate] = useState("");
   const [copyTargetDate, setCopyTargetDate] = useState("");
+  const [applyTemplateTarget, setApplyTemplateTarget] =
+    useState<TemplateRecord | null>(null);
   const [applyTargetDate, setApplyTargetDate] = useState(getToday);
+  const [editorTemplateId, setEditorTemplateId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
   const [message, setMessage] = useState("Loading schedule templates...");
@@ -420,15 +427,22 @@ export function TemplateManager() {
     }
   }
 
-  async function applyTemplate(template: TemplateRecord) {
-    if (!applyTargetDate) {
-      setMessage("Choose a target date before applying a template.");
+  function openApplyTemplate(template: TemplateRecord) {
+    setApplyTemplateTarget(template);
+    setApplyTargetDate(getToday());
+  }
+
+  async function applyTemplate() {
+    if (!applyTemplateTarget || !applyTargetDate) {
+      setMessage("Choose the date where this template should be applied.");
       return;
     }
 
     try {
       setWorking(true);
-      setMessage(`Applying ${template.name} and revalidating the target date...`);
+      setMessage(
+        `Applying ${applyTemplateTarget.name} to ${applyTargetDate} and revalidating current-day rules...`
+      );
 
       const response = await fetch("/api/templates/apply", {
         method: "POST",
@@ -437,7 +451,7 @@ export function TemplateManager() {
         },
         body: JSON.stringify({
           locationId,
-          templateId: template.id,
+          templateId: applyTemplateTarget.id,
           targetDate: applyTargetDate,
         }),
       });
@@ -454,6 +468,7 @@ export function TemplateManager() {
       setMessage(
         `${data.appliedCount ?? 0} template blocks applied to ${applyTargetDate}.${warningText}`
       );
+      setApplyTemplateTarget(null);
     } catch (error) {
       setMessage(
         error instanceof Error ? error.message : "Template could not be applied."
@@ -831,17 +846,12 @@ export function TemplateManager() {
         <div className="panel-heading-row">
           <div>
             <h2>Saved Templates</h2>
-            <p>Apply a saved template to a specific date after revalidation.</p>
+            <p>
+              Auto Generate automatically uses the newest exact template for
+              the matching weekday as its first reusable schedule reference.
+              Apply is only for manually copying a template onto a chosen date.
+            </p>
           </div>
-
-          <label className="form-field compact-field">
-            <span>Apply to date</span>
-            <input
-              type="date"
-              value={applyTargetDate}
-              onChange={(event) => setApplyTargetDate(event.target.value)}
-            />
-          </label>
         </div>
 
         <div className="table-scroll">
@@ -877,16 +887,26 @@ export function TemplateManager() {
                     </td>
                     <td>
                       <div className="table-actions">
+                        {!template.learningOnly ? (
+                          <button
+                            type="button"
+                            className="button button-secondary button-small"
+                            disabled={working}
+                            onClick={() => setEditorTemplateId(template.id)}
+                          >
+                            View / Edit
+                          </button>
+                        ) : null}
                         <button
                           type="button"
                           className="button button-primary button-small"
                           disabled={working || template.learningOnly}
                           title={
                             template.learningOnly
-                              ? "Learning-only workbook templates guide Auto Generate and Native AI; they are not direct cell copies."
-                              : undefined
+                              ? "Learning-only profiles guide Auto Generate but have no exact cells to apply."
+                              : "Apply this exact template to a date now. Auto Generate does not require this button."
                           }
-                          onClick={() => void applyTemplate(template)}
+                          onClick={() => openApplyTemplate(template)}
                         >
                           {template.learningOnly ? "Learning only" : "Apply"}
                         </button>
@@ -909,6 +929,69 @@ export function TemplateManager() {
 
         <div className="inline-message">{message}</div>
       </section>
+
+      <ManagementModal
+        open={Boolean(applyTemplateTarget)}
+        title={
+          applyTemplateTarget
+            ? `Apply ${applyTemplateTarget.name}`
+            : "Apply Template"
+        }
+        eyebrow="MANUAL TEMPLATE APPLICATION"
+        description="Choose the date to receive this template. This is separate from Auto Generate, which automatically uses the matching weekday template as guidance."
+        size="medium"
+        onClose={() => setApplyTemplateTarget(null)}
+        footer={
+          <>
+            <button
+              type="button"
+              className="button button-secondary"
+              disabled={working}
+              onClick={() => setApplyTemplateTarget(null)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="button button-primary"
+              disabled={working || !applyTargetDate}
+              onClick={() => void applyTemplate()}
+            >
+              {working ? "Applying..." : "Apply to This Date"}
+            </button>
+          </>
+        }
+      >
+        <label className="form-field">
+          <span>Apply template to date</span>
+          <input
+            type="date"
+            value={applyTargetDate}
+            onChange={(event) => setApplyTargetDate(event.target.value)}
+          />
+          {applyTemplateTarget ? (
+            <small>
+              Template weekday: {displayDay(applyTemplateTarget.dayOfWeek)}.
+              Target date: {displayDay(getDayOfWeekFromDate(applyTargetDate))}.
+              Current availability, attendance, call-outs, events, and protected
+              cells are revalidated.
+            </small>
+          ) : null}
+        </label>
+      </ManagementModal>
+
+      <TemplateEditorModal
+        open={Boolean(editorTemplateId)}
+        locationId={locationId}
+        templateId={editorTemplateId}
+        onClose={() => setEditorTemplateId(null)}
+        onSaved={async () => {
+          await loadTemplates();
+          setMessage(
+            "Template changes saved. Auto Generate will use the updated exact weekday template without modifying the current live schedule."
+          );
+        }}
+      />
     </div>
   );
 }
