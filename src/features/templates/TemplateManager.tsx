@@ -14,6 +14,10 @@ type TemplateRecord = {
   name: string;
   dayOfWeek: string;
   assignmentCount: number;
+  sourceType?: "SAVED_SCHEDULE" | "HISTORICAL_WORKBOOK" | "MANUAL";
+  sourceName?: string;
+  sourceDate?: string;
+  styleNotes?: string[];
   active: boolean;
 };
 
@@ -59,6 +63,11 @@ export function TemplateManager() {
   const [name, setName] = useState("");
   const [dayOfWeek, setDayOfWeek] = useState("MONDAY");
   const [templateSourceDate, setTemplateSourceDate] = useState(getToday);
+  const [workbookName, setWorkbookName] = useState("");
+  const [workbookDayOfWeek, setWorkbookDayOfWeek] =
+    useState("WEDNESDAY");
+  const [workbookSourceDate, setWorkbookSourceDate] =
+    useState("2026-09-30");
   const [copySourceDate, setCopySourceDate] = useState("");
   const [copyTargetDate, setCopyTargetDate] = useState("");
   const [applyTargetDate, setApplyTargetDate] = useState(getToday);
@@ -174,6 +183,64 @@ export function TemplateManager() {
     } catch (error) {
       setMessage(
         error instanceof Error ? error.message : "Template could not be saved."
+      );
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function createWorkbookTemplate() {
+    if (!locationId || !workbookName.trim() || !workbookSourceDate) {
+      setMessage(
+        "Choose a location, template name, weekday, and workbook sheet date."
+      );
+      return;
+    }
+
+    try {
+      setWorking(true);
+      setMessage("Creating template from imported workbook history...");
+
+      const response = await fetch("/api/templates", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          locationId,
+          name: workbookName.trim(),
+          dayOfWeek: workbookDayOfWeek,
+          sourceDate: workbookSourceDate,
+          sourceType: "HISTORICAL_WORKBOOK",
+          sourceName: "Livingston workbook history",
+          styleNotes: [
+            "Prefer long continuous client/staff blocks instead of half-hour fragmentation.",
+            "Use natural handoff points around Speech, Nap, and staff breaks.",
+            "Prefer roughly 2 clients per staff and 2 stable staff blocks per long-day client when coverage allows.",
+            "Client coverage and required staff breaks remain more important than copying the template exactly.",
+          ],
+        }),
+      });
+      const data = (await response.json()) as TemplatesResponse & {
+        skippedHistoricalRows?: number;
+      };
+
+      if (!response.ok) {
+        throw new Error(
+          data.error || "Workbook template could not be saved."
+        );
+      }
+
+      setWorkbookName("");
+      await loadTemplates();
+      setMessage(
+        `Workbook template saved from ${workbookSourceDate}. ${data.skippedHistoricalRows ?? 0} unmapped workbook row(s) were skipped. Auto Generate and Native AI can use this as same-weekday guidance.`
+      );
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Workbook template could not be saved."
       );
     } finally {
       setWorking(false);
@@ -380,6 +447,69 @@ export function TemplateManager() {
       </section>
 
       <section className="section-card">
+        <h2>Create Template from Imported Workbook History</h2>
+        <p className="helper-text">
+          Use a historical Excel sheet as a same-weekday reference without
+          blindly copying it. Only rows mapped to current staff/clients are
+          included, and every future application is revalidated against current
+          availability, attendance, Speech, Nap, breaks, call-outs, and locks.
+        </p>
+
+        <div className="form-grid">
+          <label className="form-field">
+            <span>Template name</span>
+            <input
+              value={workbookName}
+              onChange={(event) => setWorkbookName(event.target.value)}
+              placeholder="Example: Livingston Wednesday Workbook"
+            />
+          </label>
+
+          <label className="form-field">
+            <span>Workbook weekday</span>
+            <select
+              value={workbookDayOfWeek}
+              onChange={(event) =>
+                setWorkbookDayOfWeek(event.target.value)
+              }
+            >
+              {DAYS.map((day) => (
+                <option key={day} value={day}>
+                  {day.charAt(0) + day.slice(1).toLowerCase()}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="form-field">
+            <span>Original sheet date</span>
+            <input
+              type="date"
+              value={workbookSourceDate}
+              onChange={(event) =>
+                setWorkbookSourceDate(event.target.value)
+              }
+            />
+          </label>
+        </div>
+
+        <button
+          type="button"
+          className="button button-primary"
+          disabled={
+            working ||
+            loading ||
+            !locationId ||
+            !workbookName.trim() ||
+            !workbookSourceDate
+          }
+          onClick={() => void createWorkbookTemplate()}
+        >
+          {working ? "Working..." : "Save Workbook Sheet as Template"}
+        </button>
+      </section>
+
+      <section className="section-card">
         <h2>Copy an Existing Day</h2>
         <p className="helper-text">
           The target day is checked against staff availability, client activity,
@@ -441,13 +571,14 @@ export function TemplateManager() {
                 <th>Name</th>
                 <th>Day</th>
                 <th>Saved blocks</th>
+                <th>Source</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {templates.length === 0 ? (
                 <tr>
-                  <td colSpan={4}>No active templates have been saved yet.</td>
+                  <td colSpan={5}>No active templates have been saved yet.</td>
                 </tr>
               ) : (
                 templates.map((template) => (
@@ -455,6 +586,13 @@ export function TemplateManager() {
                     <td>{template.name}</td>
                     <td>{template.dayOfWeek}</td>
                     <td>{template.assignmentCount}</td>
+                    <td>
+                      {template.sourceType === "HISTORICAL_WORKBOOK"
+                        ? `Workbook ${template.sourceDate ?? ""}`
+                        : template.sourceType === "SAVED_SCHEDULE"
+                          ? `Saved day ${template.sourceDate ?? ""}`
+                          : "Manual"}
+                    </td>
                     <td>
                       <div className="table-actions">
                         <button
