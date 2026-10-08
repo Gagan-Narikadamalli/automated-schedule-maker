@@ -341,6 +341,31 @@ function explainUncoveredRequirement(
   return `Staff capacity exists at ${requirement.startTime}, but no safe final placement remained after coverage and repair passes. Repair Schedule should retry this block before manager placement.`;
 }
 
+function previousClientAssignment(
+  requirement: ClientRequirement,
+  assignments: SchedulerAssignment[],
+  slotLengthMinutes: number
+): SchedulerAssignment | null {
+  const targetMinutes = timeToMinutes(requirement.startTime);
+
+  if (targetMinutes === null) {
+    return null;
+  }
+
+  const previousStartTime = minutesToTime(
+    targetMinutes - slotLengthMinutes
+  );
+
+  return (
+    assignments.find(
+      (assignment) =>
+        assignment.clientId === requirement.client.id &&
+        assignment.startTime === previousStartTime &&
+        assignment.assignmentType === "CLIENT_1_TO_1"
+    ) ?? null
+  );
+}
+
 function supportPriority(client: SchedulerClient): number {
   if (client.supportLevel === "HIGH_SUPPORT") {
     return 3;
@@ -410,6 +435,30 @@ function sortRequirementsForClinicFlow(
 
     if (timeComparison !== 0) {
       return timeComparison;
+    }
+
+    // Keep ongoing 1:1 relationships moving before assigning staff to
+    // newly arriving clients in the same half-hour. Without this, a new client
+    // can accidentally take the technician who was already with another
+    // client, creating unnecessary handoffs such as ZiBo switching staff every
+    // block.
+    const leftHasPreviousPair = Boolean(
+      previousClientAssignment(
+        left,
+        assignments,
+        input.rules.slotLengthMinutes
+      )
+    );
+    const rightHasPreviousPair = Boolean(
+      previousClientAssignment(
+        right,
+        assignments,
+        input.rules.slotLengthMinutes
+      )
+    );
+
+    if (leftHasPreviousPair !== rightHasPreviousPair) {
+      return leftHasPreviousPair ? -1 : 1;
     }
 
     const leftEligibleCount = countEligibleStaff(
@@ -548,7 +597,29 @@ function findBestStaffMember(
         score: number;
       } => candidate !== null
     )
-    .sort(compareStaffCandidates);
+    .sort((left, right) => {
+      const previousAssignment = previousClientAssignment(
+        requirement,
+        assignments,
+        input.rules.slotLengthMinutes
+      );
+      const isRotationClient =
+        requirement.client.supportLevel === "ROTATION" ||
+        requirement.client.supportLevel === "HIGH_SUPPORT";
+
+      if (previousAssignment && !isRotationClient) {
+        const leftContinues =
+          left.staffMember.id === previousAssignment.staffId;
+        const rightContinues =
+          right.staffMember.id === previousAssignment.staffId;
+
+        if (leftContinues !== rightContinues) {
+          return leftContinues ? -1 : 1;
+        }
+      }
+
+      return compareStaffCandidates(left, right);
+    });
 
   return candidates[0]?.staffMember ?? null;
 }
