@@ -449,10 +449,10 @@ function ClientScheduleView({
         <div>
           <span className={styles.eyebrow}>CLIENT COVERAGE VIEW</span>
           <h2>{locationName} · {longDate(date)}</h2>
-          <p>This view is rebuilt from the same saved assignments as Staff Schedule. Manual staff edits therefore change this client view for the same date, and each client's normal coverage keeps the same client color in both views.</p>
+          <p>This view is rebuilt from the same saved assignments as Staff Schedule. Client color remains the card background, while the assigned staff member's saved color appears as the left accent and staff dot. Nap and Speech are shown explicitly instead of looking like missing coverage.</p>
         </div>
         <div className={styles.legend}>
-          <span><i className={styles.legendCoverage} />Client color = 1:1 coverage</span>
+          <span><i className={styles.legendCoverage} />Client background + staff color accent = 1:1</span>
           <span><i className={styles.legendNap} />Nap</span>
           <span><i className={styles.legendSpeech} />Speech</span>
           <span><i className={styles.legendUncovered} />Needs coverage</span>
@@ -489,10 +489,23 @@ function ClientScheduleView({
                             className={`${styles.clientCell} ${styles[`clientCell_${cell.kind}`]}`}
                             style={{
                               ...(preserveClientColor ? { background: client.color } : {}),
-                              borderLeft: `4px solid ${preserveClientColor ? client.color : accentForKind(cell.kind)}`,
+                              borderLeft: `5px solid ${
+                                preserveClientColor
+                                  ? cell.staffColor || "#8FAFC1"
+                                  : accentForKind(cell.kind)
+                              }`,
                             }}
                           >
-                            <strong>{cell.text}</strong>
+                            <strong className={styles.clientCellTitle}>
+                              {cell.staffColor ? (
+                                <i
+                                  className={styles.staffDot}
+                                  style={{ backgroundColor: cell.staffColor }}
+                                  aria-hidden="true"
+                                />
+                              ) : null}
+                              {cell.text}
+                            </strong>
                             <span>{cell.detail}</span>
                           </div>
                         ) : null}
