@@ -66,6 +66,7 @@ type ScheduleResponse = {
   locationId?: string;
   date?: string;
   staff?: ScheduleStaff[];
+  clients?: Array<{ id: string; code: string; name: string }>;
   assignments?: ScheduleAssignment[];
   recentSavedScheduleDates?: string[];
   requiredClientSlots?: number;
@@ -83,6 +84,8 @@ type UnplacedResponse = {
   success?: boolean;
   error?: string;
 };
+
+type ClientCallOutResponse = { success?: boolean; selectedClientIds?: string[]; addedCount?: number; removedCount?: number; error?: string };
 
 type CallOutResponse = {
   success?: boolean;
@@ -344,6 +347,10 @@ export function ScheduleWorkspaceV3() {
   const [placementRecord, setPlacementRecord] = useState<UnplacedRecord | null>(null);
   const [detailsRecord, setDetailsRecord] = useState<UnplacedRecord | null>(null);
   const [showCallOutPanel, setShowCallOutPanel] = useState(false);
+  const [callOutTab, setCallOutTab] = useState<"staff" | "clients">("staff");
+  const [clients, setClients] = useState<Array<{ id: string; code: string; name: string }>>([]);
+  const [callOutClientIds, setCallOutClientIds] = useState<string[]>([]);
+  const [savedCallOutClientIds, setSavedCallOutClientIds] = useState<string[]>([]);
   const [callOutStaffIds, setCallOutStaffIds] = useState<string[]>([]);
   const [savedCallOutStaffIds, setSavedCallOutStaffIds] = useState<string[]>([]);
   const [fullDayCallOutStaffIds, setFullDayCallOutStaffIds] = useState<string[]>([]);
@@ -464,6 +471,8 @@ export function ScheduleWorkspaceV3() {
       setCallOutStaffIds([]);
       setSavedCallOutStaffIds([]);
       setFullDayCallOutStaffIds([]);
+      setCallOutClientIds([]);
+      setSavedCallOutClientIds([]);
       return;
     }
 
@@ -477,6 +486,11 @@ export function ScheduleWorkspaceV3() {
     setCallOutStaffIds(ids);
     setSavedCallOutStaffIds(ids);
     setFullDayCallOutStaffIds(data.fullDayStaffIds ?? []);
+    const clientResponse = await fetch(`/api/client-call-outs?locationId=${encodeURIComponent(requestedLocationId)}&date=${encodeURIComponent(requestedDate)}`, { cache: "no-store" });
+    const clientData = await readJson<ClientCallOutResponse>(clientResponse);
+    if (!clientResponse.ok) throw new Error(clientData.error || "Client call-outs could not be loaded.");
+    setCallOutClientIds(clientData.selectedClientIds ?? []);
+    setSavedCallOutClientIds(clientData.selectedClientIds ?? []);
   }
 
   async function loadSchedule(requestedLocationId = locationId, requestedDate = selectedDate) {
@@ -497,6 +511,7 @@ export function ScheduleWorkspaceV3() {
       const nextStaff = data.staff ?? [];
       const nextAssignments = data.assignments ?? [];
       setStaff(nextStaff);
+      setClients(data.clients ?? []);
       setInitialGrid(buildGrid(nextStaff, nextAssignments));
       setRequiredClientSlots(data.requiredClientSlots ?? 0);
       setGridVersion((current) => current + 1);
@@ -712,8 +727,33 @@ export function ScheduleWorkspaceV3() {
   }
 
   function closeCallOutPanel() {
+    setCallOutClientIds(savedCallOutClientIds);
     setCallOutStaffIds(savedCallOutStaffIds);
     setShowCallOutPanel(false);
+  }
+
+  function toggleCallOutClient(clientId: string) {
+    setCallOutClientIds((current) => current.includes(clientId) ? current.filter((id) => id !== clientId) : [...current, clientId]);
+  }
+
+  async function saveClientCallOuts() {
+    if (demoMode) { setStatusMessage("Client call-outs cannot be saved in demo mode."); return; }
+    try {
+      setWorking(true);
+      const response = await fetch("/api/client-call-outs", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ locationId, date: selectedDate, clientIds: callOutClientIds }) });
+      const data = await readJson<ClientCallOutResponse>(response);
+      if (!response.ok) throw new Error(data.error || "Client call-outs could not be saved.");
+      const ids = data.selectedClientIds ?? callOutClientIds;
+      setCallOutClientIds(ids);
+      setSavedCallOutClientIds(ids);
+      setShowCallOutPanel(false);
+      const regenerate = await fetch("/api/schedule/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ locationId, date: selectedDate }) });
+      const generated = await readJson<GenerateResponse>(regenerate);
+      await loadSchedule();
+      setStatusMessage(regenerate.ok ? `${ids.length} client call-out(s) saved. The remaining active client coverage was regenerated.` : `Client call-outs saved, but schedule regeneration needs review: ${generated.error || "Unknown error"}`);
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Failed to save client call-outs.");
+    } finally { setWorking(false); }
   }
 
   async function saveCallOuts() {
@@ -1010,11 +1050,15 @@ export function ScheduleWorkspaceV3() {
           <div className="panel-heading-row">
             <div>
               <h2>Call Outs for {selectedDate}</h2>
-              <p>Checked staff are currently saved as call-outs. Uncheck someone and save if they are coming in after all.</p>
+              <p>Check people who are out today; uncheck them to restore their availability. Each tab is saved independently.</p>
             </div>
             <button type="button" className="button button-secondary" disabled={working} onClick={closeCallOutPanel}>Close</button>
           </div>
-          <div className="callout-staff-list">
+          <div role="tablist" aria-label="Call-out type" style={{ display: "flex", gap: 12, marginBottom: 16 }}>
+            <button type="button" role="tab" aria-selected={callOutTab === "staff"} className={callOutTab === "staff" ? "button button-primary" : "button button-secondary"} onClick={() => setCallOutTab("staff")}>Staff Call Outs ({callOutStaffIds.length})</button>
+            <button type="button" role="tab" aria-selected={callOutTab === "clients"} className={callOutTab === "clients" ? "button button-primary" : "button button-secondary"} onClick={() => setCallOutTab("clients")}>Client Call Outs ({callOutClientIds.length})</button>
+          </div>
+          {callOutTab === "staff" ? <div className="callout-staff-list">
             {staff.map((staffMember) => (
               <label key={staffMember.id} className="checkbox-card">
                 <input type="checkbox" disabled={working} checked={callOutStaffIds.includes(staffMember.id)} onChange={() => toggleCallOutStaff(staffMember.id)} />
@@ -1026,8 +1070,13 @@ export function ScheduleWorkspaceV3() {
                 </span>
               </label>
             ))}
-          </div>
-          <button type="button" className="button button-primary" disabled={working} onClick={() => void saveCallOuts()}>{working ? "Saving..." : "Save Call Outs"}</button>
+          </div> : <div className="callout-staff-list">
+            {clients.map((client) => <label key={client.id} className="checkbox-card">
+              <input type="checkbox" disabled={working} checked={callOutClientIds.includes(client.id)} onChange={() => toggleCallOutClient(client.id)} />
+              <span>{client.code}{client.name !== client.code ? ` — ${client.name}` : ""}{savedCallOutClientIds.includes(client.id) && <small>Marked absent today</small>}</span>
+            </label>)}
+          </div>}
+          <button type="button" className="button button-primary" disabled={working} onClick={() => void (callOutTab === "staff" ? saveCallOuts() : saveClientCallOuts())}>{working ? "Saving..." : `Save ${callOutTab === "staff" ? "Staff" : "Client"} Call Outs`}</button>
         </section>
       )}
 
