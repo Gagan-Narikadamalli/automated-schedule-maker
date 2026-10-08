@@ -46,6 +46,49 @@ function takeRecentScheduleDates(
   return orderedDates;
 }
 
+function buildLatestClientReferences(
+  records: DatabaseRecord[],
+  latestScheduleDate: string | null,
+  validStaffIds: Set<string>,
+  validClientIds: Set<string>
+): SchedulerAssignment[] {
+  if (!latestScheduleDate) return [];
+
+  const references: SchedulerAssignment[] = [];
+
+  records.forEach((record, index) => {
+    const assignmentType = String(record.assignmentType ?? "");
+    const scheduleDate = String(record.scheduleDate ?? "");
+    const staffId = record.staffId ? String(record.staffId) : "";
+    const clientId = record.clientId ? String(record.clientId) : "";
+    const startTime = String(record.startTime ?? "");
+
+    if (
+      scheduleDate !== latestScheduleDate ||
+      assignmentType !== "CLIENT_1_TO_1" ||
+      !validStaffIds.has(staffId) ||
+      !validClientIds.has(clientId) ||
+      !startTime
+    ) {
+      return;
+    }
+
+    references.push({
+      id: `imported-client-${latestScheduleDate}-${index}-${staffId}-${clientId}-${startTime}`,
+      staffId,
+      clientId,
+      startTime,
+      assignmentType: "CLIENT_1_TO_1",
+      source: "COPIED",
+      locked: false,
+      note:
+        "Exact pairing from the most recent imported same-weekday schedule.",
+    });
+  });
+
+  return references;
+}
+
 function buildBreakReferences(
   records: DatabaseRecord[],
   validStaffIds: Set<string>
@@ -206,8 +249,20 @@ export async function applyHistoricalTraining(
     }))
   );
 
-  const breakReferences = buildBreakReferences(
+  const latestImportedScheduleDate =
+    recentScheduleDates[0] ?? null;
+  const clientReferences = buildLatestClientReferences(
     matchedRecords,
+    latestImportedScheduleDate,
+    currentStaffIds,
+    currentClientIds
+  );
+  const breakReferences = buildBreakReferences(
+    matchedRecords.filter(
+      (record) =>
+        String(record.scheduleDate ?? "") ===
+        latestImportedScheduleDate
+    ),
     currentStaffIds
   );
 
@@ -216,6 +271,7 @@ export async function applyHistoricalTraining(
       ...inputWithHistoricalRules,
       referenceAssignments: [
         ...input.referenceAssignments,
+        ...clientReferences,
         ...breakReferences,
       ],
       historicalPatterns: mergeHistoricalPatternScores(
