@@ -393,6 +393,7 @@ export async function PUT(request: Request) {
     // Every scheduled staff member is owed one break. Breaks may be
     // narrowed inside the clinic window, but never scheduled before 11 AM or
     // after 2 PM.
+    changes.breakSchedulingEnabled = true;
     changes.breakEligibilityHours = 0;
 
     if (
@@ -409,8 +410,10 @@ export async function PUT(request: Request) {
       );
     }
 
-    // Nap duration remains configurable, but Speech is always one fixed
-    // 30-minute appointment for one client.
+    // Every present client receives one nap opportunity. Nap duration remains
+    // configurable, but Speech is always one fixed 30-minute appointment for
+    // one client.
+    changes.napDurationRulesEnabled = true;
     changes.napMinimumMinutes = changes.napPreferredMinutes;
     changes.napMaximumMinutes = changes.napPreferredMinutes;
     changes.speechDurationRulesEnabled = true;
