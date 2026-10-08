@@ -55,6 +55,106 @@ const ALLOWED_ATTACHMENT_MIME_TYPES = new Set([
 const MAX_TOOL_EVIDENCE_LENGTH = 32_000;
 const MAX_DATE_CONTEXT_LENGTH = 42_000;
 
+type DirectExecutableTool = {
+  execute?: (
+    input: Record<string, unknown>,
+    options?: unknown
+  ) => unknown | Promise<unknown>;
+};
+
+function cleanLookupReference(value: string): string {
+  return value
+    .replace(/[?!.,]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractDeterministicStaffClientLookup(
+  message: string
+): string | null {
+  const patterns = [
+    /\bfor\s+(.+?)\s*,?\s*who\s+is\s+(?:the\s+)?client\b/i,
+    /\bfor\s+(.+?)\s*,?\s*(?:what|which)\s+client\b/i,
+    /\bwhich\s+client\s+(?:is\s+)?(.+?)\s+with\b/i,
+    /\bwho\s+does\s+(.+?)\s+have\b/i,
+    /\bwho\s+is\s+(.+?)\s+with\b/i,
+    /\bwhat\s+clients?\s+(?:does|is)\s+(.+?)(?:\s+(?:have|with|from|at|today|tomorrow|on)\b|[?.!,]|$)/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = message.match(pattern);
+    if (match?.[1]) return cleanLookupReference(match[1]);
+  }
+
+  return null;
+}
+
+function formatDeterministicStaffClientLookup(
+  outputValue: unknown,
+  date: string,
+  staffReference: string
+): string {
+  const output =
+    outputValue && typeof outputValue === "object" && !Array.isArray(outputValue)
+      ? (outputValue as Record<string, any>)
+      : {};
+
+  if (output.needsClarification === true) {
+    return String(
+      output.message ||
+        `I need a more specific staff reference than "${staffReference}".`
+    );
+  }
+
+  if (typeof output.message === "string" && output.message.trim()) {
+    if (
+      output.profileStatus ||
+      output.scheduleAvailable === false ||
+      output.count === 0
+    ) {
+      return output.message.trim();
+    }
+  }
+
+  if (output.scheduleAvailable === false) {
+    return `The schedule for ${date} has not been generated yet. Would you like me to generate it?`;
+  }
+
+  const segments = Array.isArray(output.segments)
+    ? output.segments
+        .map((value: unknown) =>
+          value && typeof value === "object" && !Array.isArray(value)
+            ? (value as Record<string, any>)
+            : {}
+        )
+        .filter(
+          (segment: Record<string, any>) =>
+            Boolean(segment.clientCode) &&
+            segment.assignmentType === "CLIENT_1_TO_1"
+        )
+    : [];
+
+  const staffName =
+    typeof output.resolvedStaffName === "string" &&
+    output.resolvedStaffName.trim()
+      ? output.resolvedStaffName.trim()
+      : staffReference;
+
+  if (segments.length === 0) {
+    return `${staffName} has no scheduled 1:1 client blocks on ${date}.`;
+  }
+
+  return [
+    `${staffName}'s clients on ${date}:`,
+    ...segments.map(
+      (segment: Record<string, any>) =>
+        `- ${String(segment.clientCode)} ${String(
+          segment.startTime ?? "?"
+        )}-${String(segment.endTime ?? "?")}`
+    ),
+  ].join("\n");
+}
+
 function cleanLocationName(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const cleaned = value.replace(/[\r\n\t]+/g, " ").trim().slice(0, 120);
@@ -495,42 +595,85 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
       }>;
     }> = [];
 
-    const agent = new ToolLoopAgent({
-      model,
-      instructions: sharedInstructions,
-      tools,
-      toolChoice: "auto",
-      stopWhen: stepCountIs(20),
-      reasoning: "high",
-      maxOutputTokens: 2400,
-    });
+    const deterministicStaffLookup =
+      !attachmentPreviewOnly
+        ? extractDeterministicStaffClientLookup(message)
+        : null;
 
-    const gatewayResult = await agent.generate({
-      prompt: buildConversationPrompt(history, normalizedMessage, dateContext),
-      timeout: {
-        totalMs: 260_000,
-        stepMs: 65_000,
-      },
-    });
+    if (deterministicStaffLookup) {
+      const lookupInput = {
+        staffName: deterministicStaffLookup,
+        includeBreaks: false,
+      };
+      const lookupTool =
+        readTools.lookup_schedule as unknown as DirectExecutableTool;
+      const lookupOutput = lookupTool.execute
+        ? await lookupTool.execute(lookupInput)
+        : {
+            ok: false,
+            error: "Schedule lookup is unavailable.",
+          };
 
-    resultText = gatewayResult.text;
-    resultSteps = gatewayResult.steps.map((step) => ({
-      toolCalls: step.toolCalls.map((toolCall) => ({
-        toolName: toolCall.toolName,
-        input:
-          toolCall.input && typeof toolCall.input === "object"
-            ? (toolCall.input as Record<string, unknown>)
-            : {},
-      })),
-      toolResults: step.toolResults.map((toolResult) => ({
-        toolName: toolResult.toolName,
-        input:
-          toolResult.input && typeof toolResult.input === "object"
-            ? (toolResult.input as Record<string, unknown>)
-            : {},
-        output: toolResult.output,
-      })),
-    }));
+      resultText = formatDeterministicStaffClientLookup(
+        lookupOutput,
+        resolvedDate.date,
+        deterministicStaffLookup
+      );
+      resultSteps = [
+        {
+          toolCalls: [
+            {
+              toolName: "lookup_schedule",
+              input: lookupInput,
+            },
+          ],
+          toolResults: [
+            {
+              toolName: "lookup_schedule",
+              input: lookupInput,
+              output: lookupOutput,
+            },
+          ],
+        },
+      ];
+    } else {
+      const agent = new ToolLoopAgent({
+        model,
+        instructions: sharedInstructions,
+        tools,
+        toolChoice: "auto",
+        stopWhen: stepCountIs(20),
+        reasoning: "high",
+        maxOutputTokens: 2400,
+      });
+
+      const gatewayResult = await agent.generate({
+        prompt: buildConversationPrompt(history, normalizedMessage, dateContext),
+        timeout: {
+          totalMs: 260_000,
+          stepMs: 65_000,
+        },
+      });
+
+      resultText = gatewayResult.text;
+      resultSteps = gatewayResult.steps.map((step) => ({
+        toolCalls: step.toolCalls.map((toolCall) => ({
+          toolName: toolCall.toolName,
+          input:
+            toolCall.input && typeof toolCall.input === "object"
+              ? (toolCall.input as Record<string, unknown>)
+              : {},
+        })),
+        toolResults: step.toolResults.map((toolResult) => ({
+          toolName: toolResult.toolName,
+          input:
+            toolResult.input && typeof toolResult.input === "object"
+              ? (toolResult.input as Record<string, unknown>)
+              : {},
+          output: toolResult.output,
+        })),
+      }));
+    }
 
     const toolsUsed = [
       ...new Set(
