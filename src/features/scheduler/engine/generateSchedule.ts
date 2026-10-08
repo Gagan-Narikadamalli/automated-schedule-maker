@@ -220,6 +220,113 @@ function buildMinimumPairingPlan(
   return planned;
 }
 
+function buildPreferredContinuousPairingPlan(
+  requirement: ClientRequirement,
+  staffMember: SchedulerStaff,
+  input: SchedulerInput,
+  assignments: SchedulerAssignment[],
+  callOutStaffIds: Set<string>
+): SchedulerAssignment[] | null {
+  const minimumPlan = buildMinimumPairingPlan(
+    requirement,
+    staffMember,
+    input,
+    assignments,
+    callOutStaffIds
+  );
+
+  if (!minimumPlan) {
+    return null;
+  }
+
+  const planned = [...minimumPlan];
+  const simulated = [
+    ...assignments.map((assignment) => ({ ...assignment })),
+    ...minimumPlan.map((assignment) => ({ ...assignment })),
+  ];
+  const startMinutes = timeToMinutes(requirement.startTime);
+
+  if (startMinutes === null) {
+    return planned;
+  }
+
+  const priorBlocks = priorContiguousPairBlocks(
+    staffMember.id,
+    requirement.client.id,
+    requirement.startTime,
+    assignments,
+    input.rules.slotLengthMinutes
+  );
+  const globalMaximumBlocks = Math.max(
+    Math.floor(
+      (input.rules.maximumClientStaffConsecutiveHours * 60) /
+        input.rules.slotLengthMinutes
+    ),
+    1
+  );
+  const clientMaximumBlocks =
+    requirement.client.maxConsecutiveBlocksWithSameStaff !== undefined &&
+    requirement.client.maxConsecutiveBlocksWithSameStaff > 0
+      ? requirement.client.maxConsecutiveBlocksWithSameStaff
+      : Number.POSITIVE_INFINITY;
+  const maximumBlocks = Math.min(
+    globalMaximumBlocks,
+    clientMaximumBlocks
+  );
+
+  // Once a new staff/client session starts, fill as much of that client's
+  // uninterrupted attendance segment as safely possible (up to the clinic's
+  // four-hour maximum). Nap, Speech, staff availability, protected cells, or
+  // another hard constraint naturally stop the run. This makes the schedule
+  // visually readable as long blocks instead of re-solving the pairing every
+  // 30 minutes.
+  for (
+    let offset = planned.length;
+    priorBlocks + planned.length < maximumBlocks;
+    offset += 1
+  ) {
+    const slot = minutesToTime(
+      startMinutes + offset * input.rules.slotLengthMinutes
+    );
+
+    if (!requirement.client.requiredSlots.includes(slot)) {
+      break;
+    }
+
+    if (
+      requirementIsAlreadyCovered(
+        { client: requirement.client, startTime: slot },
+        simulated
+      )
+    ) {
+      break;
+    }
+
+    const check = canAssignStaffToClient({
+      staffMember,
+      client: requirement.client,
+      startTime: slot,
+      assignments: simulated,
+      callOutStaffIds,
+      rules: input.rules,
+    });
+
+    if (!check.allowed) {
+      break;
+    }
+
+    const assignment = createAutoClientAssignment(
+      staffMember,
+      requirement.client,
+      slot
+    );
+    planned.push(assignment);
+    simulated.push(assignment);
+  }
+
+  return planned;
+}
+
 function pairingWouldMeetMinimumWithoutReservation(
   staffMember: SchedulerStaff,
   client: SchedulerClient,
@@ -1383,7 +1490,7 @@ export function generateSchedule(input: SchedulerInput): SchedulerResult {
       continue;
     }
 
-    const minimumPlan = buildMinimumPairingPlan(
+    const preferredPlan = buildPreferredContinuousPairingPlan(
       requirement,
       bestStaffMember,
       input,
@@ -1391,12 +1498,12 @@ export function generateSchedule(input: SchedulerInput): SchedulerResult {
       callOutStaffIds
     );
 
-    if (!minimumPlan) {
+    if (!preferredPlan) {
       initiallyUncovered.push(requirement);
       continue;
     }
 
-    assignments.push(...minimumPlan);
+    assignments.push(...preferredPlan);
   }
 
   const repeatFallbackRequirements: ClientRequirement[] = [];
