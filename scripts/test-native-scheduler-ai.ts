@@ -105,4 +105,9 @@ assert.equal(plan("which staff are missing breaks?").toolName, "get_staff");
 assert.equal(plan("show client nap and speech requirements").toolName, "get_clients");
 assert.equal(plan("what is happening on this schedule?").toolName, "get_day_schedule");
 
+const continuity = plan("why is the schedule jumbled and how can we make the client blocks smoother?");
+assert.equal(continuity.intent, "IMPROVEMENTS");
+assert.equal(continuity.toolName, "suggest_schedule_improvements");
+assert.equal(continuity.input.focus, "CONTINUITY");
+
 console.log("Native Scheduler AI intent tests passed.");
