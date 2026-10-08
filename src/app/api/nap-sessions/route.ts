@@ -49,7 +49,7 @@ const DAY_NAMES = [
   "SATURDAY",
 ];
 
-const NAP_WINDOW_START = "11:00";
+const NAP_WINDOW_START = "11:30";
 const NAP_WINDOW_END = "14:00";
 
 function serializeNapSession(session: PlainRecord) {
@@ -244,7 +244,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           error:
-            "Nap window must start and finish inside 11:00 AM-2:00 PM.",
+            "Nap window must start and finish inside 11:30 AM-2:00 PM.",
         },
         { status: 400 }
       );
