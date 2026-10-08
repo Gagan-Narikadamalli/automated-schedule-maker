@@ -573,11 +573,26 @@ function sortRequirementsForClinicFlow(
       return timeComparison;
     }
 
-    // Keep clients whose attendance continues from the previous half-hour
-    // ahead of newly arriving clients. This ordering is based on the client's
-    // required slots (not the assignments built so far), so it works even
-    // though the day's requirements are sorted before generation begins. A new
-    // arrival therefore cannot steal the technician from an ongoing client.
+    // First preserve clients that already have a real staff pairing from the
+    // immediately previous coverage segment (including across a protected Nap
+    // or Speech gap). This is evaluated with assignments already built for
+    // earlier times, so established relationships get first claim on their
+    // technician before newly arriving clients are considered.
+    const leftPreviousAssignment = previousClientAssignment(
+      left,
+      assignments,
+      input.rules.slotLengthMinutes
+    );
+    const rightPreviousAssignment = previousClientAssignment(
+      right,
+      assignments,
+      input.rules.slotLengthMinutes
+    );
+
+    if (Boolean(leftPreviousAssignment) !== Boolean(rightPreviousAssignment)) {
+      return leftPreviousAssignment ? -1 : 1;
+    }
+
     const leftHasPreviousPair = Boolean(
       priorClientCoverageSlot(
         left,
@@ -1487,44 +1502,60 @@ export function generateSchedule(input: SchedulerInput): SchedulerResult {
       )
   );
 
-  const sortedRequirements = sortRequirementsForClinicFlow(
-    requirementsToFill,
-    input,
-    assignments,
-    callOutStaffIds
-  );
+  const startTimes = [
+    ...new Set(
+      requirementsToFill.map(
+        (requirement) => requirement.startTime
+      )
+    ),
+  ].sort();
 
-  for (const requirement of sortedRequirements) {
-    if (requirementIsAlreadyCovered(requirement, assignments)) {
-      continue;
-    }
-
-    const bestStaffMember = findBestStaffMember(
-      requirement,
+  // Build the day chronologically. Re-sort each half-hour only after all
+  // earlier blocks are known, so the scheduler can genuinely preserve the
+  // client/staff relationship it created in the previous block instead of
+  // making all ordering decisions from an empty morning schedule.
+  for (const startTime of startTimes) {
+    const requirementsAtTime = sortRequirementsForClinicFlow(
+      requirementsToFill.filter(
+        (requirement) => requirement.startTime === startTime
+      ),
       input,
       assignments,
       callOutStaffIds
     );
 
-    if (!bestStaffMember) {
-      initiallyUncovered.push(requirement);
-      continue;
+    for (const requirement of requirementsAtTime) {
+      if (requirementIsAlreadyCovered(requirement, assignments)) {
+        continue;
+      }
+
+      const bestStaffMember = findBestStaffMember(
+        requirement,
+        input,
+        assignments,
+        callOutStaffIds
+      );
+
+      if (!bestStaffMember) {
+        initiallyUncovered.push(requirement);
+        continue;
+      }
+
+      const preferredPlan = buildPreferredContinuousPairingPlan(
+        requirement,
+        bestStaffMember,
+        input,
+        assignments,
+        callOutStaffIds
+      );
+
+      if (!preferredPlan) {
+        initiallyUncovered.push(requirement);
+        continue;
+      }
+
+      assignments.push(...preferredPlan);
     }
-
-    const preferredPlan = buildPreferredContinuousPairingPlan(
-      requirement,
-      bestStaffMember,
-      input,
-      assignments,
-      callOutStaffIds
-    );
-
-    if (!preferredPlan) {
-      initiallyUncovered.push(requirement);
-      continue;
-    }
-
-    assignments.push(...preferredPlan);
   }
 
   const repeatFallbackRequirements: ClientRequirement[] = [];
