@@ -404,70 +404,109 @@ function mapRules(document: DatabaseRecord | null): ExtendedSchedulerRules {
   };
 }
 
-function applyTemplateLearningProfile(
+function applyTemplateLearningProfiles(
   rules: ExtendedSchedulerRules,
-  template: DatabaseRecord | null
+  templates: DatabaseRecord[]
 ): ExtendedSchedulerRules {
-  if (
-    !rules.autoUseWeekdayTemplate ||
-    !template ||
-    !template.learningProfile ||
-    typeof template.learningProfile !== "object"
-  ) {
+  if (!rules.autoUseWeekdayTemplate || templates.length === 0) {
     return rules;
   }
 
-  const profile = template.learningProfile as DatabaseRecord;
-  const clampNumber = (
-    value: unknown,
+  const profiles = templates
+    .map((template) => ({
+      profile:
+        template.learningProfile &&
+        typeof template.learningProfile === "object"
+          ? (template.learningProfile as DatabaseRecord)
+          : null,
+      weight: Math.max(
+        Array.isArray(template.assignments)
+          ? Math.min(template.assignments.length, 96)
+          : 1,
+        1
+      ),
+    }))
+    .filter(
+      (
+        item
+      ): item is { profile: DatabaseRecord; weight: number } =>
+        Boolean(item.profile)
+    );
+
+  if (profiles.length === 0) {
+    return rules;
+  }
+
+  const weightedNumber = (
+    field: string,
     fallback: number,
     minimum: number,
     maximum: number
   ) => {
-    const numeric = Number(value);
-    return Number.isFinite(numeric)
-      ? Math.min(Math.max(numeric, minimum), maximum)
-      : fallback;
+    let weightedTotal = 0;
+    let totalWeight = 0;
+
+    for (const { profile, weight } of profiles) {
+      const numeric = Number(profile[field]);
+
+      if (!Number.isFinite(numeric)) {
+        continue;
+      }
+
+      weightedTotal += numeric * weight;
+      totalWeight += weight;
+    }
+
+    if (totalWeight <= 0) {
+      return fallback;
+    }
+
+    return Math.min(
+      Math.max(weightedTotal / totalWeight, minimum),
+      maximum
+    );
   };
 
   return {
     ...rules,
     humanStyleBlockBalancingEnabled:
-      profile.humanStyleBlockBalancingEnabled !== undefined
-        ? Boolean(profile.humanStyleBlockBalancingEnabled)
-        : rules.humanStyleBlockBalancingEnabled,
-    preferredClientsPerStaffPerDay: clampNumber(
-      profile.preferredClientsPerStaffPerDay,
+      profiles.some(
+        ({ profile }) =>
+          profile.humanStyleBlockBalancingEnabled === true
+      ) ||
+      rules.humanStyleBlockBalancingEnabled,
+    preferredClientsPerStaffPerDay: weightedNumber(
+      "preferredClientsPerStaffPerDay",
       rules.preferredClientsPerStaffPerDay ?? 2,
       1,
       6
     ),
-    preferredStaffPerClientPerDay: clampNumber(
-      profile.preferredStaffPerClientPerDay,
+    preferredStaffPerClientPerDay: weightedNumber(
+      "preferredStaffPerClientPerDay",
       rules.preferredStaffPerClientPerDay ?? 2,
       1,
       6
     ),
-    continuityPriority: clampNumber(
-      profile.continuityPriority,
+    continuityPriority: weightedNumber(
+      "continuityPriority",
       rules.continuityPriority,
       0,
       500
     ),
-    clientHandoffPenaltyPriority: clampNumber(
-      profile.clientHandoffPenaltyPriority,
+    clientHandoffPenaltyPriority: weightedNumber(
+      "clientHandoffPenaltyPriority",
       rules.clientHandoffPenaltyPriority,
       0,
       500
     ),
-    workloadBalancePriority: clampNumber(
-      profile.workloadBalancePriority,
+    workloadBalancePriority: weightedNumber(
+      "workloadBalancePriority",
       rules.workloadBalancePriority,
       0,
       500
     ),
-    staffScheduleCompactnessPriority: clampNumber(
-      profile.staffScheduleCompactnessPriority,
+    staffScheduleCompactnessPriority: weightedNumber(
+      "staffScheduleCompactnessPriority",
       rules.staffScheduleCompactnessPriority,
       0,
       500
@@ -858,7 +897,7 @@ export async function buildDaySchedulerInput(
     rawSpeechSessions,
     rawAssignments,
     rawRules,
-    rawTemplate,
+    rawTemplates,
     rawPreviousWeekdayAssignments,
     rawEarlierWeekAssignments,
   ] = await Promise.all([
@@ -873,14 +912,14 @@ export async function buildDaySchedulerInput(
     ScheduleAssignment.find({ locationId, date }).lean(),
     SchedulingRules.findOne({ locationId }).lean(),
     dayOfWeek
-      ? ScheduleTemplate.findOne({
+      ? ScheduleTemplate.find({
           locationId,
           dayOfWeek,
           active: true,
         })
-          .sort({ updatedAt: -1 })
+          .sort({ updatedAt: -1, createdAt: -1 })
           .lean()
-      : Promise.resolve(null),
+      : Promise.resolve([]),
     ScheduleAssignment.find({
       locationId,
       date: {
@@ -904,14 +943,15 @@ export async function buildDaySchedulerInput(
   const speechSessions = rawSpeechSessions as unknown as DatabaseRecord[];
   const assignmentDocuments = rawAssignments as unknown as DatabaseRecord[];
   const rulesDocument = rawRules as unknown as DatabaseRecord | null;
-  const templateDocument = rawTemplate as unknown as DatabaseRecord | null;
+  const templateDocuments =
+    rawTemplates as unknown as DatabaseRecord[];
   const previousWeekdayAssignments =
     rawPreviousWeekdayAssignments as unknown as DatabaseRecord[];
   const earlierWeekAssignments =
     rawEarlierWeekAssignments as unknown as DatabaseRecord[];
-  const extendedRules = applyTemplateLearningProfile(
+  const extendedRules = applyTemplateLearningProfiles(
     mapRules(rulesDocument),
-    templateDocument
+    templateDocuments
   );
 
   const partialCallOuts = (
@@ -943,16 +983,29 @@ export async function buildDaySchedulerInput(
   );
 
   const templateReferences =
-    extendedRules.autoUseWeekdayTemplate && templateDocument
-      ? mapReferenceAssignments(
-          templateDocument.assignments ?? [],
-          "TEMPLATE",
-          staff,
-          clients,
-          `Reference from weekday template ${String(
-            templateDocument.name ?? ""
-          )}.`
-        )
+    extendedRules.autoUseWeekdayTemplate
+      ? templateDocuments.flatMap((template, templateIndex) => {
+          if (
+            template.learningOnly === true ||
+            !Array.isArray(template.assignments) ||
+            template.assignments.length === 0
+          ) {
+            return [];
+          }
+
+          return mapReferenceAssignments(
+            template.assignments,
+            "TEMPLATE",
+            staff,
+            clients,
+            `Reference from weekday template ${String(
+              template.name ?? ""
+            )}.`
+          ).map((reference) => ({
+            ...reference,
+            id: `template-${templateIndex}-${reference.id}`,
+          }));
+        })
       : [];
 
   const historicalReferenceDates = [
@@ -1081,8 +1134,15 @@ export async function buildDaySchedulerInput(
     clients,
     partialCallOuts,
     autoTemplateName:
-      extendedRules.autoUseWeekdayTemplate && templateDocument
-        ? String(templateDocument.name ?? "") || null
+      extendedRules.autoUseWeekdayTemplate &&
+      templateDocuments.length > 0
+        ? templateDocuments.length === 1
+          ? String(templateDocuments[0].name ?? "") || null
+          : `${templateDocuments.length} weekday templates: ${templateDocuments
+              .slice(0, 3)
+              .map((template) => String(template.name ?? ""))
+              .filter(Boolean)
+              .join(", ")}${templateDocuments.length > 3 ? ", ..." : ""}`
         : null,
     previousReferenceDate: latestPreviousReferenceDate,
     historicalReferenceDates:
