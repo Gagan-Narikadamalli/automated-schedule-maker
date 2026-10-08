@@ -78,7 +78,6 @@ type ClientForm = {
   assignedBcbaId: string;
   assignedInternIds: string[];
   attendancePatterns: TimePattern[];
-  napPatterns: TimePattern[];
   preferredStaffIds: string[];
   restrictedStaffIds: string[];
 };
@@ -131,7 +130,6 @@ function emptyClientForm(): ClientForm {
     assignedBcbaId: "",
     assignedInternIds: [],
     attendancePatterns: [],
-    napPatterns: [],
     preferredStaffIds: [],
     restrictedStaffIds: [],
   };
@@ -143,15 +141,6 @@ function emptyAttendance(): TimePattern {
     days: ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"],
     startTime: "08:00",
     endTime: "16:00",
-  };
-}
-
-function emptyNap(): TimePattern {
-  return {
-    name: "Nap",
-    days: ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"],
-    startTime: "12:00",
-    endTime: "13:00",
   };
 }
 
@@ -246,11 +235,6 @@ export function ClientCardManager() {
   const [weeklyAttendanceSchedule, setWeeklyAttendanceSchedule] =
     useState<WeeklySchedule>(() =>
       createWeeklySchedule("08:00", "16:00", false)
-    );
-  const [napDraft, setNapDraft] = useState<TimePattern>(emptyNap);
-  const [weeklyNapSchedule, setWeeklyNapSchedule] =
-    useState<WeeklySchedule>(() =>
-      createWeeklySchedule("12:00", "13:00", false)
     );
   const [editingId, setEditingId] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -392,10 +376,6 @@ export function ClientCardManager() {
     setWeeklyAttendanceSchedule(
       createWeeklySchedule("08:00", "16:00", false)
     );
-    setNapDraft(emptyNap());
-    setWeeklyNapSchedule(
-      createWeeklySchedule("12:00", "13:00", false)
-    );
     setModalOpen(true);
   }
 
@@ -426,10 +406,6 @@ export function ClientCardManager() {
         ...pattern,
         days: [...pattern.days],
       })),
-      napPatterns: (client.napPatterns ?? []).map((pattern) => ({
-        ...pattern,
-        days: [...pattern.days],
-      })),
       preferredStaffIds,
       restrictedStaffIds,
     });
@@ -439,14 +415,6 @@ export function ClientCardManager() {
         client.attendancePatterns ?? [],
         "08:00",
         "16:00"
-      )
-    );
-    setNapDraft(emptyNap());
-    setWeeklyNapSchedule(
-      weeklyScheduleFromPatterns(
-        client.napPatterns ?? [],
-        "12:00",
-        "13:00"
       )
     );
     setModalOpen(true);
@@ -462,10 +430,6 @@ export function ClientCardManager() {
     setAttendanceDraft(emptyAttendance());
     setWeeklyAttendanceSchedule(
       createWeeklySchedule("08:00", "16:00", false)
-    );
-    setNapDraft(emptyNap());
-    setWeeklyNapSchedule(
-      createWeeklySchedule("12:00", "13:00", false)
     );
   }
 
@@ -535,59 +499,6 @@ export function ClientCardManager() {
     }));
   }
 
-  function applyNapToSelectedDays() {
-    if (napDraft.days.length === 0) {
-      setMessage("Choose at least one weekday to apply the nap window.");
-      return;
-    }
-
-    if (napDraft.endTime <= napDraft.startTime) {
-      setMessage("Nap window end time must be later than the start time.");
-      return;
-    }
-
-    setWeeklyNapSchedule((current) => {
-      const next = { ...current };
-
-      for (const day of napDraft.days) {
-        next[day] = {
-          enabled: true,
-          startTime: napDraft.startTime,
-          endTime: napDraft.endTime,
-        };
-      }
-
-      return next;
-    });
-    setMessage(
-      `Applied ${napDraft.startTime}-${napDraft.endTime} nap window to the selected weekdays.`
-    );
-  }
-
-  function toggleWeeklyNapDay(day: string) {
-    setWeeklyNapSchedule((current) => ({
-      ...current,
-      [day]: {
-        ...current[day],
-        enabled: !current[day]?.enabled,
-      },
-    }));
-  }
-
-  function updateWeeklyNapTime(
-    day: string,
-    field: "startTime" | "endTime",
-    value: string
-  ) {
-    setWeeklyNapSchedule((current) => ({
-      ...current,
-      [day]: {
-        ...current[day],
-        [field]: value,
-      },
-    }));
-  }
-
   function toggleId(field: "assignedInternIds" | "preferredStaffIds" | "restrictedStaffIds", id: string) {
     setForm((current) => ({
       ...current,
@@ -627,27 +538,6 @@ export function ClientCardManager() {
       weeklyAttendanceSchedule,
       "Regular attendance"
     );
-    const napScheduleError =
-      Object.values(weeklyNapSchedule).some(
-        (day) =>
-          day.enabled &&
-          (!day.startTime ||
-            !day.endTime ||
-            day.endTime <= day.startTime)
-      )
-        ? "Each enabled nap window must end after it starts."
-        : null;
-
-    if (napScheduleError) {
-      setMessage(napScheduleError);
-      return;
-    }
-
-    const napPatterns = patternsFromWeeklySchedule(
-      weeklyNapSchedule,
-      "Nap window"
-    );
-
     const fullName = `${form.firstName.trim()} ${form.lastName.trim()}`.trim();
     const displayCode = clientDisplayCode(
       form.firstName,
@@ -695,7 +585,7 @@ export function ClientCardManager() {
             assignedBcbaId: form.assignedBcbaId || null,
             assignedInternIds: form.assignedInternIds,
             attendancePatterns,
-            napPatterns,
+            napPatterns: [],
             staffRelationships,
           }),
         }
@@ -1205,123 +1095,14 @@ export function ClientCardManager() {
         </div>
 
         <div className={cardStyles.formSection}>
-          <h3>Weekly Nap / Break + Nap windows</h3>
+          <h3>Nap scheduling</h3>
           <p>
-            Nap times are placement windows for Auto Generate. The actual nap
-            duration comes from Clinic Settings. Enter the allowed window for
-            each weekday, or leave the day unchecked when no nap window applies.
+            Nap timing is managed from Speech, Nap & Attendance Changes so the
+            same nap window can be applied to multiple kids at once. Every
+            client who is present during the clinic nap period receives a
+            flexible daily nap automatically; special Nap events can narrow the
+            allowed window for selected kids.
           </p>
-
-          <div className={cardStyles.quickSchedule}>
-            <strong>Quick Apply</strong>
-            <span>
-              Select the weekdays that share the same nap window, set the window,
-              and apply it. You can then adjust any day individually.
-            </span>
-
-            <div className="form-grid">
-              <label className="form-field">
-                <span>Window starts</span>
-                <input
-                  type="time"
-                  value={napDraft.startTime}
-                  onChange={(event) =>
-                    setNapDraft({
-                      ...napDraft,
-                      startTime: event.target.value,
-                    })
-                  }
-                />
-              </label>
-              <label className="form-field">
-                <span>Window ends</span>
-                <input
-                  type="time"
-                  value={napDraft.endTime}
-                  onChange={(event) =>
-                    setNapDraft({
-                      ...napDraft,
-                      endTime: event.target.value,
-                    })
-                  }
-                />
-              </label>
-            </div>
-
-            <div className="day-selector">
-              {WEEKDAYS.map(([value, label]) => (
-                <label key={value} className="checkbox-card">
-                  <input
-                    type="checkbox"
-                    checked={napDraft.days.includes(value)}
-                    onChange={() =>
-                      toggleDraftDay(napDraft, setNapDraft, value)
-                    }
-                  />
-                  <span>{label}</span>
-                </label>
-              ))}
-            </div>
-
-            <button
-              type="button"
-              className="button button-secondary button-small"
-              onClick={applyNapToSelectedDays}
-            >
-              Apply nap window to selected days
-            </button>
-          </div>
-
-          <div className={cardStyles.weeklyEditor}>
-            {WEEKDAYS.map(([value, label]) => {
-              const daySchedule = weeklyNapSchedule[value];
-
-              return (
-                <div key={value} className={cardStyles.weeklyEditorRow}>
-                  <label className={cardStyles.weeklyDayToggle}>
-                    <input
-                      type="checkbox"
-                      checked={daySchedule?.enabled ?? false}
-                      onChange={() => toggleWeeklyNapDay(value)}
-                    />
-                    <strong>{label}</strong>
-                  </label>
-
-                  <label className="form-field">
-                    <span>Window start</span>
-                    <input
-                      type="time"
-                      disabled={!daySchedule?.enabled}
-                      value={daySchedule?.startTime ?? "12:00"}
-                      onChange={(event) =>
-                        updateWeeklyNapTime(
-                          value,
-                          "startTime",
-                          event.target.value
-                        )
-                      }
-                    />
-                  </label>
-
-                  <label className="form-field">
-                    <span>Window end</span>
-                    <input
-                      type="time"
-                      disabled={!daySchedule?.enabled}
-                      value={daySchedule?.endTime ?? "13:00"}
-                      onChange={(event) =>
-                        updateWeeklyNapTime(
-                          value,
-                          "endTime",
-                          event.target.value
-                        )
-                      }
-                    />
-                  </label>
-                </div>
-              );
-            })}
-          </div>
         </div>
 
         <div className={cardStyles.formSection}>
