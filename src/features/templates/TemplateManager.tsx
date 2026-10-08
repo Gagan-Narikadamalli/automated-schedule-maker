@@ -219,8 +219,9 @@ export function TemplateManager() {
         body: JSON.stringify({
           locationId,
           name: name.trim(),
-          dayOfWeek,
+          dayOfWeek: getDayOfWeekFromDate(templateSourceDate),
           sourceDate: templateSourceDate,
+          sourceType: "SAVED_SCHEDULE",
         }),
       });
       const data = (await response.json()) as TemplatesResponse;
@@ -232,7 +233,9 @@ export function TemplateManager() {
       setName("");
       await loadTemplates();
       setMessage(
-        `Template saved from ${templateSourceDate}. It will still be revalidated when applied to another date.`
+        `Exact ${displayDay(
+          getDayOfWeekFromDate(templateSourceDate)
+        )} template saved from ${templateSourceDate}. Auto Generate can use it as the same-weekday reference, and direct application will still revalidate current constraints.`
       );
     } catch (error) {
       setMessage(
