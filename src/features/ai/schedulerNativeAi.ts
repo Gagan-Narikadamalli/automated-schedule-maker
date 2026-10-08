@@ -212,6 +212,15 @@ function extractStaffLookup(message: string): string | null {
   ]);
 }
 
+function staffLookupWantsClients(message: string): boolean {
+  const raw = visibleMessage(message);
+  return (
+    /\bwho\s+is\s+(?:the\s+)?client\b/i.test(raw) ||
+    /\b(?:what|which)\s+clients?\b/i.test(raw) ||
+    /\bwho\s+does\s+.+?\s+have\b/i.test(raw)
+  );
+}
+
 function extractClientLookup(message: string): string | null {
   return firstEntity(message, [
     /\bwho\s+(?:is\s+)?(?:covering|with)\s+(.+?)(?=\s+(?:at|from|between|today|tomorrow|on)\b|[?.!,]|$)/i,
@@ -709,7 +718,11 @@ export function planNativeSchedulerAction(args: {
     return {
       intent: "STAFF_LOOKUP",
       toolName: "lookup_schedule",
-      input: { staffName, ...times, includeBreaks: true },
+      input: {
+        staffName,
+        ...times,
+        includeBreaks: !staffLookupWantsClients(normalizedMessage),
+      },
       confidence: 0.94,
       explanation: "Look up the named staff member's schedule.",
     };
