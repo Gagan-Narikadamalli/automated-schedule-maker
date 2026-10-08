@@ -574,29 +574,27 @@ function mapClients(
     activeClients.map((client) => String(client._id))
   );
 
-  const speechWindows = speechSessions
-    .filter((session) =>
-      activeClientIds.has(String(session.clientId))
-    )
-    .filter((session) => Boolean(session.startTime && session.endTime))
-    .map((session, index) => ({
-      key: `speech-session-${String(
-        session._id ?? index
-      )}`,
-      clientId: String(session.clientId),
-      startTime: String(session.startTime),
-      endTime: String(session.endTime),
-      priority: 100,
-    }));
+  const speechSlotsByClient = new Map<string, Set<string>>();
 
-  const resolvedSpeechSlots = resolveFlexibleEventWindows(
-    speechWindows,
-    {
-      enabled: rules.speechDurationRulesEnabled,
-      durationMinutes: rules.speechPreferredMinutes,
-      slotLengthMinutes: rules.slotLengthMinutes,
+  for (const session of speechSessions) {
+    const clientId = String(session.clientId ?? "");
+    const startTime = String(session.startTime ?? "");
+
+    if (
+      !activeClientIds.has(clientId) ||
+      !startTime
+    ) {
+      continue;
     }
-  );
+
+    const slots = speechSlotsByClient.get(clientId) ?? new Set<string>();
+
+    // Speech is always a fixed 30-minute appointment. Legacy records that
+    // once contained a larger range are intentionally normalized to their
+    // first schedule block so Speech cannot consume an entire flexible window.
+    slots.add(startTime);
+    speechSlotsByClient.set(clientId, slots);
+  }
 
   return activeClients.map((client) => {
     const clientId = String(client._id);
@@ -606,11 +604,7 @@ function mapClients(
     );
     const napSlots: string[] = [];
     const speechSlots = [
-      ...new Set(
-        speechWindows
-          .filter((window) => window.clientId === clientId)
-          .flatMap((window) => resolvedSpeechSlots.get(window.key) ?? [])
-      ),
+      ...(speechSlotsByClient.get(clientId) ?? new Set<string>()),
     ].sort();
     const blockedSlots = new Set([...napSlots, ...speechSlots]);
     const staffRelationships: Record<string, StaffRelationship> = {};
