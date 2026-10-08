@@ -172,6 +172,9 @@ function getDefaultRules(): ExtendedSchedulerRules {
     allowSameStaffClientRepeatForCoverageException: true,
     preferSameTeam: true,
     preferStaffContinuity: true,
+    humanStyleBlockBalancingEnabled: true,
+    preferredClientsPerStaffPerDay: 2,
+    preferredStaffPerClientPerDay: 2,
     slotLengthMinutes: 30,
     preferredStaffPriority: 100,
     sameTeamPriority: 40,
@@ -252,6 +255,18 @@ function mapRules(document: DatabaseRecord | null): ExtendedSchedulerRules {
     ),
     preferStaffContinuity: Boolean(
       document.preferStaffContinuity ?? defaults.preferStaffContinuity
+    ),
+    humanStyleBlockBalancingEnabled: Boolean(
+      document.humanStyleBlockBalancingEnabled ??
+        defaults.humanStyleBlockBalancingEnabled
+    ),
+    preferredClientsPerStaffPerDay: Number(
+      document.preferredClientsPerStaffPerDay ??
+        defaults.preferredClientsPerStaffPerDay
+    ),
+    preferredStaffPerClientPerDay: Number(
+      document.preferredStaffPerClientPerDay ??
+        defaults.preferredStaffPerClientPerDay
     ),
     slotLengthMinutes: Number(
       document.slotLengthMinutes ?? defaults.slotLengthMinutes
