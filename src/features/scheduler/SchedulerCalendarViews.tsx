@@ -44,9 +44,16 @@ type ScheduleAssignment = {
     | "OPEN";
 };
 
+type ClientEvent = {
+  clientId: string;
+  startTime: string;
+  eventType: "NAP" | "SPEECH";
+};
+
 type ScheduleResponse = {
   staff?: ScheduleStaff[];
   assignments?: ScheduleAssignment[];
+  clientEvents?: ClientEvent[];
   requiredClientSlots?: number;
   error?: string;
 };
@@ -259,6 +266,7 @@ function ClientScheduleView({
   const [error, setError] = useState("");
   const [staff, setStaff] = useState<ScheduleStaff[]>([]);
   const [assignments, setAssignments] = useState<ScheduleAssignment[]>([]);
+  const [clientEvents, setClientEvents] = useState<ClientEvent[]>([]);
   const [unplaced, setUnplaced] = useState<UnplacedRecord[]>([]);
 
   const load = useCallback(async (silent = false) => {
@@ -279,6 +287,7 @@ function ClientScheduleView({
       if (!unplacedResponse.ok) throw new Error(unplacedData.error || "Unplaced coverage could not be loaded.");
       setStaff(scheduleData.staff ?? []);
       setAssignments(scheduleData.assignments ?? []);
+      setClientEvents(scheduleData.clientEvents ?? []);
       setUnplaced(unplacedData.unplacedAssignments ?? []);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Client schedule could not be loaded.");
