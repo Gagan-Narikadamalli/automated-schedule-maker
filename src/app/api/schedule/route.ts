@@ -90,19 +90,27 @@ export async function GET(request: Request) {
   try {
     await connectToDatabase();
 
-    const [dayData, staffDocuments, assignments, savedDates] =
-      await Promise.all([
-        buildDaySchedulerInput(locationId, date),
-        Staff.find({ locationId, active: true })
-          .select("fullName role color teamId")
-          .sort({ fullName: 1 })
-          .lean(),
-        ScheduleAssignment.find({ locationId, date })
-          .populate("clientId", "displayCode color supportLevel teamId")
-          .sort({ startTime: 1 })
-          .lean(),
-        ScheduleAssignment.distinct("date", { locationId }),
-      ]);
+    const [
+      dayData,
+      staffDocuments,
+      clientDocuments,
+      assignments,
+      savedDates,
+    ] = await Promise.all([
+      buildDaySchedulerInput(locationId, date),
+      Staff.find({ locationId, active: true })
+        .select("fullName role color teamId")
+        .sort({ fullName: 1 })
+        .lean(),
+      Client.find({ locationId, active: true })
+        .select("displayCode color")
+        .lean(),
+      ScheduleAssignment.find({ locationId, date })
+        .populate("clientId", "displayCode color supportLevel teamId")
+        .sort({ startTime: 1 })
+        .lean(),
+      ScheduleAssignment.distinct("date", { locationId }),
+    ]);
 
     const fixedNapApplication = await applyFixedNapSessions(
       locationId,
@@ -118,8 +126,21 @@ export async function GET(request: Request) {
       ])
     );
 
-    const plainStaffDocuments = staffDocuments as unknown as PlainDatabaseRecord[];
-    const plainAssignments = assignments as unknown as PlainDatabaseRecord[];
+    const plainStaffDocuments =
+      staffDocuments as unknown as PlainDatabaseRecord[];
+    const plainClientDocuments =
+      clientDocuments as unknown as PlainDatabaseRecord[];
+    const plainAssignments =
+      assignments as unknown as PlainDatabaseRecord[];
+    const clientPresentation = new Map(
+      plainClientDocuments.map((client) => [
+        String(client._id),
+        {
+          displayCode: String(client.displayCode ?? "Client"),
+          color: String(client.color ?? "#D9F4EE"),
+        },
+      ])
+    );
 
     const recentSavedScheduleDates = (savedDates as string[])
       .filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value))
@@ -146,18 +167,27 @@ export async function GET(request: Request) {
       assignments: plainAssignments.map((assignment) =>
         serializeAssignment(assignment)
       ),
-      clientEvents: effectiveClients.flatMap((client) => [
-        ...client.napSlots.map((startTime) => ({
-          clientId: client.id,
-          startTime,
-          eventType: "NAP" as const,
-        })),
-        ...client.speechSlots.map((startTime) => ({
-          clientId: client.id,
-          startTime,
-          eventType: "SPEECH" as const,
-        })),
-      ]),
+      clientEvents: effectiveClients.flatMap((client) => {
+        const presentation = clientPresentation.get(client.id);
+        return [
+          ...client.napSlots.map((startTime) => ({
+            clientId: client.id,
+            clientCode:
+              presentation?.displayCode ?? client.displayCode,
+            clientColor: presentation?.color ?? "#D9F4EE",
+            startTime,
+            eventType: "NAP" as const,
+          })),
+          ...client.speechSlots.map((startTime) => ({
+            clientId: client.id,
+            clientCode:
+              presentation?.displayCode ?? client.displayCode,
+            clientColor: presentation?.color ?? "#D9F4EE",
+            startTime,
+            eventType: "SPEECH" as const,
+          })),
+        ];
+      }),
       requiredClientSlots: effectiveClients.reduce(
         (total, client) => total + client.requiredSlots.length,
         0
