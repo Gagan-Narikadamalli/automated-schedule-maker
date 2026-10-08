@@ -399,6 +399,57 @@ function testManualAssignmentsCanBeRebuiltWhenPreservationIsOff() {
   );
 }
 
+function testNewArrivalDoesNotStealOngoingClientStaff() {
+  const staff = [
+    createStaff("bt-a", "BT A", "BT", ["08:00", "08:30", "09:00"]),
+    createStaff("bt-b", "BT B", "BT", ["08:30", "09:00"]),
+  ];
+  const ongoingClient = createClient(
+    "client-zibo",
+    "ZiBo",
+    ["08:00", "08:30", "09:00"]
+  );
+  const arrivingClient = createClient(
+    "client-jobr",
+    "JoBr",
+    ["08:30", "09:00"]
+  );
+  const input = createInput(staff, [ongoingClient, arrivingClient]);
+  input.rules.maximumClientsPerTechPerDay = 3;
+  input.rules.maximumTechsPerClientPerDay = 3;
+  input.rules.continuityPriority = 200;
+  input.rules.clientHandoffPenaltyPriority = 200;
+  input.rules.workloadBalancePriority = 0;
+
+  const result = generateSchedule(input);
+  const ziboAssignments = clientAssignments(result.assignments)
+    .filter((assignment) => assignment.clientId === "client-zibo")
+    .sort((left, right) =>
+      left.startTime.localeCompare(right.startTime)
+    );
+  const jobrAtEightThirty = clientAssignments(result.assignments).find(
+    (assignment) =>
+      assignment.clientId === "client-jobr" &&
+      assignment.startTime === "08:30"
+  );
+
+  assert.deepEqual(
+    ziboAssignments.map((assignment) => assignment.staffId),
+    ["bt-a", "bt-a", "bt-a"],
+    "An ongoing client should remain with the same available technician instead of being split when another client arrives."
+  );
+  assert.equal(
+    jobrAtEightThirty?.staffId,
+    "bt-b",
+    "The newly arriving client should use the newly available technician instead of stealing the ongoing client's technician."
+  );
+  assert.equal(
+    result.metrics.uncoveredClientSlots,
+    0,
+    "Continuity must never reduce client coverage."
+  );
+}
+
 function testHandoffPenaltyPrefersNeighboringClientContinuity() {
   const staff = [
     createStaff("bt-1", "BT One", "BT", ["08:00", "08:30"]),
@@ -1005,6 +1056,7 @@ function runSchedulerRegressionScenarios() {
   testPartialBuildKeepsSafeCoverage();
   testManualAssignmentsStayProtected();
   testManualAssignmentsCanBeRebuiltWhenPreservationIsOff();
+  testNewArrivalDoesNotStealOngoingClientStaff();
   testHandoffPenaltyPrefersNeighboringClientContinuity();
   testCompactnessPrefersAdjacentStaffWork();
   testAiEntityMatchingIgnoresCaseSpacingAndSmallTypos();
