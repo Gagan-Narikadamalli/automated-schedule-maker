@@ -571,6 +571,42 @@ export function planNativeManagementAction(args: {
     return { intent: "RULES", toolName: "update_scheduler_rules", input: ruleChanges, confidence: 0.95, explanation: "Update scheduler rules." };
   }
 
+  const createWorkbookTemplate = raw.match(
+    /\b(?:create|save|add)\s+(?:a\s+)?(?:schedule\s+)?template\s+(.+?)(?=\s+(?:from|using)\s+(?:the\s+)?(?:excel|workbook|historical|history)\b|[?.!,]|$)/i
+  );
+  if (
+    createWorkbookTemplate?.[1] &&
+    /\b(?:excel|workbook|historical|history)\b/i.test(raw)
+  ) {
+    const sourceDate = explicitIsoDate(raw) || args.date;
+    const explicitDays = weekdays(raw);
+    const dayOfWeek = explicitDays.length === 1
+      ? explicitDays[0]
+      : undefined;
+
+    if (!sourceDate) {
+      return clarification(
+        "Creating a workbook template needs the original sheet date, for example 2026-09-30 for the Wednesday sheet."
+      );
+    }
+
+    return {
+      intent: "TEMPLATE",
+      toolName: "manage_schedule_template",
+      input: {
+        action: "CREATE",
+        name: clean(createWorkbookTemplate[1]),
+        sourceDate,
+        sourceType: "HISTORICAL_WORKBOOK",
+        sourceName: "Livingston workbook history",
+        ...(dayOfWeek ? { dayOfWeek } : {}),
+      },
+      confidence: 0.98,
+      explanation:
+        "Create a reusable same-weekday template from imported workbook history.",
+    };
+  }
+
   const createTemplate = raw.match(/\b(?:create|save)\s+(?:a\s+)?(?:schedule\s+)?template\s+(.+?)(?=\s+(?:from|using)\s+(?:the\s+)?(?:schedule\s+)?(?:on\s+|for\s+)?(?:20\d{2}-\d{2}-\d{2}|today|tomorrow|selected\s+day)\b|[?.!,]|$)/i);
   if (createTemplate?.[1]) {
     const sourceDate = explicitIsoDate(raw) || args.date;
