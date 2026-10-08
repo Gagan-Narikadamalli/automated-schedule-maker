@@ -574,29 +574,6 @@ function mapClients(
     activeClients.map((client) => String(client._id))
   );
 
-  const napWindows = activeClients.flatMap((client) => {
-    const clientId = String(client._id);
-
-    return ((client.napPatterns ?? []) as DatabaseRecord[])
-      .filter((pattern) => {
-        const days = Array.isArray(pattern.days)
-          ? pattern.days.map((day: unknown) => String(day))
-          : [];
-
-        return (
-          patternMatchesDate(days, date) &&
-          Boolean(pattern.startTime && pattern.endTime)
-        );
-      })
-      .map((pattern, index) => ({
-        key: `nap-pattern-${clientId}-${index}`,
-        clientId,
-        startTime: String(pattern.startTime),
-        endTime: String(pattern.endTime),
-        priority: 50,
-      }));
-  });
-
   const speechWindows = speechSessions
     .filter((session) =>
       activeClientIds.has(String(session.clientId))
@@ -612,14 +589,6 @@ function mapClients(
       priority: 100,
     }));
 
-  const resolvedNapSlots = resolveFlexibleEventWindows(
-    napWindows,
-    {
-      enabled: rules.napDurationRulesEnabled,
-      durationMinutes: rules.napPreferredMinutes,
-      slotLengthMinutes: rules.slotLengthMinutes,
-    }
-  );
   const resolvedSpeechSlots = resolveFlexibleEventWindows(
     speechWindows,
     {
@@ -635,13 +604,7 @@ function mapClients(
       client.attendancePatterns,
       date
     );
-    const napSlots = [
-      ...new Set(
-        napWindows
-          .filter((window) => window.clientId === clientId)
-          .flatMap((window) => resolvedNapSlots.get(window.key) ?? [])
-      ),
-    ].sort();
+    const napSlots: string[] = [];
     const speechSlots = [
       ...new Set(
         speechWindows
