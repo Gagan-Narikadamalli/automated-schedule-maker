@@ -5,6 +5,7 @@ export type FlexibleEventWindow = {
   startTime: string;
   endTime: string;
   priority?: number;
+  allowedSlots?: string[];
 };
 
 export type FlexibleEventDurationRule = {
@@ -66,9 +67,14 @@ export function resolveFlexibleEventWindows(
   });
 
   for (const window of orderedWindows) {
+    const allowedSlotSet = window.allowedSlots
+      ? new Set(window.allowedSlots)
+      : null;
     const availableSlots = getSlotsInsideTimeRange(
       window.startTime,
       window.endTime
+    ).filter(
+      (slot) => !allowedSlotSet || allowedSlotSet.has(slot)
     );
 
     if (!rule.enabled || availableSlots.length === 0) {
