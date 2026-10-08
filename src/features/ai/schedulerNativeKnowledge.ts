@@ -81,7 +81,9 @@ export async function buildNativeHistoricalKnowledge(args: {
         active: true,
         dayOfWeek: targetWeekday,
       })
-        .select("name dayOfWeek assignments")
+        .select(
+          "name dayOfWeek assignments sourceType sourceName sourceDate styleNotes"
+        )
         .sort({ name: 1 })
         .lean(),
       AITrainingExample.find({
