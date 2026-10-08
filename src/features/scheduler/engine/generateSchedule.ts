@@ -529,21 +529,23 @@ function exactReferenceMatchStrength(
   staffId: string,
   clientId: string,
   startTime: string,
-  referenceAssignments: SchedulerAssignment[]
+  referenceAssignments: SchedulerAssignment[],
+  source?: "TEMPLATE" | "COPIED"
 ): number {
   return referenceAssignments.reduce((score, assignment) => {
     if (
       assignment.assignmentType !== "CLIENT_1_TO_1" ||
       assignment.staffId !== staffId ||
       assignment.clientId !== clientId ||
-      assignment.startTime !== startTime
+      assignment.startTime !== startTime ||
+      (source && assignment.source !== source)
     ) {
       return score;
     }
 
     // A saved weekday template is the strongest reusable instruction. Previous
-    // same-weekday schedules remain strong evidence, but one stale generated
-    // day should not override an explicit weekday template.
+    // same-weekday schedules remain strong evidence, while current-day AUTO
+    // output is deliberately ignored so a bad generation cannot train itself.
     if (assignment.source === "TEMPLATE") return score + 100;
     if (assignment.source === "COPIED") return score + 10;
     return score;
@@ -823,25 +825,54 @@ function findBestStaffMember(
       } => candidate !== null
     )
     .sort((left, right) => {
-      const leftReferenceStrength = exactReferenceMatchStrength(
+      const leftTemplateStrength = exactReferenceMatchStrength(
         left.staffMember.id,
         requirement.client.id,
         requirement.startTime,
-        input.referenceAssignments
+        input.referenceAssignments,
+        "TEMPLATE"
       );
-      const rightReferenceStrength = exactReferenceMatchStrength(
+      const rightTemplateStrength = exactReferenceMatchStrength(
         right.staffMember.id,
         requirement.client.id,
         requirement.startTime,
-        input.referenceAssignments
+        input.referenceAssignments,
+        "TEMPLATE"
       );
 
-      // Reuse the exact weekday-template / previous-same-weekday pairing first
-      // whenever both the staff member and client are valid today. Hard
-      // eligibility was already checked above, so call-outs, availability,
-      // attendance, restrictions, hour limits, and occupied cells still win.
-      if (leftReferenceStrength !== rightReferenceStrength) {
-        return rightReferenceStrength - leftReferenceStrength;
+      // An explicit weekday template is the first reusable preference once
+      // hard eligibility has passed.
+      if (leftTemplateStrength !== rightTemplateStrength) {
+        return rightTemplateStrength - leftTemplateStrength;
+      }
+
+      const roleDifference =
+        coverageRoleTier(left.staffMember) -
+        coverageRoleTier(right.staffMember);
+      if (roleDifference !== 0) {
+        return roleDifference;
+      }
+
+      const leftPreviousWeekdayStrength = exactReferenceMatchStrength(
+        left.staffMember.id,
+        requirement.client.id,
+        requirement.startTime,
+        input.referenceAssignments,
+        "COPIED"
+      );
+      const rightPreviousWeekdayStrength = exactReferenceMatchStrength(
+        right.staffMember.id,
+        requirement.client.id,
+        requirement.startTime,
+        input.referenceAssignments,
+        "COPIED"
+      );
+
+      // Previous same-weekday schedules are then reused inside the normal
+      // clinic role tier. This keeps regular BT/RBT coverage from being
+      // displaced by a historical lower-priority relief-role assignment.
+      if (leftPreviousWeekdayStrength !== rightPreviousWeekdayStrength) {
+        return rightPreviousWeekdayStrength - leftPreviousWeekdayStrength;
       }
 
       const previousAssignment = previousClientAssignment(
@@ -864,7 +895,11 @@ function findBestStaffMember(
         }
       }
 
-      return compareStaffCandidates(left, right);
+      if (right.score !== left.score) {
+        return right.score - left.score;
+      }
+
+      return left.staffMember.name.localeCompare(right.staffMember.name);
     });
 
   return candidates[0]?.staffMember ?? null;
