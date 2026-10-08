@@ -532,6 +532,178 @@ function findReliefSwap(
   return null;
 }
 
+function smoothShortClientRuns(
+  staff: SchedulerStaff[],
+  clients: SchedulerClient[],
+  assignments: SchedulerAssignment[],
+  callOutStaffIds: Set<string>,
+  schedulerRules: SchedulerRules
+): void {
+  const staffById = new Map(
+    staff.map((staffMember) => [staffMember.id, staffMember])
+  );
+
+  for (let pass = 0; pass < 3; pass += 1) {
+    let changed = false;
+
+    for (const client of clients) {
+      const clientAssignments = assignments
+        .filter(
+          (assignment) =>
+            assignment.clientId === client.id &&
+            assignment.assignmentType === "CLIENT_1_TO_1"
+        )
+        .sort((left, right) =>
+          left.startTime.localeCompare(right.startTime)
+        );
+
+      if (clientAssignments.length < 2) {
+        continue;
+      }
+
+      const runs: SchedulerAssignment[][] = [];
+
+      for (const assignment of clientAssignments) {
+        const currentRun = runs[runs.length - 1];
+        const previousAssignment =
+          currentRun?.[currentRun.length - 1] ?? null;
+        const continuesCurrentRun =
+          previousAssignment &&
+          previousAssignment.staffId === assignment.staffId &&
+          shiftTime(
+            previousAssignment.startTime,
+            schedulerRules.slotLengthMinutes
+          ) === assignment.startTime;
+
+        if (continuesCurrentRun) {
+          currentRun.push(assignment);
+        } else {
+          runs.push([assignment]);
+        }
+      }
+
+      for (let runIndex = 0; runIndex < runs.length; runIndex += 1) {
+        const run = runs[runIndex];
+
+        // Only collapse short AUTO islands. Long blocks are intentional and
+        // manual/locked manager decisions are never moved.
+        if (
+          run.length > 2 ||
+          run.some(
+            (assignment) =>
+              assignment.source !== "AUTO" ||
+              assignment.locked
+          )
+        ) {
+          continue;
+        }
+
+        const previousRun = runs[runIndex - 1];
+        const nextRun = runs[runIndex + 1];
+        const candidateStaffIds = [
+          ...(previousRun
+            ? [
+                {
+                  staffId: previousRun[0].staffId,
+                  neighborLength: previousRun.length,
+                },
+              ]
+            : []),
+          ...(nextRun
+            ? [
+                {
+                  staffId: nextRun[0].staffId,
+                  neighborLength: nextRun.length,
+                },
+              ]
+            : []),
+        ]
+          .filter(
+            (candidate, index, all) =>
+              candidate.staffId !== run[0].staffId &&
+              all.findIndex(
+                (other) => other.staffId === candidate.staffId
+              ) === index
+          )
+          .sort(
+            (left, right) =>
+              right.neighborLength - left.neighborLength
+          );
+
+        for (const candidate of candidateStaffIds) {
+          const targetStaff = staffById.get(candidate.staffId);
+
+          if (!targetStaff) {
+            continue;
+          }
+
+          const runIds = new Set(
+            run.map((assignment) => assignment.id)
+          );
+          const simulated = assignments
+            .filter((assignment) => !runIds.has(assignment.id))
+            .map((assignment) => ({ ...assignment }));
+          const replacements: SchedulerAssignment[] = [];
+          let valid = true;
+
+          for (const assignment of run) {
+            const check = canAssignStaffToClient({
+              staffMember: targetStaff,
+              client,
+              startTime: assignment.startTime,
+              assignments: simulated,
+              callOutStaffIds,
+              rules: schedulerRules,
+              allowSameDayPairRepeat: true,
+            });
+
+            if (!check.allowed) {
+              valid = false;
+              break;
+            }
+
+            const replacement: SchedulerAssignment = {
+              ...assignment,
+              id: `smooth-${client.id}-${assignment.startTime}-${targetStaff.id}`,
+              staffId: targetStaff.id,
+              source: "AUTO",
+              locked: false,
+              note:
+                "Automatically smoothed to keep the client with the same staff for a longer continuous block.",
+            };
+            replacements.push(replacement);
+            simulated.push(replacement);
+          }
+
+          if (!valid) {
+            continue;
+          }
+
+          assignments.splice(
+            0,
+            assignments.length,
+            ...simulated
+          );
+          changed = true;
+          break;
+        }
+
+        if (changed) {
+          break;
+        }
+      }
+
+      if (changed) {
+        break;
+      }
+    }
+
+    if (!changed) {
+      break;
+    }
+  }
+}
+
 export function placeStaffBreaksAfterCoverage({
   staff,
   clients,
@@ -640,6 +812,19 @@ export function placeStaffBreaksAfterCoverage({
 
     unplacedBreakStaffIds.push(staffMember.id);
   }
+
+  // Break placement can occasionally create a one- or two-block island in a
+  // client's day. After every required break is secured, collapse those small
+  // AUTO islands into the neighboring staff/client block when the move remains
+  // fully legal. Coverage and breaks stay unchanged; the calendar simply
+  // becomes easier to read.
+  smoothShortClientRuns(
+    staff,
+    clients,
+    assignments,
+    callOutSet,
+    schedulerRules
+  );
 
   return {
     assignments,
