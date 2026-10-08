@@ -3,7 +3,6 @@ import {
   getSlotsInsideTimeRange,
   patternMatchesDate,
 } from "@/features/scheduler/engine/dateUtils";
-import { resolveFlexibleEventWindows } from "@/features/scheduler/engine/flexibleEventWindows";
 import type {
   SchedulerAssignment,
   SchedulerClient,
@@ -195,10 +194,10 @@ function getDefaultRules(): ExtendedSchedulerRules {
     autoUseWeekdayTemplate: true,
     autoUsePreviousWeekdaySchedule: true,
     breakWindowStart: "11:00",
-    breakWindowEnd: "13:30",
+    breakWindowEnd: "14:00",
     breakSchedulingEnabled: true,
     defaultBreakMinutes: 30,
-    breakEligibilityHours: 6,
+    breakEligibilityHours: 0,
     scheduleStartTime: "08:00",
     scheduleEndTime: "20:00",
     fullTimeMinimumWeeklyHours: 30,
