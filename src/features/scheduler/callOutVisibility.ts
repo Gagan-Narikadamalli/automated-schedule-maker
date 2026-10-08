@@ -1,5 +1,5 @@
 export const STAFF_GRID_DAY_START = "08:00";
-export const STAFF_GRID_DAY_END = "18:00";
+export const STAFF_GRID_DAY_END = "17:00";
 
 export type CallOutWindow = {
   staffId: string;
