@@ -448,26 +448,55 @@ function explainUncoveredRequirement(
   return `Staff capacity exists at ${requirement.startTime}, but no safe final placement remained after coverage and repair passes. Repair Schedule should retry this block before manager placement.`;
 }
 
-function previousClientAssignment(
+function priorClientCoverageSlot(
   requirement: ClientRequirement,
-  assignments: SchedulerAssignment[],
   slotLengthMinutes: number
-): SchedulerAssignment | null {
+): string | null {
   const targetMinutes = timeToMinutes(requirement.startTime);
 
   if (targetMinutes === null) {
     return null;
   }
 
-  const previousStartTime = minutesToTime(
-    targetMinutes - slotLengthMinutes
+  let priorMinutes = targetMinutes - slotLengthMinutes;
+
+  while (priorMinutes >= 0) {
+    const slot = minutesToTime(priorMinutes);
+    const isPlannedClientEvent =
+      requirement.client.napSlots.includes(slot) ||
+      requirement.client.speechSlots.includes(slot);
+
+    if (!isPlannedClientEvent) {
+      return requirement.client.requiredSlots.includes(slot)
+        ? slot
+        : null;
+    }
+
+    priorMinutes -= slotLengthMinutes;
+  }
+
+  return null;
+}
+
+function previousClientAssignment(
+  requirement: ClientRequirement,
+  assignments: SchedulerAssignment[],
+  slotLengthMinutes: number
+): SchedulerAssignment | null {
+  const previousCoverageSlot = priorClientCoverageSlot(
+    requirement,
+    slotLengthMinutes
   );
+
+  if (!previousCoverageSlot) {
+    return null;
+  }
 
   return (
     assignments.find(
       (assignment) =>
         assignment.clientId === requirement.client.id &&
-        assignment.startTime === previousStartTime &&
+        assignment.startTime === previousCoverageSlot &&
         assignment.assignmentType === "CLIENT_1_TO_1"
     ) ?? null
   );
@@ -549,26 +578,18 @@ function sortRequirementsForClinicFlow(
     // required slots (not the assignments built so far), so it works even
     // though the day's requirements are sorted before generation begins. A new
     // arrival therefore cannot steal the technician from an ongoing client.
-    const leftMinutes = timeToMinutes(left.startTime);
-    const rightMinutes = timeToMinutes(right.startTime);
-    const leftPreviousSlot =
-      leftMinutes === null
-        ? null
-        : minutesToTime(
-            leftMinutes - input.rules.slotLengthMinutes
-          );
-    const rightPreviousSlot =
-      rightMinutes === null
-        ? null
-        : minutesToTime(
-            rightMinutes - input.rules.slotLengthMinutes
-          );
-    const leftHasPreviousPair =
-      leftPreviousSlot !== null &&
-      left.client.requiredSlots.includes(leftPreviousSlot);
-    const rightHasPreviousPair =
-      rightPreviousSlot !== null &&
-      right.client.requiredSlots.includes(rightPreviousSlot);
+    const leftHasPreviousPair = Boolean(
+      priorClientCoverageSlot(
+        left,
+        input.rules.slotLengthMinutes
+      )
+    );
+    const rightHasPreviousPair = Boolean(
+      priorClientCoverageSlot(
+        right,
+        input.rules.slotLengthMinutes
+      )
+    );
 
     if (leftHasPreviousPair !== rightHasPreviousPair) {
       return leftHasPreviousPair ? -1 : 1;
