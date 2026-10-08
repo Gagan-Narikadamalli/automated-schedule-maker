@@ -21,6 +21,16 @@ type TemplateRequest = {
   sourceType?: "SAVED_SCHEDULE" | "HISTORICAL_WORKBOOK" | "MANUAL";
   sourceName?: string;
   styleNotes?: string[];
+  allowLearningOnlyFallback?: boolean;
+  learningProfile?: {
+    humanStyleBlockBalancingEnabled?: boolean;
+    preferredClientsPerStaffPerDay?: number;
+    preferredStaffPerClientPerDay?: number;
+    continuityPriority?: number;
+    clientHandoffPenaltyPriority?: number;
+    workloadBalancePriority?: number;
+    staffScheduleCompactnessPriority?: number;
+  };
 };
 
 type DeleteTemplateRequest = {
@@ -62,6 +72,11 @@ function serializeTemplate(template: PlainRecord) {
     styleNotes: Array.isArray(template.styleNotes)
       ? template.styleNotes.map((item: unknown) => String(item))
       : [],
+    learningOnly: Boolean(template.learningOnly),
+    learningProfile:
+      template.learningProfile && typeof template.learningProfile === "object"
+        ? template.learningProfile
+        : null,
     assignmentCount: Array.isArray(template.assignments)
       ? template.assignments.length
       : 0,
@@ -173,6 +188,64 @@ export async function POST(request: Request) {
           .filter(Boolean)
           .slice(0, 20)
       : [];
+    const allowLearningOnlyFallback =
+      body.allowLearningOnlyFallback === true;
+    const learningProfile = body.learningProfile
+      ? {
+          humanStyleBlockBalancingEnabled:
+            body.learningProfile.humanStyleBlockBalancingEnabled !== false,
+          preferredClientsPerStaffPerDay: Math.min(
+            Math.max(
+              Number(
+                body.learningProfile.preferredClientsPerStaffPerDay ?? 2
+              ),
+              1
+            ),
+            6
+          ),
+          preferredStaffPerClientPerDay: Math.min(
+            Math.max(
+              Number(
+                body.learningProfile.preferredStaffPerClientPerDay ?? 2
+              ),
+              1
+            ),
+            6
+          ),
+          continuityPriority: Math.min(
+            Math.max(
+              Number(body.learningProfile.continuityPriority ?? 200),
+              0
+            ),
+            500
+          ),
+          clientHandoffPenaltyPriority: Math.min(
+            Math.max(
+              Number(
+                body.learningProfile.clientHandoffPenaltyPriority ?? 200
+              ),
+              0
+            ),
+            500
+          ),
+          workloadBalancePriority: Math.min(
+            Math.max(
+              Number(body.learningProfile.workloadBalancePriority ?? 0),
+              0
+            ),
+            500
+          ),
+          staffScheduleCompactnessPriority: Math.min(
+            Math.max(
+              Number(
+                body.learningProfile.staffScheduleCompactnessPriority ?? 8
+              ),
+              0
+            ),
+            500
+          ),
+        }
+      : null;
 
     if (!locationId || !name || !dayOfWeek || !DAYS.has(dayOfWeek)) {
       return NextResponse.json(
@@ -209,6 +282,7 @@ export async function POST(request: Request) {
 
     let assignments: PlainRecord[] = [];
     let skippedHistoricalRows = 0;
+    let learningOnly = false;
 
     if (sourceType === "HISTORICAL_WORKBOOK") {
       if (!sourceDate) {
@@ -230,13 +304,17 @@ export async function POST(request: Request) {
         .lean()) as unknown as PlainRecord[];
 
       if (historicalRows.length === 0) {
-        return NextResponse.json(
-          {
-            error:
-              "No imported workbook rows were found for that date/day. Import or map the sheet before saving it as a template.",
-          },
-          { status: 400 }
-        );
+        if (!allowLearningOnlyFallback || styleNotes.length === 0) {
+          return NextResponse.json(
+            {
+              error:
+                "No imported workbook rows were found for that date/day. Import or map the sheet before saving it as a template.",
+            },
+            { status: 400 }
+          );
+        }
+
+        learningOnly = true;
       }
 
       assignments = historicalRows.reduce<PlainRecord[]>(
@@ -283,14 +361,18 @@ export async function POST(request: Request) {
       );
 
       if (assignments.length === 0) {
-        return NextResponse.json(
-          {
-            error:
-              "Workbook rows exist for this day, but none are fully mapped to current Livingston staff/client records yet.",
-            skippedHistoricalRows,
-          },
-          { status: 400 }
-        );
+        if (!allowLearningOnlyFallback || styleNotes.length === 0) {
+          return NextResponse.json(
+            {
+              error:
+                "Workbook rows exist for this day, but none are fully mapped to current Livingston staff/client records yet.",
+              skippedHistoricalRows,
+            },
+            { status: 400 }
+          );
+        }
+
+        learningOnly = true;
       }
     } else if (sourceType === "SAVED_SCHEDULE") {
       const sourceAssignments = sourceDate
@@ -332,6 +414,8 @@ export async function POST(request: Request) {
           sourceName,
           sourceDate,
           styleNotes,
+          learningOnly,
+          learningProfile,
           assignments,
           active: true,
         },
@@ -363,6 +447,8 @@ export async function POST(request: Request) {
         sourceDate,
         assignmentCount: assignments.length,
         skippedHistoricalRows,
+        learningOnly,
+        learningProfile,
         styleNotes,
       },
     });
@@ -373,6 +459,7 @@ export async function POST(request: Request) {
           template.toObject() as unknown as PlainRecord
         ),
         skippedHistoricalRows,
+        learningOnly,
       },
       { status: 201 }
     );
