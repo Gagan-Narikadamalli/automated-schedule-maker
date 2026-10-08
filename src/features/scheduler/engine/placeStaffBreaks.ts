@@ -1,4 +1,5 @@
 import { canAssignStaffToClient } from "./constraints";
+import { balanceScheduleLikeHuman } from "./humanStyleBlockBalance";
 import { scoreCandidate } from "./scoring";
 import type {
   SchedulerAssignment,
@@ -33,6 +34,9 @@ export type PlaceStaffBreaksResult = {
   assignments: SchedulerAssignment[];
   reservedBreaks: SchedulerAssignment[];
   reliefSwapCount: number;
+  humanStyleBlockSwapCount: number;
+  humanStylePenaltyBefore: number;
+  humanStylePenaltyAfter: number;
   unplacedBreakStaffIds: string[];
 };
 
@@ -543,7 +547,9 @@ function smoothShortClientRuns(
     staff.map((staffMember) => [staffMember.id, staffMember])
   );
 
-  for (let pass = 0; pass < 3; pass += 1) {
+  const maxPasses = Math.max(clients.length * 4, 12);
+
+  for (let pass = 0; pass < maxPasses; pass += 1) {
     let changed = false;
 
     for (const client of clients) {
@@ -723,6 +729,9 @@ export function placeStaffBreaksAfterCoverage({
       assignments: initialAssignments.map((assignment) => ({ ...assignment })),
       reservedBreaks: [],
       reliefSwapCount: 0,
+      humanStyleBlockSwapCount: 0,
+      humanStylePenaltyBefore: 0,
+      humanStylePenaltyAfter: 0,
       unplacedBreakStaffIds: [],
     };
   }
@@ -826,10 +835,27 @@ export function placeStaffBreaksAfterCoverage({
     schedulerRules
   );
 
-  return {
+  // Final human-style pass: with coverage and all owed breaks already secured,
+  // exchange whole overlapping client blocks between staff when doing so
+  // creates a cleaner 2-client/2-staff style day. This is deliberately a soft
+  // optimizer, not a hard rule: it never removes coverage or a break, and every
+  // proposed exchange is revalidated against availability, restrictions,
+  // service setting, daily limits, and the four-hour continuous maximum.
+  const humanBalance = balanceScheduleLikeHuman({
+    staff,
+    clients,
     assignments,
+    callOutStaffIds,
+    rules: schedulerRules,
+  });
+
+  return {
+    assignments: humanBalance.assignments,
     reservedBreaks,
     reliefSwapCount,
+    humanStyleBlockSwapCount: humanBalance.blockSwapCount,
+    humanStylePenaltyBefore: humanBalance.penaltyBefore,
+    humanStylePenaltyAfter: humanBalance.penaltyAfter,
     unplacedBreakStaffIds,
   };
 }
