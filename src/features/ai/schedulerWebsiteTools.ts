@@ -128,6 +128,8 @@ type TemplateInput = {
     | "SATURDAY"
     | "SUNDAY";
   sourceDate?: string;
+  sourceType?: "SAVED_SCHEDULE" | "HISTORICAL_WORKBOOK";
+  sourceName?: string;
   targetDate?: string;
 };
 
@@ -373,6 +375,17 @@ const templateSchema = jsonSchema<TemplateInput>({
     sourceDate: {
       type: "string",
       description: "YYYY-MM-DD source schedule date for CREATE.",
+    },
+    sourceType: {
+      type: "string",
+      enum: ["SAVED_SCHEDULE", "HISTORICAL_WORKBOOK"],
+      description:
+        "Use HISTORICAL_WORKBOOK when CREATE should capture a mapped imported Excel/workbook sheet rather than a saved live schedule.",
+    },
+    sourceName: {
+      type: "string",
+      description:
+        "Optional workbook/source label for a historical template.",
     },
     targetDate: {
       type: "string",
@@ -946,7 +959,7 @@ export function createSchedulerWebsiteTools(context: SchedulerAiContext) {
 
     manage_schedule_template: tool({
       description:
-        "List, create, apply, or archive reusable schedule templates. CREATE can save a populated source schedule date into a named weekday template. APPLY revalidates the template against the target date's staff/client constraints and preserves protected target cells. Resolve template names safely instead of inventing IDs.",
+        "List, create, apply, or archive reusable schedule templates. CREATE can save either a populated live source date or a mapped imported Excel/workbook sheet (sourceType=HISTORICAL_WORKBOOK) into a named weekday template. Historical templates are learning/reference patterns, not blind copies. APPLY revalidates the template against the target date's staff/client constraints and preserves protected target cells. Resolve template names safely instead of inventing IDs.",
       inputSchema: templateSchema,
       execute: async (input) => {
         const listTemplates = async () =>
@@ -997,6 +1010,18 @@ export function createSchedulerWebsiteTools(context: SchedulerAiContext) {
             name,
             dayOfWeek,
             sourceDate,
+            sourceType: input.sourceType ?? "SAVED_SCHEDULE",
+            sourceName: input.sourceName,
+            ...(input.sourceType === "HISTORICAL_WORKBOOK"
+              ? {
+                  styleNotes: [
+                    "Prefer long continuous client/staff blocks instead of half-hour fragmentation.",
+                    "Use Speech, Nap, and staff breaks as natural handoff points.",
+                    "Prefer roughly 2 clients per staff and about 2 stable staff blocks per long-day client when current constraints allow.",
+                    "Coverage and required breaks override template resemblance.",
+                  ],
+                }
+              : {}),
           });
         }
 
