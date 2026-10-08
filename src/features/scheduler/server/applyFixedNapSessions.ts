@@ -10,7 +10,7 @@ import { NapSession } from "@/models/NapSession";
 
 type DatabaseRecord = Record<string, any>;
 
-const DEFAULT_NAP_WINDOW_START = "11:00";
+const DEFAULT_NAP_WINDOW_START = "11:30";
 const DEFAULT_NAP_WINDOW_END = "14:00";
 
 export type FixedNapApplicationResult = {
@@ -67,7 +67,7 @@ export async function applyFixedNapSessions(
    * Nap is therefore resolved second. A saved Nap special event narrows a
    * child's placement window; when no special Nap event exists, every client
    * who is actually present during the clinic nap period receives one default
-   * flexible nap window from 11:00 AM-2:00 PM.
+   * flexible nap window from 11:30 AM-2:00 PM.
    *
    * The actual duration still comes from Clinic Settings (normally 30 minutes).
    */
