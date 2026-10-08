@@ -46,6 +46,29 @@ type OperationResponse = {
   error?: string;
 };
 
+type WorkbookSheetSummary = {
+  sheetName: string;
+  detectedDate: string | null;
+  detectedDayOfWeek: string | null;
+  headerRowNumber: number | null;
+  timeRowCount: number;
+  matchedStaffCount: number;
+  totalStaffHeaders: number;
+  mappedClientAssignmentCount: number;
+  mappedBreakCount: number;
+  assignmentCount: number;
+  unmatchedStaffHeaders: string[];
+  unmatchedClientCodes: string[];
+};
+
+type WorkbookInspectResponse = {
+  fileName?: string;
+  sheets?: WorkbookSheetSummary[];
+  inspection?: WorkbookSheetSummary;
+  template?: TemplateRecord;
+  error?: string;
+};
+
 const DAYS = [
   "MONDAY",
   "TUESDAY",
@@ -62,6 +85,17 @@ function getToday(): string {
   return localDate.toISOString().slice(0, 10);
 }
 
+function getDayOfWeekFromDate(date: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return "MONDAY";
+  const parsed = new Date(`${date}T12:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return "MONDAY";
+  return DAYS[parsed.getUTCDay()];
+}
+
+function displayDay(day: string): string {
+  return day.charAt(0) + day.slice(1).toLowerCase();
+}
+
 export function TemplateManager() {
   const [locations, setLocations] = useState<LocationOption[]>([]);
   const [locationId, setLocationId] = useState("");
@@ -69,11 +103,13 @@ export function TemplateManager() {
   const [name, setName] = useState("");
   const [dayOfWeek, setDayOfWeek] = useState("MONDAY");
   const [templateSourceDate, setTemplateSourceDate] = useState(getToday);
+  const [workbookFile, setWorkbookFile] = useState<File | null>(null);
+  const [workbookSheets, setWorkbookSheets] = useState<WorkbookSheetSummary[]>([]);
+  const [selectedWorkbookSheet, setSelectedWorkbookSheet] = useState("");
   const [workbookName, setWorkbookName] = useState("");
-  const [workbookDayOfWeek, setWorkbookDayOfWeek] =
-    useState("WEDNESDAY");
-  const [workbookSourceDate, setWorkbookSourceDate] =
-    useState("2026-09-30");
+  const [workbookDayOfWeek, setWorkbookDayOfWeek] = useState("WEDNESDAY");
+  const [workbookSourceDate, setWorkbookSourceDate] = useState("");
+  const [inspectingWorkbook, setInspectingWorkbook] = useState(false);
   const [copySourceDate, setCopySourceDate] = useState("");
   const [copyTargetDate, setCopyTargetDate] = useState("");
   const [applyTargetDate, setApplyTargetDate] = useState(getToday);
@@ -94,6 +130,18 @@ export function TemplateManager() {
     if (locationId) {
       void loadTemplates(locationId);
     }
+  }, [locationId]);
+
+  useEffect(() => {
+    setDayOfWeek(getDayOfWeekFromDate(templateSourceDate));
+  }, [templateSourceDate]);
+
+  useEffect(() => {
+    setWorkbookFile(null);
+    setWorkbookSheets([]);
+    setSelectedWorkbookSheet("");
+    setWorkbookName("");
+    setWorkbookSourceDate("");
   }, [locationId]);
 
   async function loadLocations() {
@@ -195,51 +243,117 @@ export function TemplateManager() {
     }
   }
 
-  async function createWorkbookTemplate() {
-    if (!locationId || !workbookName.trim() || !workbookSourceDate) {
+  function applyWorkbookSheetSelection(
+    sheetName: string,
+    sheets = workbookSheets
+  ) {
+    setSelectedWorkbookSheet(sheetName);
+    const selected = sheets.find((sheet) => sheet.sheetName === sheetName);
+    if (!selected) return;
+
+    if (selected.detectedDayOfWeek) {
+      setWorkbookDayOfWeek(selected.detectedDayOfWeek);
+    }
+    setWorkbookSourceDate(selected.detectedDate ?? "");
+
+    const clinic = selectedLocation?.name ?? "Clinic";
+    const day = displayDay(
+      selected.detectedDayOfWeek || workbookDayOfWeek
+    );
+    setWorkbookName(`${clinic} ${day} - ${sheetName}`);
+  }
+
+  async function inspectWorkbook(file: File | null) {
+    if (!file || !locationId) {
+      setWorkbookFile(null);
+      setWorkbookSheets([]);
+      setSelectedWorkbookSheet("");
+      return;
+    }
+
+    try {
+      setInspectingWorkbook(true);
+      setWorkbookFile(file);
+      setWorkbookSheets([]);
+      setSelectedWorkbookSheet("");
+      setMessage("Reading workbook sheets and matching clinic names...");
+
+      const form = new FormData();
+      form.set("mode", "INSPECT");
+      form.set("locationId", locationId);
+      form.set("file", file);
+
+      const response = await fetch("/api/templates/workbook", {
+        method: "POST",
+        body: form,
+      });
+      const data = (await response.json()) as WorkbookInspectResponse;
+
+      if (!response.ok) {
+        throw new Error(data.error || "Workbook could not be inspected.");
+      }
+
+      const sheets = data.sheets ?? [];
+      setWorkbookSheets(sheets);
+
+      const firstUsable =
+        sheets.find((sheet) => sheet.assignmentCount > 0) ?? sheets[0];
+      if (firstUsable) {
+        applyWorkbookSheetSelection(firstUsable.sheetName, sheets);
+        setMessage(
+          `Workbook loaded. Choose a sheet, review its mapping, then save it as an exact weekday template.`
+        );
+      } else {
+        setMessage("Workbook opened, but it does not contain any readable sheets.");
+      }
+    } catch (error) {
+      setWorkbookFile(null);
+      setWorkbookSheets([]);
+      setSelectedWorkbookSheet("");
       setMessage(
-        "Choose a location, template name, weekday, and workbook sheet date."
+        error instanceof Error
+          ? error.message
+          : "Workbook could not be inspected."
+      );
+    } finally {
+      setInspectingWorkbook(false);
+    }
+  }
+
+  async function createWorkbookTemplate() {
+    if (
+      !locationId ||
+      !workbookFile ||
+      !selectedWorkbookSheet ||
+      !workbookName.trim() ||
+      !workbookDayOfWeek
+    ) {
+      setMessage(
+        "Upload a workbook, select a sheet, confirm the weekday, and enter a template name."
       );
       return;
     }
 
     try {
       setWorking(true);
-      setMessage("Creating template from imported workbook history...");
+      setMessage("Creating an exact template from the selected workbook sheet...");
 
-      const response = await fetch("/api/templates", {
+      const form = new FormData();
+      form.set("mode", "CREATE");
+      form.set("locationId", locationId);
+      form.set("file", workbookFile);
+      form.set("sheetName", selectedWorkbookSheet);
+      form.set("templateName", workbookName.trim());
+      form.set("dayOfWeek", workbookDayOfWeek);
+      if (workbookSourceDate) {
+        form.set("sourceDate", workbookSourceDate);
+      }
+
+      const response = await fetch("/api/templates/workbook", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          locationId,
-          name: workbookName.trim(),
-          dayOfWeek: workbookDayOfWeek,
-          sourceDate: workbookSourceDate,
-          sourceType: "HISTORICAL_WORKBOOK",
-          sourceName: "Livingston workbook history",
-          allowLearningOnlyFallback: true,
-          learningProfile: {
-            humanStyleBlockBalancingEnabled: true,
-            preferredClientsPerStaffPerDay: 2,
-            preferredStaffPerClientPerDay: 2,
-            continuityPriority: 200,
-            clientHandoffPenaltyPriority: 200,
-            workloadBalancePriority: 0,
-            staffScheduleCompactnessPriority: 8,
-          },
-          styleNotes: [
-            "Prefer long continuous client/staff blocks instead of half-hour fragmentation.",
-            "Use natural handoff points around Speech, Nap, and staff breaks.",
-            "Prefer roughly 2 clients per staff and 2 stable staff blocks per long-day client when coverage allows.",
-            "Client coverage and required staff breaks remain more important than copying the template exactly.",
-          ],
-        }),
+        body: form,
       });
-      const data = (await response.json()) as TemplatesResponse & {
-        skippedHistoricalRows?: number;
-      };
+      const data = (await response.json()) as WorkbookInspectResponse;
 
       if (!response.ok) {
         throw new Error(
@@ -247,12 +361,17 @@ export function TemplateManager() {
         );
       }
 
-      setWorkbookName("");
       await loadTemplates();
+      const inspection = data.inspection;
+      const skippedStaff = inspection?.unmatchedStaffHeaders.length ?? 0;
+      const skippedClients = inspection?.unmatchedClientCodes.length ?? 0;
+      const warning =
+        skippedStaff || skippedClients
+          ? ` ${skippedStaff} unmatched staff header(s) and ${skippedClients} unmatched client code(s) were skipped; review the mapping shown above.`
+          : "";
+
       setMessage(
-        data.template?.learningOnly
-          ? `Workbook learning template saved for ${workbookDayOfWeek}. The screenshot/style guidance is active now; exact workbook cells can be added later when the sheet is imported.`
-          : `Workbook template saved from ${workbookSourceDate}. ${data.skippedHistoricalRows ?? 0} unmapped workbook row(s) were skipped. Auto Generate and Native AI can use this as same-weekday guidance.`
+        `Exact template saved from "${selectedWorkbookSheet}" with ${inspection?.assignmentCount ?? data.template?.assignmentCount ?? 0} mapped blocks.${warning}`
       );
     } catch (error) {
       setMessage(
@@ -416,8 +535,10 @@ export function TemplateManager() {
       <section className="section-card">
         <h2>Create Template from a Saved Day</h2>
         <p className="helper-text">
-          Capture the current saved schedule as a reusable weekday template. Manual
-          locks are remembered, but the template is revalidated when applied later.
+          Generate or manually edit any schedule in the main workspace first,
+          then capture that exact saved day here. The weekday is detected from
+          the date automatically. Saving the same template name again updates it
+          with the newly edited day.
         </p>
 
         <div className="form-grid">
@@ -431,17 +552,16 @@ export function TemplateManager() {
           </label>
 
           <label className="form-field">
-            <span>Day of week</span>
-            <select
-              value={dayOfWeek}
-              onChange={(event) => setDayOfWeek(event.target.value)}
-            >
-              {DAYS.map((day) => (
-                <option key={day} value={day}>
-                  {day.charAt(0) + day.slice(1).toLowerCase()}
-                </option>
-              ))}
-            </select>
+            <span>Detected weekday</span>
+            <input
+              value={displayDay(dayOfWeek)}
+              readOnly
+              aria-readonly="true"
+            />
+            <small>
+              The weekday is taken from the capture date so a Thursday can no
+              longer accidentally be saved as a Monday template.
+            </small>
           </label>
 
           <label className="form-field">
@@ -454,56 +574,119 @@ export function TemplateManager() {
           </label>
         </div>
 
-        <button
-          type="button"
-          className="button button-primary"
-          disabled={working || loading || !locationId}
-          onClick={() => void createTemplate()}
-        >
-          {working ? "Working..." : "Save Day as Template"}
-        </button>
+        <div className="template-action-row">
+          <button
+            type="button"
+            className="button button-primary"
+            disabled={
+              working ||
+              loading ||
+              !locationId ||
+              !name.trim() ||
+              !templateSourceDate
+            }
+            onClick={() => void createTemplate()}
+          >
+            {working ? "Working..." : "Save Exact Day as Template"}
+          </button>
+          <a className="button button-secondary" href="/">
+            Open Schedule Workspace to Generate / Edit
+          </a>
+        </div>
       </section>
 
       <section className="section-card">
-        <h2>Create Template from Imported Workbook History</h2>
+        <h2>Upload Excel Workbook and Create an Exact Sheet Template</h2>
         <p className="helper-text">
-          Use a historical Excel sheet as a same-weekday reference without
-          blindly copying it. Only rows mapped to current staff/clients are
-          included, and every future application is revalidated against current
-          availability, attendance, Speech, Nap, breaks, call-outs, and locks.
+          Upload the real Excel workbook. The website reads its sheet names,
+          lets you select one sheet, matches the staff names in the columns and
+          client display codes inside the time cells, and saves those exact
+          mapped blocks as the weekday template. Current-day rules still
+          override the template when Auto Generate runs.
         </p>
 
         <div className="form-grid">
           <label className="form-field">
+            <span>Excel workbook</span>
+            <input
+              type="file"
+              accept=".xlsx,.xls,.xlsm"
+              disabled={working || inspectingWorkbook || !locationId}
+              onChange={(event) =>
+                void inspectWorkbook(event.target.files?.[0] ?? null)
+              }
+            />
+            <small>
+              {inspectingWorkbook
+                ? "Reading workbook..."
+                : workbookFile
+                  ? workbookFile.name
+                  : "Choose the Livingston workbook or another clinic workbook."}
+            </small>
+          </label>
+
+          <label className="form-field">
+            <span>Sheet to use</span>
+            <select
+              value={selectedWorkbookSheet}
+              disabled={
+                inspectingWorkbook ||
+                working ||
+                workbookSheets.length === 0
+              }
+              onChange={(event) =>
+                applyWorkbookSheetSelection(event.target.value)
+              }
+            >
+              {workbookSheets.length === 0 ? (
+                <option value="">Upload a workbook first</option>
+              ) : (
+                workbookSheets.map((sheet) => (
+                  <option key={sheet.sheetName} value={sheet.sheetName}>
+                    {sheet.sheetName}
+                  </option>
+                ))
+              )}
+            </select>
+          </label>
+
+          <label className="form-field">
             <span>Template name</span>
             <input
               value={workbookName}
+              disabled={!selectedWorkbookSheet || working}
               onChange={(event) => setWorkbookName(event.target.value)}
-              placeholder="Example: Livingston Wednesday Workbook"
+              placeholder="Example: Livingston Wednesday - Oct 7"
             />
           </label>
 
           <label className="form-field">
-            <span>Workbook weekday</span>
+            <span>Weekday</span>
             <select
               value={workbookDayOfWeek}
+              disabled={!selectedWorkbookSheet || working}
               onChange={(event) =>
                 setWorkbookDayOfWeek(event.target.value)
               }
             >
               {DAYS.map((day) => (
                 <option key={day} value={day}>
-                  {day.charAt(0) + day.slice(1).toLowerCase()}
+                  {displayDay(day)}
                 </option>
               ))}
             </select>
+            <small>
+              Auto-detected from the sheet name/date when possible. You can
+              correct it before saving.
+            </small>
           </label>
 
           <label className="form-field">
-            <span>Original sheet date</span>
+            <span>Original sheet date (optional)</span>
             <input
               type="date"
               value={workbookSourceDate}
+              disabled={!selectedWorkbookSheet || working}
               onChange={(event) =>
                 setWorkbookSourceDate(event.target.value)
               }
@@ -511,19 +694,95 @@ export function TemplateManager() {
           </label>
         </div>
 
+        {selectedWorkbookSheet ? (() => {
+          const sheet = workbookSheets.find(
+            (item) => item.sheetName === selectedWorkbookSheet
+          );
+          if (!sheet) return null;
+
+          return (
+            <div className="template-import-summary">
+              <div>
+                <strong>{sheet.assignmentCount}</strong>
+                <span>mapped blocks</span>
+              </div>
+              <div>
+                <strong>
+                  {sheet.matchedStaffCount}/{sheet.totalStaffHeaders || sheet.matchedStaffCount}
+                </strong>
+                <span>staff columns matched</span>
+              </div>
+              <div>
+                <strong>{sheet.mappedClientAssignmentCount}</strong>
+                <span>client blocks</span>
+              </div>
+              <div>
+                <strong>{sheet.mappedBreakCount}</strong>
+                <span>break / break+nap blocks</span>
+              </div>
+              <div>
+                <strong>{sheet.timeRowCount}</strong>
+                <span>time rows detected</span>
+              </div>
+            </div>
+          );
+        })() : null}
+
+        {selectedWorkbookSheet ? (() => {
+          const sheet = workbookSheets.find(
+            (item) => item.sheetName === selectedWorkbookSheet
+          );
+          if (!sheet) return null;
+          const hasWarnings =
+            sheet.unmatchedStaffHeaders.length > 0 ||
+            sheet.unmatchedClientCodes.length > 0;
+          if (!hasWarnings) {
+            return (
+              <div className="template-import-ok">
+                All detected workbook names/codes on this sheet mapped to the
+                current clinic records.
+              </div>
+            );
+          }
+
+          return (
+            <div className="template-import-warning">
+              {sheet.unmatchedStaffHeaders.length > 0 ? (
+                <p>
+                  <strong>Unmatched staff columns:</strong>{" "}
+                  {sheet.unmatchedStaffHeaders.join(", ")}
+                </p>
+              ) : null}
+              {sheet.unmatchedClientCodes.length > 0 ? (
+                <p>
+                  <strong>Unmatched client cells:</strong>{" "}
+                  {sheet.unmatchedClientCodes.slice(0, 18).join(", ")}
+                  {sheet.unmatchedClientCodes.length > 18 ? " ..." : ""}
+                </p>
+              ) : null}
+              <p>
+                Unmatched values are skipped instead of being attached to the
+                wrong person.
+              </p>
+            </div>
+          );
+        })() : null}
+
         <button
           type="button"
           className="button button-primary"
           disabled={
             working ||
+            inspectingWorkbook ||
             loading ||
             !locationId ||
-            !workbookName.trim() ||
-            !workbookSourceDate
+            !workbookFile ||
+            !selectedWorkbookSheet ||
+            !workbookName.trim()
           }
           onClick={() => void createWorkbookTemplate()}
         >
-          {working ? "Working..." : "Save Workbook Sheet as Template"}
+          {working ? "Working..." : "Create Exact Template from Selected Sheet"}
         </button>
       </section>
 
