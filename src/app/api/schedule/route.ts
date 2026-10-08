@@ -148,7 +148,7 @@ export async function GET(request: Request) {
       .slice(0, 8);
 
     const absentClientIds = new Set(dayData.input.clients.map((client) => client.id));
-    const clientRows = plainClientDocuments.map((client) => ({ id: String(client._id), code: String(client.displayCode ?? ""), name: firstNameOnly(client.fullName ?? client.displayCode) }));
+    const clientRows = plainClientDocuments.map((client) => ({ id: String(client._id), code: String(client.displayCode ?? ""), name: firstNameOnly(client.fullName ?? client.displayCode), color: String(client.color ?? "#D9F4EE") }));
 
     return NextResponse.json({
       clients: clientRows,
@@ -156,6 +156,7 @@ export async function GET(request: Request) {
         id: String(member._id),
         name: firstNameOnly(member.fullName),
         role: String(member.role ?? ""),
+        color: String(member.color ?? "#DCE9F8"),
       })),
       date,
       locationId,
