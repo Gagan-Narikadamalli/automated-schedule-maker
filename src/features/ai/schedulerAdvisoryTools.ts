@@ -18,7 +18,7 @@ type ReplacementInput = {
 };
 
 type SuggestionInput = {
-  focus?: "ALL" | "COVERAGE" | "BREAKS";
+  focus?: "ALL" | "COVERAGE" | "BREAKS" | "CONTINUITY";
   startTime?: string;
   endTime?: string;
 };
@@ -52,8 +52,8 @@ const suggestionSchema = jsonSchema<SuggestionInput>({
   properties: {
     focus: {
       type: "string",
-      enum: ["ALL", "COVERAGE", "BREAKS"],
-      description: "Whether to focus suggestions on coverage, breaks, or both. Defaults to ALL.",
+      enum: ["ALL", "COVERAGE", "BREAKS", "CONTINUITY"],
+      description: "Whether to focus suggestions on coverage, breaks, continuity/block balance, or all. Defaults to ALL.",
     },
     startTime: {
       type: "string",
@@ -327,7 +327,7 @@ export function createSchedulerAdvisoryTools(context: SchedulerAiContext) {
         const uncovered = uncoveredRequirements(dayData, assignments, startTime, endTime);
         const coverageSuggestions: JsonRecord[] = [];
 
-        if (focus !== "BREAKS") {
+        if (focus !== "BREAKS" && focus !== "CONTINUITY") {
           for (const gap of uncovered) {
             const direct = availableUnassignedStaff(
               dayData,
@@ -390,7 +390,7 @@ export function createSchedulerAdvisoryTools(context: SchedulerAiContext) {
         }
 
         const breakSuggestions: JsonRecord[] = [];
-        if (focus !== "COVERAGE") {
+        if (focus !== "COVERAGE" && focus !== "CONTINUITY") {
           const slotMinutes = dayData.extendedRules.slotLengthMinutes;
           const breakStart = dayData.extendedRules.breakWindowStart ?? "11:00";
           const breakEnd = dayData.extendedRules.breakWindowEnd ?? "14:00";
@@ -465,6 +465,186 @@ export function createSchedulerAdvisoryTools(context: SchedulerAiContext) {
           }
         }
 
+        const continuitySuggestions: JsonRecord[] = [];
+        if (focus === "ALL" || focus === "CONTINUITY") {
+          const staffNames = staffNameMap(dayData);
+          const byStaff = new Map<string, JsonRecord[]>();
+          const byClient = new Map<string, JsonRecord[]>();
+
+          for (const assignment of assignments) {
+            if (
+              assignment.assignmentType !== "CLIENT_1_TO_1" ||
+              !assignment.staffId ||
+              !assignment.clientId
+            ) {
+              continue;
+            }
+
+            const staffId = idFrom(assignment.staffId);
+            const clientId = idFrom(assignment.clientId);
+            if (!staffId || !clientId) continue;
+
+            byStaff.set(staffId, [
+              ...(byStaff.get(staffId) ?? []),
+              assignment,
+            ]);
+            byClient.set(clientId, [
+              ...(byClient.get(clientId) ?? []),
+              assignment,
+            ]);
+          }
+
+          for (const client of dayData.clients) {
+            const own = [...(byClient.get(client.id) ?? [])].sort(
+              (left, right) =>
+                String(left.startTime).localeCompare(
+                  String(right.startTime)
+                )
+            );
+            if (own.length < 2) continue;
+
+            let handoffs = 0;
+            for (let index = 1; index < own.length; index += 1) {
+              if (
+                idFrom(own[index].staffId) !==
+                idFrom(own[index - 1].staffId)
+              ) {
+                handoffs += 1;
+              }
+            }
+
+            const distinctStaff = new Set(
+              own.map((assignment) => idFrom(assignment.staffId))
+            ).size;
+            if (handoffs > 1 || distinctStaff > 2) {
+              continuitySuggestions.push({
+                kind: "CLIENT_FRAGMENTATION",
+                clientCode: client.displayCode,
+                handoffs,
+                distinctStaff,
+                recommendation:
+                  "Prefer one continuous staff block, then one clean handoff to a second continuous staff block when coverage and breaks allow it.",
+              });
+            }
+          }
+
+          for (const member of dayData.staff) {
+            const own = byStaff.get(member.id) ?? [];
+            const distinctClients = new Set(
+              own.map((assignment) => idFrom(assignment.clientId))
+            ).size;
+
+            if (own.length >= 8 && distinctClients === 1) {
+              continuitySuggestions.push({
+                kind: "STAFF_SINGLE_CLIENT_DAY",
+                staffName: member.name,
+                clientCode:
+                  clientCodes.get(
+                    idFrom(own[0]?.clientId) ?? ""
+                  ) ?? null,
+                recommendation:
+                  "This staff member has a long one-client day. If another staff member has an overlapping continuous client block, consider exchanging the post-break blocks so both staff end with about two stable clients instead of one person owning the same client all day.",
+              });
+            }
+          }
+
+          const staffList = dayData.staff;
+          for (
+            let leftIndex = 0;
+            leftIndex < staffList.length;
+            leftIndex += 1
+          ) {
+            for (
+              let rightIndex = leftIndex + 1;
+              rightIndex < staffList.length;
+              rightIndex += 1
+            ) {
+              const left = staffList[leftIndex];
+              const right = staffList[rightIndex];
+              const leftDistinct = new Set(
+                (byStaff.get(left.id) ?? []).map((assignment) =>
+                  idFrom(assignment.clientId)
+                )
+              ).size;
+              const rightDistinct = new Set(
+                (byStaff.get(right.id) ?? []).map((assignment) =>
+                  idFrom(assignment.clientId)
+                )
+              ).size;
+
+              if (leftDistinct !== 1 && rightDistinct !== 1) continue;
+
+              const overlap = assignments
+                .filter(
+                  (assignment) =>
+                    assignment.assignmentType === "CLIENT_1_TO_1" &&
+                    idFrom(assignment.staffId) === left.id &&
+                    withinRange(
+                      String(assignment.startTime ?? ""),
+                      startTime,
+                      endTime
+                    )
+                )
+                .map((leftAssignment) => {
+                  const rightAssignment = assignments.find(
+                    (assignment) =>
+                      assignment.assignmentType === "CLIENT_1_TO_1" &&
+                      idFrom(assignment.staffId) === right.id &&
+                      String(assignment.startTime) ===
+                        String(leftAssignment.startTime)
+                  );
+                  if (!rightAssignment) return null;
+                  const leftClientId = idFrom(leftAssignment.clientId);
+                  const rightClientId = idFrom(rightAssignment.clientId);
+                  if (
+                    !leftClientId ||
+                    !rightClientId ||
+                    leftClientId === rightClientId
+                  ) {
+                    return null;
+                  }
+                  return {
+                    startTime: String(leftAssignment.startTime),
+                    leftClientId,
+                    rightClientId,
+                  };
+                })
+                .filter(
+                  (
+                    value
+                  ): value is {
+                    startTime: string;
+                    leftClientId: string;
+                    rightClientId: string;
+                  } => value !== null
+                )
+                .sort((a, b) =>
+                  a.startTime.localeCompare(b.startTime)
+                );
+
+              if (overlap.length < 2) continue;
+
+              continuitySuggestions.push({
+                kind: "BLOCK_EXCHANGE",
+                staffA: staffNames.get(left.id) ?? left.name,
+                staffB: staffNames.get(right.id) ?? right.name,
+                clientA:
+                  clientCodes.get(overlap[0].leftClientId) ??
+                  overlap[0].leftClientId,
+                clientB:
+                  clientCodes.get(overlap[0].rightClientId) ??
+                  overlap[0].rightClientId,
+                startTime: overlap[0].startTime,
+                recommendation:
+                  "These staff have overlapping different-client blocks. A validated continuous block exchange may create a cleaner two-client day for both staff while keeping coverage unchanged.",
+              });
+
+              if (continuitySuggestions.length >= 20) break;
+            }
+            if (continuitySuggestions.length >= 20) break;
+          }
+        }
+
         return {
           date,
           scheduleAvailable: assignments.length > 0,
@@ -474,6 +654,7 @@ export function createSchedulerAdvisoryTools(context: SchedulerAiContext) {
           uncoveredCount: uncovered.length,
           coverageSuggestions,
           breakSuggestions,
+          continuitySuggestions,
         };
       },
     }),
