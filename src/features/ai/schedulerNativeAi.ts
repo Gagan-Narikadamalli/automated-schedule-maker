@@ -200,8 +200,12 @@ function extractBreakStaff(message: string): string | null {
 
 function extractStaffLookup(message: string): string | null {
   return firstEntity(message, [
+    /\bfor\s+(.+?)\s*,?\s*who\s+is\s+(?:the\s+)?client\b/i,
+    /\bfor\s+(.+?)\s*,?\s*(?:what|which)\s+client\b/i,
+    /\bwhich\s+client\s+(?:is\s+)?(.+?)\s+with\b/i,
+    /\bwho\s+does\s+(.+?)\s+have\b/i,
     /\bwho\s+is\s+(.+?)\s+with\b/i,
-    /\bwhat\s+clients?\s+(?:does|is)\s+(.+?)(?:\s+(?:have|with|from|at|today|tomorrow)\b|[?.!,]|$)/i,
+    /\bwhat\s+clients?\s+(?:does|is)\s+(.+?)(?:\s+(?:have|with|from|at|today|tomorrow|on)\b|[?.!,]|$)/i,
     /\bwhen\s+is\s+(.+?)\s+(?:on\s+)?break\b/i,
     /\b(?:show|what(?:'s|\s+is))\s+(.+?)'s\s+schedule\b/i,
     /\bschedule\s+for\s+(.+?)(?=\s+(?:from|between|at|today|tomorrow|on)\b|[?.!,]|$)/i,
