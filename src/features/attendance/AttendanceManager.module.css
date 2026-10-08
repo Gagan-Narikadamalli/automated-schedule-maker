@@ -27,3 +27,10 @@
 @media(min-width:1650px){.grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:980px){.grid{grid-template-columns:1fr}}
 @media(max-width:640px){.cardHeader{padding:14px 12px;gap:8px}.avatar{width:36px;height:36px}.editHint{padding:6px}.footer{bottom:0;padding:12px}.saveGroup,.save{width:100%}}
+
+/* Person's saved clinic color remains distinct from the attendance status. */
+.card{background:linear-gradient(90deg,var(--person-color,#dce9f8) 0 7px,#fff 7px 100%)}
+.avatar,.cardIn .avatar,.cardOut .avatar{background:var(--person-color,#dce9f8);color:#112c48;border:1px solid #132d4a26;text-shadow:0 1px 2px #ffffffae}
+.cardHeader::before{content:"";position:absolute}
+.card{position:relative}
+.personMeta{color:#4f7089}
