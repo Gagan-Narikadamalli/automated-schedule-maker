@@ -419,12 +419,15 @@ function applyTemplateLearningProfiles(
         typeof template.learningProfile === "object"
           ? (template.learningProfile as DatabaseRecord)
           : null,
-      weight: Math.max(
-        Array.isArray(template.assignments)
-          ? Math.min(template.assignments.length, 96)
-          : 1,
-        1
-      ),
+      weight:
+        template.learningOnly === true
+          ? 64
+          : Math.max(
+              Array.isArray(template.assignments)
+                ? Math.min(template.assignments.length, 96)
+                : 1,
+              1
+            ),
     }))
     .filter(
       (
