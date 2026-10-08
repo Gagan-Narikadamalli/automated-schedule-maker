@@ -411,7 +411,16 @@ export function ScheduleWorkspaceV3() {
   }, [placementRecord]);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const requestedDate = params.get("date");
+    if (requestedDate && /^\\d{4}-\\d{2}-\\d{2}$/.test(requestedDate)) {
+      setSelectedDate(requestedDate);
+    }
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
+    const requestedLocationId = new URLSearchParams(window.location.search).get("locationId");
     async function loadLocations() {
       try {
         const response = await fetch("/api/locations", { cache: "no-store" });
@@ -421,7 +430,7 @@ export function ScheduleWorkspaceV3() {
         const nextLocations = data.locations ?? [];
         if (nextLocations.length === 0) throw new Error("No clinic locations are currently stored.");
         setLocations(nextLocations);
-        setLocationId(nextLocations[0].id);
+        setLocationId(nextLocations.find((location) => location.id === requestedLocationId)?.id ?? nextLocations[0].id);
       } catch {
         if (cancelled) return;
         setLocations(DEMO_LOCATIONS);
