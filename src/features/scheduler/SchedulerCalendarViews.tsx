@@ -91,6 +91,7 @@ type ClientCellResult = {
   text: string;
   detail: string;
   kind: "coverage" | "nap" | "speech" | "uncovered";
+  staffColor?: string;
 };
 
 function parseLocalDate(dateText: string): Date {
@@ -313,6 +314,25 @@ function ClientScheduleView({
     [staff]
   );
 
+  const staffColorById = useMemo(
+    () =>
+      new Map(
+        staff.map((member) => [
+          member.id,
+          member.color || "#9BB8CA",
+        ])
+      ),
+    [staff]
+  );
+
+  const clientEventByKey = useMemo(() => {
+    const events = new Map<string, ClientEvent>();
+    for (const event of clientEvents) {
+      events.set(event.clientId + "|" + event.startTime, event);
+    }
+    return events;
+  }, [clientEvents]);
+
   const clients = useMemo<ClientColumn[]>(() => {
     const byId = new Map<string, ClientColumn>();
     for (const assignment of assignments) {
@@ -345,6 +365,9 @@ function ClientScheduleView({
   function cellFor(clientIdValue: string, startTime: string): ClientCellResult | null {
     const matching = assignments.filter(
       (assignment) => clientId(assignment) === clientIdValue && assignment.startTime === startTime
+    );
+    const resolvedEvent = clientEventByKey.get(
+      clientIdValue + "|" + startTime
     );
     const coverage = matching.find((assignment) => assignment.assignmentType === "CLIENT_1_TO_1");
     const coverageName = coverage
@@ -383,11 +406,28 @@ function ClientScheduleView({
       return { text: "Speech", detail, kind: "speech" };
     }
 
+    if (resolvedEvent?.eventType === "NAP") {
+      return {
+        text: "Nap",
+        detail: "Scheduled 30-minute nap",
+        kind: "nap",
+      };
+    }
+
+    if (resolvedEvent?.eventType === "SPEECH") {
+      return {
+        text: "Speech",
+        detail: "Scheduled 30-minute speech",
+        kind: "speech",
+      };
+    }
+
     if (coverage) {
       return {
         text: coverageName || "Covered",
         detail: "1:1 coverage",
         kind: "coverage",
+        staffColor: staffColorById.get(coverage.staffId),
       };
     }
     if (unplaced.some((record) => record.clientId === clientIdValue && record.originalStartTime === startTime)) {
