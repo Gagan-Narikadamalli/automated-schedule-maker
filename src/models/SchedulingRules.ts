@@ -102,6 +102,22 @@ const SchedulingRulesSchema = new Schema(
       type: Boolean,
       default: true,
     },
+    humanStyleBlockBalancingEnabled: {
+      type: Boolean,
+      default: true,
+    },
+    preferredClientsPerStaffPerDay: {
+      type: Number,
+      default: 2,
+      min: 1,
+      max: 6,
+    },
+    preferredStaffPerClientPerDay: {
+      type: Number,
+      default: 2,
+      min: 1,
+      max: 6,
+    },
     preserveManualOverrides: {
       type: Boolean,
       default: true,
