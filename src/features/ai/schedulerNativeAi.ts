@@ -200,8 +200,10 @@ function extractBreakStaff(message: string): string | null {
 
 function extractStaffLookup(message: string): string | null {
   return firstEntity(message, [
-    /\bfor\s+(.+?)\s*,?\s*who\s+is\s+(?:the\s+)?client\b/i,
-    /\bfor\s+(.+?)\s*,?\s*(?:what|which)\s+client\b/i,
+    /\bfor\s+(.+?)(?:\s+on\s+.+?)?\s*,?\s*who\s+is\s+(?:the\s+)?client\b/i,
+    /\bfor\s+(.+?)(?:\s+on\s+.+?)?\s*,?\s*(?:what|which)\s+client\b/i,
+    /\b(?:who\s+is\s+(?:the\s+)?client|(?:what|which)\s+client)\s+for\s+(.+?)(?=\s+(?:on|at|from|today|tomorrow)\b|[?.!,]|$)/i,
+    /\bwho\s+is\s+(.+?)'s\s+client\b/i,
     /\bwhich\s+client\s+(?:is\s+)?(.+?)\s+with\b/i,
     /\bwho\s+does\s+(.+?)\s+have\b/i,
     /\bwho\s+is\s+(.+?)\s+with\b/i,
@@ -223,6 +225,8 @@ function staffLookupWantsClients(message: string): boolean {
 
 function extractClientLookup(message: string): string | null {
   return firstEntity(message, [
+    /\bfor\s+(.+?)(?:\s+on\s+.+?)?\s*,?\s*who\s+is\s+(?:the\s+)?(?:staff|therapist|bt|rbt)\b/i,
+    /\bwho\s+is\s+(?:the\s+)?(?:staff|therapist|bt|rbt)\s+for\s+(.+?)(?=\s+(?:on|at|from|today|tomorrow)\b|[?.!,]|$)/i,
     /\bwho\s+(?:is\s+)?(?:covering|with)\s+(.+?)(?=\s+(?:at|from|between|today|tomorrow|on)\b|[?.!,]|$)/i,
     /\bcoverage\s+(?:for|of)\s+(.+?)(?=\s+(?:at|from|between|today|tomorrow|on)\b|[?.!,]|$)/i,
     /\bclient\s+(?:code\s+)?([A-Z][A-Za-z0-9_-]{1,8})\b/,
