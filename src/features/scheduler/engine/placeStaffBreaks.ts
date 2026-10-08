@@ -459,6 +459,10 @@ function findReliefSwap(
           assignments: assignmentsWithoutCurrent,
           callOutStaffIds,
           rules: schedulerRules,
+          // Client coverage and the owed staff break both outrank soft
+          // same-day pairing-count preferences during the final relief pass.
+          allowSameDayPairRepeat: true,
+          allowCoverageLimitException: true,
         });
 
         if (!check.allowed) {
@@ -572,7 +576,18 @@ export function placeStaffBreaksAfterCoverage({
       continue;
     }
 
-    // Every scheduled staff member is owed one break. The old
+    const hasBreakWindowAvailability = staffMember.availableSlots.some(
+      (slot) =>
+        slot >= rules.breakWindowStart &&
+        slot < rules.breakWindowEnd
+    );
+
+    if (!hasBreakWindowAvailability) {
+      continue;
+    }
+
+    // Every scheduled staff member who is present during the clinic break
+    // window is owed one break. The old
     // shift-length threshold is intentionally not used here; if the person has
     // a legal 11:00 AM-2:00 PM break opportunity, Auto Generate must try to
     // place it.
