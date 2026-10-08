@@ -26,6 +26,9 @@ type RulesRequest = {
   slotLengthMinutes?: number;
   preferSameTeam?: boolean;
   preferStaffContinuity?: boolean;
+  humanStyleBlockBalancingEnabled?: boolean;
+  preferredClientsPerStaffPerDay?: number;
+  preferredStaffPerClientPerDay?: number;
   preserveManualOverrides?: boolean;
   preferredStaffPriority?: number;
   sameTeamPriority?: number;
@@ -86,6 +89,9 @@ function defaultRules(locationId: string) {
     slotLengthMinutes: 30,
     preferSameTeam: true,
     preferStaffContinuity: true,
+    humanStyleBlockBalancingEnabled: true,
+    preferredClientsPerStaffPerDay: 2,
+    preferredStaffPerClientPerDay: 2,
     preserveManualOverrides: true,
     preferredStaffPriority: 100,
     sameTeamPriority: 40,
@@ -363,6 +369,28 @@ export async function PUT(request: Request) {
     if (!rolePrioritiesAreValid) {
       return NextResponse.json(
         { error: "Role coverage priority values must be between 0 and 1000." },
+        { status: 400 }
+      );
+    }
+
+    if (
+      body.preferredClientsPerStaffPerDay !== undefined &&
+      (body.preferredClientsPerStaffPerDay < 1 ||
+        body.preferredClientsPerStaffPerDay > 6)
+    ) {
+      return NextResponse.json(
+        { error: "Preferred clients per staff must be between 1 and 6." },
+        { status: 400 }
+      );
+    }
+
+    if (
+      body.preferredStaffPerClientPerDay !== undefined &&
+      (body.preferredStaffPerClientPerDay < 1 ||
+        body.preferredStaffPerClientPerDay > 6)
+    ) {
+      return NextResponse.json(
+        { error: "Preferred staff per client must be between 1 and 6." },
         { status: 400 }
       );
     }
