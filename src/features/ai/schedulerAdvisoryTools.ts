@@ -6,7 +6,6 @@ import { Client } from "@/models/Client";
 import { ScheduleAssignment } from "@/models/ScheduleAssignment";
 
 import { matchEntityReference } from "./entityReference";
-import { buildNativeHistoricalKnowledge } from "./schedulerNativeKnowledge";
 import type { SchedulerAiContext } from "./types";
 
 type JsonRecord = Record<string, any>;
@@ -319,16 +318,10 @@ export function createSchedulerAdvisoryTools(context: SchedulerAiContext) {
         "Analyze the selected day and propose practical coverage and break improvements using broad scheduling judgment. Suggestions are advisory and may ignore soft clinic optimization preferences, but they do not pretend a change is valid. Actual edits must still go through scheduler tools, which enforce availability, attendance, restrictions, protected cells, and conflicts. Use when the user asks what the AI recommends, how to cover gaps, or how to fit breaks.",
       inputSchema: suggestionSchema,
       execute: async ({ focus = "ALL", startTime, endTime }) => {
-        const [dayData, assignments, historicalKnowledge] =
-          await Promise.all([
-            buildDaySchedulerInput(locationId, date),
-            loadAssignments(locationId, date),
-            buildNativeHistoricalKnowledge({
-              locationId,
-              date,
-              query: `schedule improvements ${focus}`,
-            }),
-          ]);
+        const [dayData, assignments] = await Promise.all([
+          buildDaySchedulerInput(locationId, date),
+          loadAssignments(locationId, date),
+        ]);
         const byCell = assignmentMap(assignments);
         const clientCodes = clientCodeMap(dayData);
         const uncovered = uncoveredRequirements(dayData, assignments, startTime, endTime);
@@ -662,7 +655,6 @@ export function createSchedulerAdvisoryTools(context: SchedulerAiContext) {
           coverageSuggestions,
           breakSuggestions,
           continuitySuggestions,
-          historicalKnowledge,
         };
       },
     }),
