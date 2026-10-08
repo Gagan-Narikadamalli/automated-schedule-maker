@@ -567,6 +567,7 @@ function smoothShortClientRuns(
   staff: SchedulerStaff[],
   clients: SchedulerClient[],
   assignments: SchedulerAssignment[],
+  referenceAssignments: SchedulerAssignment[],
   callOutStaffIds: Set<string>,
   schedulerRules: SchedulerRules
 ): void {
@@ -630,7 +631,15 @@ function smoothShortClientRuns(
           run.some(
             (assignment) =>
               assignment.source !== "AUTO" ||
-              assignment.locked
+              assignment.locked ||
+              referenceAssignments.some(
+                (reference) =>
+                  reference.source === "TEMPLATE" &&
+                  reference.assignmentType === "CLIENT_1_TO_1" &&
+                  reference.staffId === assignment.staffId &&
+                  reference.clientId === assignment.clientId &&
+                  reference.startTime === assignment.startTime
+              )
           )
         ) {
           continue;
@@ -875,6 +884,7 @@ export function placeStaffBreaksAfterCoverage({
     staff,
     clients,
     assignments,
+    referenceAssignments,
     callOutSet,
     schedulerRules
   );
@@ -889,6 +899,7 @@ export function placeStaffBreaksAfterCoverage({
     staff,
     clients,
     assignments,
+    referenceAssignments,
     callOutStaffIds,
     rules: schedulerRules,
   });
