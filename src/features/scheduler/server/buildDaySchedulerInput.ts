@@ -559,8 +559,7 @@ function mapStaff(
 function mapClients(
   clientDocuments: DatabaseRecord[],
   speechSessions: DatabaseRecord[],
-  date: string,
-  rules: ExtendedSchedulerRules
+  date: string
 ): SchedulerClient[] {
   const activeClients = clientDocuments.filter((client) => {
     return isDateInsideActiveRange(
@@ -848,8 +847,7 @@ export async function buildDaySchedulerInput(
   const clients = mapClients(
     clientDocuments,
     speechSessions,
-    date,
-    extendedRules
+    date
   );
   const existingAssignments = mapExistingAssignments(
     assignmentDocuments
