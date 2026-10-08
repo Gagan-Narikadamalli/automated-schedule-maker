@@ -239,20 +239,20 @@ export async function POST(request: Request) {
         );
       }
 
-      assignments = historicalRows
-        .map((assignment) => {
+      assignments = historicalRows.reduce<PlainRecord[]>(
+        (result, assignment) => {
           const assignmentType = String(assignment.assignmentType ?? "");
           const staffId = assignment.staffId ?? null;
           const clientId = assignment.clientId ?? null;
 
           if (!staffId) {
             skippedHistoricalRows += 1;
-            return null;
+            return result;
           }
 
           if (assignmentType === "CLIENT_1_TO_1" && !clientId) {
             skippedHistoricalRows += 1;
-            return null;
+            return result;
           }
 
           if (
@@ -266,19 +266,21 @@ export async function POST(request: Request) {
             ].includes(assignmentType)
           ) {
             skippedHistoricalRows += 1;
-            return null;
+            return result;
           }
 
-          return {
+          result.push({
             startTime: String(assignment.startTime),
             endTime: String(assignment.endTime),
             staffId,
             clientId,
             assignmentType,
             locked: false,
-          };
-        })
-        .filter((assignment): assignment is PlainRecord => assignment !== null);
+          });
+          return result;
+        },
+        []
+      );
 
       if (assignments.length === 0) {
         return NextResponse.json(
