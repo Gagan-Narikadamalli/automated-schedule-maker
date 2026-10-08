@@ -162,7 +162,7 @@ export function OverviewDashboard() {
       "Day",
       "Client Hours Needed",
       "Client Hours Covered",
-      "Staff Hours Scheduled",
+      "Staff Client Hours Scheduled",
       "Additional Labor Hours Needed",
       "Staff Present",
       "Staff Absent",
@@ -258,7 +258,7 @@ export function OverviewDashboard() {
           <strong>{totals.clientHoursCovered.toFixed(1)}</strong>
         </article>
         <article className="metric-card">
-          <span>Staff hours scheduled</span>
+          <span>Staff client hours scheduled</span>
           <strong>{totals.staffHoursScheduled.toFixed(1)}</strong>
         </article>
         <article className="metric-card">
@@ -277,7 +277,7 @@ export function OverviewDashboard() {
             <h2>Daily Breakdown</h2>
             <p>
               Required client coverage is compared with the current saved client
-              assignments and staff availability for each weekday.
+              assignments, actual staff client-assignment hours, and availability for each weekday.
             </p>
           </div>
 
@@ -308,7 +308,7 @@ export function OverviewDashboard() {
                 <th>Day</th>
                 <th>Client needed</th>
                 <th>Client covered</th>
-                <th>Staff scheduled</th>
+                <th>Staff client hours</th>
                 <th>Additional labor</th>
                 <th>Staff present</th>
                 <th>Staff absent</th>
