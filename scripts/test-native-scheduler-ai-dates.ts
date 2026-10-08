@@ -29,6 +29,10 @@ assert.equal(resolve("change it next Friday").date, "2026-10-16");
 assert.equal(resolve("change it last Friday").date, "2026-10-02");
 assert.equal(resolve("generate next week schedule").date, "2026-10-12");
 assert.equal(resolve("generate this week schedule").date, "2026-10-05");
+assert.equal(resolve("On October 6th who is Anias with?").date, "2026-10-06");
+assert.equal(resolve("On October 6 th who is Anias with?").date, "2026-10-06");
+assert.equal(resolve("On octovber 6th who is Anias with?").date, "2026-10-06");
+assert.equal(resolve("On the 6th of October who is Anias with?").date, "2026-10-06");
 
 const futureHistory: SchedulerAiHistoryMessage[] = [
   {
