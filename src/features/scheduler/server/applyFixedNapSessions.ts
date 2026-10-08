@@ -10,6 +10,9 @@ import { NapSession } from "@/models/NapSession";
 
 type DatabaseRecord = Record<string, any>;
 
+const DEFAULT_NAP_WINDOW_START = "11:00";
+const DEFAULT_NAP_WINDOW_END = "14:00";
+
 export type FixedNapApplicationResult = {
   input: SchedulerInput;
   applied: boolean;
@@ -59,81 +62,105 @@ export async function applyFixedNapSessions(
     ]);
   }
 
-  const fixedNapWindows = sessions
-    .filter((session) => {
-      const startTime = String(session.startTime ?? "");
-      const endTime = String(session.endTime ?? "");
-      return Boolean(startTime && endTime && endTime > startTime);
-    })
-    .map((session, index) => ({
-      key: `fixed-nap-${String(session._id ?? index)}`,
-      clientId: String(session.clientId ?? ""),
-      startTime: String(session.startTime),
-      endTime: String(session.endTime),
-      priority:
-        String(session.priorityCategory ?? "OLDER") === "YOUNGER"
-          ? 0
-          : 10,
-    }));
+  /**
+   * Speech is already removed from requiredSlots by buildDaySchedulerInput.
+   * Nap is therefore resolved second. A saved Nap special event narrows a
+   * child's placement window; when no special Nap event exists, every client
+   * who is actually present during the clinic nap period receives one default
+   * flexible nap window from 11:00 AM-2:00 PM.
+   *
+   * The actual duration still comes from Clinic Settings (normally 30 minutes).
+   */
+  const napWindows = input.clients.flatMap((client) => {
+    const clientSessions = sessionsByClient.get(client.id) ?? [];
+    const allowedSlots = [...client.requiredSlots];
 
-  const resolvedFixedNapSlots = resolveFlexibleEventWindows(
-    fixedNapWindows,
-    {
-      enabled: input.rules.napDurationRulesEnabled ?? true,
-      durationMinutes: input.rules.napPreferredMinutes ?? 30,
-      slotLengthMinutes: input.rules.slotLengthMinutes,
+    if (clientSessions.length > 0) {
+      return clientSessions
+        .filter((session) => {
+          const startTime = String(session.startTime ?? "");
+          const endTime = String(session.endTime ?? "");
+          return Boolean(startTime && endTime && endTime > startTime);
+        })
+        .map((session, index) => ({
+          key: `fixed-nap-${String(session._id ?? index)}`,
+          clientId: client.id,
+          startTime: String(session.startTime),
+          endTime: String(session.endTime),
+          allowedSlots,
+          priority:
+            String(session.priorityCategory ?? "OLDER") === "YOUNGER"
+              ? 10
+              : 20,
+        }));
     }
-  );
-  const fixedNapSlotsByClient = new Map<string, Set<string>>();
 
-  for (const window of fixedNapWindows) {
-    if (!window.clientId) continue;
-    const slots = fixedNapSlotsByClient.get(window.clientId) ?? new Set<string>();
+    return [
+      {
+        key: `default-nap-${client.id}`,
+        clientId: client.id,
+        startTime: DEFAULT_NAP_WINDOW_START,
+        endTime: DEFAULT_NAP_WINDOW_END,
+        allowedSlots,
+        priority: 30,
+      },
+    ];
+  });
 
-    for (const slot of resolvedFixedNapSlots.get(window.key) ?? []) {
+  const resolvedNapSlots = resolveFlexibleEventWindows(napWindows, {
+    enabled: input.rules.napDurationRulesEnabled ?? true,
+    durationMinutes: input.rules.napPreferredMinutes ?? 30,
+    slotLengthMinutes: input.rules.slotLengthMinutes,
+  });
+
+  const napSlotsByClient = new Map<string, Set<string>>();
+
+  for (const window of napWindows) {
+    const slots =
+      napSlotsByClient.get(window.clientId) ?? new Set<string>();
+
+    for (const slot of resolvedNapSlots.get(window.key) ?? []) {
       slots.add(slot);
     }
 
-    fixedNapSlotsByClient.set(window.clientId, slots);
+    napSlotsByClient.set(window.clientId, slots);
   }
 
   const clients = input.clients.map((client) => {
     const clientSessions = sessionsByClient.get(client.id) ?? [];
-    const clientAttendanceChanges = attendanceChangesByClient.get(client.id) ?? [];
-    let nextClient = { ...client };
+    const clientAttendanceChanges =
+      attendanceChangesByClient.get(client.id) ?? [];
+    const napSlots = [
+      ...(napSlotsByClient.get(client.id) ?? new Set<string>()),
+    ].sort();
 
-    if (clientSessions.length > 0) {
-      const fixedNapSlots =
-        fixedNapSlotsByClient.get(client.id) ?? new Set<string>();
-      const priorityCategory: NapPriorityCategory =
-        clientSessions.some(
-          (session) =>
-            String(session.priorityCategory ?? "OLDER") === "YOUNGER"
-        )
-          ? "YOUNGER"
-          : "OLDER";
+    const priorityCategory: NapPriorityCategory =
+      clientSessions.some(
+        (session) =>
+          String(session.priorityCategory ?? "OLDER") === "YOUNGER"
+      )
+        ? "YOUNGER"
+        : "OLDER";
 
-      if (fixedNapSlots.size > 0) {
-        const restoredCoverage = new Set([
-          ...nextClient.requiredSlots,
-          ...nextClient.napSlots,
-        ]);
+    const restoredCoverage = new Set([
+      ...client.requiredSlots,
+      ...client.napSlots,
+    ]);
 
-        for (const speechSlot of nextClient.speechSlots) {
-          restoredCoverage.delete(speechSlot);
-        }
-        for (const napSlot of fixedNapSlots) {
-          restoredCoverage.delete(napSlot);
-        }
-
-        nextClient = {
-          ...nextClient,
-          requiredSlots: [...restoredCoverage].sort(),
-          napSlots: [...fixedNapSlots].sort(),
-          napPriorityCategory: priorityCategory,
-        };
-      }
+    for (const speechSlot of client.speechSlots) {
+      restoredCoverage.delete(speechSlot);
     }
+
+    for (const napSlot of napSlots) {
+      restoredCoverage.delete(napSlot);
+    }
+
+    let nextClient = {
+      ...client,
+      requiredSlots: [...restoredCoverage].sort(),
+      napSlots,
+      napPriorityCategory: priorityCategory,
+    };
 
     if (clientAttendanceChanges.length > 0) {
       const requiredSlots = new Set(nextClient.requiredSlots);
@@ -170,8 +197,13 @@ export async function applyFixedNapSessions(
     return nextClient;
   });
 
+  const napClientIds = new Set(
+    clients
+      .filter((client) => client.napSlots.length > 0)
+      .map((client) => client.id)
+  );
   const affectedClientIds = new Set([
-    ...sessionsByClient.keys(),
+    ...napClientIds,
     ...attendanceChangesByClient.keys(),
   ]);
 
@@ -180,7 +212,8 @@ export async function applyFixedNapSessions(
       ...input,
       clients,
     },
-    applied: sessions.length > 0 || attendanceChanges.length > 0,
+    applied:
+      napClientIds.size > 0 || attendanceChanges.length > 0,
     sessionCount: sessions.length,
     clientCount: affectedClientIds.size,
     attendanceChangeCount: attendanceChanges.length,
