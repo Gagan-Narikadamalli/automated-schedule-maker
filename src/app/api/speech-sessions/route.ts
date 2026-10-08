@@ -35,6 +35,28 @@ type DeleteRequest = {
 
 type PlainRecord = Record<string, any>;
 
+function isThirtyMinuteBoundary(value: string): boolean {
+  const match = /^(\d{2}):(\d{2})$/.exec(value);
+  if (!match) return false;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  return (
+    hours >= 0 &&
+    hours <= 23 &&
+    (minutes === 0 || minutes === 30)
+  );
+}
+
+function addThirtyMinutes(value: string): string | null {
+  const match = /^(\d{2}):(\d{2})$/.exec(value);
+  if (!match) return null;
+  const total = Number(match[1]) * 60 + Number(match[2]) + 30;
+  if (total >= 24 * 60) return null;
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(
+    total % 60
+  ).padStart(2, "0")}`;
+}
+
 const DAY_NAMES = [
   "SUNDAY",
   "MONDAY",
@@ -192,9 +214,18 @@ export async function POST(request: Request) {
       return forbiddenResponse("You do not have access to this location.");
     }
 
-    if (endTime <= startTime) {
+    const expectedEndTime = addThirtyMinutes(startTime);
+
+    if (
+      !isThirtyMinuteBoundary(startTime) ||
+      !expectedEndTime ||
+      endTime !== expectedEndTime
+    ) {
       return NextResponse.json(
-        { error: "Speech end time must be later than start time." },
+        {
+          error:
+            "Speech is a fixed 30-minute event and must start on a 30-minute schedule boundary.",
+        },
         { status: 400 }
       );
     }
