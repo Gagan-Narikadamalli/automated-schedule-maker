@@ -652,7 +652,7 @@ export function planNativeSchedulerAction(args: {
   }
 
   if (
-    /\b(?:health|conflicts?|incomplete|missing\s+coverage|coverage\s+gaps?|uncovered\s+coverage|missing\s+breaks?|staff\s+missing\s+(?:a\s+)?break|validate|check\s+(?:the\s+)?schedule)\b/i.test(
+    /\b(?:health|conflicts?|incomplete|missing\s+coverage|coverage\s+gaps?|uncovered\s+coverage|validate|check\s+(?:the\s+)?schedule)\b/i.test(
       raw
     )
   ) {
