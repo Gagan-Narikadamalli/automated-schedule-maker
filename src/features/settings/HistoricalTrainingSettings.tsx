@@ -215,10 +215,11 @@ export function HistoricalTrainingSettings() {
         <div>
           <h2>Historical Pattern Learning</h2>
           <p>
-            Use recent clinic schedules and imported workbook observations as
-            soft guidance. For Livingston, the current trial profile is based on
-            the recent Sep 28 through Oct 2 workbook week and only matches staff
-            and clients that still exist in the database.
+            Use recent clinic schedules, imported workbook observations, and
+            saved weekday learning templates as soft guidance. Livingston now
+            carries workbook-derived weekday learning profiles built from the
+            full scheduling workbook, while recent matching staff/client history
+            supplies the strongest exact pairing signals.
           </p>
         </div>
 
@@ -253,7 +254,8 @@ export function HistoricalTrainingSettings() {
           />
           <span>
             Learn from recent same-weekday schedules, imported historical data,
-            and the Livingston workbook trial profile when available.
+            every active same-weekday template, and Livingston workbook learning
+            profiles when available.
           </span>
         </label>
       </div>
