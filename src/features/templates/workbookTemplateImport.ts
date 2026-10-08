@@ -246,6 +246,51 @@ export function detectDateFromSheetName(
     return dateFromParts(year, Number(numeric[1]), Number(numeric[2]));
   }
 
+  // Historical Livingston sheets commonly use compact month/day names such
+  // as "MON 1005", "WED 930", "WED 99", or "MON 831". Treat those as
+  // MMDD / MDD using the workbook-year fallback so upload can select the
+  // correct original date automatically.
+  const compact = sheetName.match(
+    /\b(?:sun(?:day)?|mon(?:day)?|tue(?:s|sday)?|wed(?:s|nesday)?|thu(?:rs|rsday)?|fri(?:day)?|sat(?:urday)?)\s+(\d{2,4})\b/i
+  );
+  if (compact) {
+    const digits = compact[1];
+
+    const candidates: Array<{ month: number; day: number }> = [];
+
+    if (digits.length === 4) {
+      candidates.push({
+        month: Number(digits.slice(0, 2)),
+        day: Number(digits.slice(2)),
+      });
+    } else if (digits.length === 3) {
+      candidates.push(
+        {
+          month: Number(digits.slice(0, 1)),
+          day: Number(digits.slice(1)),
+        },
+        {
+          month: Number(digits.slice(0, 2)),
+          day: Number(digits.slice(2)),
+        }
+      );
+    } else if (digits.length === 2) {
+      candidates.push({
+        month: Number(digits.slice(0, 1)),
+        day: Number(digits.slice(1)),
+      });
+    }
+
+    for (const candidate of candidates) {
+      const parsed = dateFromParts(
+        fallbackYear,
+        candidate.month,
+        candidate.day
+      );
+      if (parsed) return parsed;
+    }
+  }
+
   const monthNames: Record<string, number> = {
     jan: 1,
     january: 1,
