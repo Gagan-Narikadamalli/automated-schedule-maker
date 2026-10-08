@@ -100,6 +100,101 @@ export function weekdayOnOrBefore(
   return formatDate(anchor);
 }
 
+const MONTH_NAMES = [
+  ["january", "jan"],
+  ["february", "feb"],
+  ["march", "mar"],
+  ["april", "apr"],
+  ["may"],
+  ["june", "jun"],
+  ["july", "jul"],
+  ["august", "aug"],
+  ["september", "sept", "sep"],
+  ["october", "oct"],
+  ["november", "nov"],
+  ["december", "dec"],
+] as const;
+
+function editDistance(left: string, right: string): number {
+  const a = left.toLowerCase();
+  const b = right.toLowerCase();
+  const previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+
+  for (let i = 1; i <= a.length; i += 1) {
+    let diagonal = previous[0];
+    previous[0] = i;
+
+    for (let j = 1; j <= b.length; j += 1) {
+      const above = previous[j];
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      previous[j] = Math.min(
+        previous[j] + 1,
+        previous[j - 1] + 1,
+        diagonal + cost
+      );
+      diagonal = above;
+    }
+  }
+
+  return previous[b.length];
+}
+
+function monthNumberFromToken(token: string): number | null {
+  const normalized = token.toLowerCase().replace(/[^a-z]/g, "");
+  if (!normalized) return null;
+
+  for (let index = 0; index < MONTH_NAMES.length; index += 1) {
+    if ((MONTH_NAMES[index] as readonly string[]).includes(normalized)) {
+      return index + 1;
+    }
+  }
+
+  // Tolerate small month-name typos in natural Scheduler AI questions, such
+  // as "octovber 6th". Only full-ish month tokens are fuzzy matched so normal
+  // words in a sentence are not mistaken for dates.
+  if (normalized.length < 5) return null;
+
+  let bestMonth: number | null = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  for (let index = 0; index < MONTH_NAMES.length; index += 1) {
+    const fullName = MONTH_NAMES[index][0];
+    const distance = editDistance(normalized, fullName);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestMonth = index + 1;
+    }
+  }
+
+  return bestDistance <= 2 ? bestMonth : null;
+}
+
+function buildNamedDate(
+  monthToken: string,
+  dayText: string,
+  yearText: string | undefined,
+  anchorDate: string
+): string | null {
+  const month = monthNumberFromToken(monthToken);
+  const day = Number(dayText);
+  const year = Number(yearText || anchorDate.slice(0, 4));
+
+  if (!month || !Number.isInteger(day) || day < 1 || day > 31) {
+    return null;
+  }
+
+  const candidate = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
+  if (
+    candidate.getUTCFullYear() !== year ||
+    candidate.getUTCMonth() !== month - 1 ||
+    candidate.getUTCDate() !== day
+  ) {
+    return null;
+  }
+
+  return formatDate(candidate);
+}
+
 function parseNamedOrNumericDate(
   message: string,
   anchorDate: string
@@ -124,22 +219,30 @@ function parseNamedOrNumericDate(
     }
   }
 
-  const monthNames =
-    "january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec";
-  const named = message.match(
-    new RegExp(
-      "\\b(" +
-        monthNames +
-        ")\\s+(\\d{1,2})(?:,?\\s+(20\\d{2}))?\\b",
-      "i"
-    )
+  const monthFirst = message.match(
+    /\b([a-z]{3,12})\s+(?:the\s+)?(\d{1,2})(?:\s*(?:st|nd|rd|th))?(?:,?\s+(20\d{2}))?\b/i
   );
-  if (named) {
-    const year = named[3] || anchorDate.slice(0, 4);
-    const parsed = new Date(
-      Date.parse(named[1] + " " + named[2] + ", " + year + " 12:00:00 UTC")
+  if (monthFirst) {
+    const named = buildNamedDate(
+      monthFirst[1],
+      monthFirst[2],
+      monthFirst[3],
+      anchorDate
     );
-    if (!Number.isNaN(parsed.getTime())) return formatDate(parsed);
+    if (named) return named;
+  }
+
+  const dayFirst = message.match(
+    /\b(?:the\s+)?(\d{1,2})(?:\s*(?:st|nd|rd|th))?(?:\s+of)?\s+([a-z]{3,12})(?:,?\s+(20\d{2}))?\b/i
+  );
+  if (dayFirst) {
+    const named = buildNamedDate(
+      dayFirst[2],
+      dayFirst[1],
+      dayFirst[3],
+      anchorDate
+    );
+    if (named) return named;
   }
 
   return null;
