@@ -878,6 +878,106 @@ function testTemplateReferenceGuidesStableMatching() {
   );
 }
 
+function testExactWeekdayTemplatePreservesPlannedHandoff() {
+  const slots = ["08:00", "08:30", "09:00", "09:30"];
+  const staff = [
+    createStaff("bt-a", "Anias", "BT", slots),
+    createStaff("bt-b", "Areyana", "BT", slots),
+  ];
+  const client = createClient("client-maha", "MaHa", slots);
+  const references: SchedulerAssignment[] = [
+    {
+      id: "template-maha-a-0800",
+      staffId: "bt-a",
+      clientId: "client-maha",
+      startTime: "08:00",
+      assignmentType: "CLIENT_1_TO_1",
+      source: "TEMPLATE",
+      locked: false,
+    },
+    {
+      id: "template-maha-a-0830",
+      staffId: "bt-a",
+      clientId: "client-maha",
+      startTime: "08:30",
+      assignmentType: "CLIENT_1_TO_1",
+      source: "TEMPLATE",
+      locked: false,
+    },
+    {
+      id: "template-maha-b-0900",
+      staffId: "bt-b",
+      clientId: "client-maha",
+      startTime: "09:00",
+      assignmentType: "CLIENT_1_TO_1",
+      source: "TEMPLATE",
+      locked: false,
+    },
+    {
+      id: "template-maha-b-0930",
+      staffId: "bt-b",
+      clientId: "client-maha",
+      startTime: "09:30",
+      assignmentType: "CLIENT_1_TO_1",
+      source: "TEMPLATE",
+      locked: false,
+    },
+  ];
+
+  const result = generateSchedule(
+    createInput(staff, [client], [], references)
+  );
+  const assigned = clientAssignments(result.assignments)
+    .filter((assignment) => assignment.clientId === "client-maha")
+    .sort((left, right) =>
+      left.startTime.localeCompare(right.startTime)
+    );
+
+  assert.deepEqual(
+    assigned.map((assignment) => [
+      assignment.startTime,
+      assignment.staffId,
+    ]),
+    [
+      ["08:00", "bt-a"],
+      ["08:30", "bt-a"],
+      ["09:00", "bt-b"],
+      ["09:30", "bt-b"],
+    ],
+    "Auto Generate should reuse exact weekday-template pairings and preserve the template handoff instead of extending an earlier pair through it."
+  );
+}
+
+function testTemplateMatchFallsBackWhenTemplateStaffUnavailable() {
+  const staff = [
+    createStaff("bt-a", "Anias", "BT", []),
+    createStaff("bt-b", "Areyana", "BT", ["08:00"]),
+  ];
+  const client = createClient("client-maha", "MaHa", ["08:00"]);
+  const references: SchedulerAssignment[] = [
+    {
+      id: "template-maha-a-0800",
+      staffId: "bt-a",
+      clientId: "client-maha",
+      startTime: "08:00",
+      assignmentType: "CLIENT_1_TO_1",
+      source: "TEMPLATE",
+      locked: false,
+    },
+  ];
+
+  const result = generateSchedule(
+    createInput(staff, [client], [], references)
+  );
+  const assignment = clientAssignments(result.assignments)[0];
+
+  assert.equal(
+    assignment?.staffId,
+    "bt-b",
+    "If the template staff member is unavailable or called out, Auto Generate must fall back to another eligible staff member rather than leave the client uncovered."
+  );
+}
+
 function testBreakPlanningUsesReliefCapacity() {
   const slots = ["11:00"];
   const staff = [
@@ -1306,6 +1406,8 @@ function runSchedulerRegressionScenarios() {
   testHigherSupportClientRotates();
   testWeeklyMaximumIsHardLimit();
   testTemplateReferenceGuidesStableMatching();
+  testExactWeekdayTemplatePreservesPlannedHandoff();
+  testTemplateMatchFallsBackWhenTemplateStaffUnavailable();
   testBreakPlanningUsesReliefCapacity();
   testRepeatedBreakHistoryGuidesPlacement();
   testGlobalMaximumForcesClientStaffRotation();
