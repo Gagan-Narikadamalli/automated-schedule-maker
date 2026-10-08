@@ -148,15 +148,16 @@ The workbook learning focuses on structure: long continuous client/staff runs, n
 
 ## Templates
 
-Templates support:
+Templates now support two clear creation workflows:
 
-- saving a populated live schedule as a weekday template;
-- creating a workbook/history-based same-weekday template;
-- learning-only workbook profiles that influence generation without direct copying;
-- direct application of normal cell templates with revalidation;
-- archiving templates that should no longer influence scheduling.
+- **Save an edited/generated day exactly.** Generate a date in the Schedule Workspace, make any manual changes, then choose that same date on the Templates page and save it. The weekday is derived from the date automatically, so a Thursday can no longer accidentally be saved as a Monday template. Reusing the same template name updates that weekday template with the newly saved day.
+- **Upload an Excel workbook.** Upload an `.xlsx`, `.xls`, or `.xlsm` file, then choose the workbook sheet from the dropdown. The importer detects the time rows, maps staff column names to current clinic staff, maps client display codes such as `MaHa` / `ZiBo` to current clients, recognizes Break and Break/Nap cells, previews unmatched staff/client values, and saves the selected sheet as an exact reusable weekday template.
 
-A learning-only template cannot be applied cell-for-cell because it represents scheduling behavior, not a literal saved grid.
+Exact workbook/saved-day templates are revalidated when used. Auto Generate tries those same-weekday staff/client/time pairings first when they remain legal on the current day. Current availability, attendance, call-outs, Speech, Nap, breaks, hard restrictions, hour limits, and protected manager cells always override the historical template.
+
+Learning-only workbook profiles still exist for historical style guidance, but they are separate from exact uploaded sheet templates and cannot be applied cell-for-cell.
+
+Templates can also be directly applied to a target date with revalidation, copied between dates, or archived when they should no longer influence scheduling.
 
 ## Manual editing and safety
 
