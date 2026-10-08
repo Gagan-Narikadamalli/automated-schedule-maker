@@ -130,6 +130,16 @@ type TemplateInput = {
   sourceDate?: string;
   sourceType?: "SAVED_SCHEDULE" | "HISTORICAL_WORKBOOK";
   sourceName?: string;
+  allowLearningOnlyFallback?: boolean;
+  learningProfile?: {
+    humanStyleBlockBalancingEnabled?: boolean;
+    preferredClientsPerStaffPerDay?: number;
+    preferredStaffPerClientPerDay?: number;
+    continuityPriority?: number;
+    clientHandoffPenaltyPriority?: number;
+    workloadBalancePriority?: number;
+    staffScheduleCompactnessPriority?: number;
+  };
   targetDate?: string;
 };
 
@@ -386,6 +396,24 @@ const templateSchema = jsonSchema<TemplateInput>({
       type: "string",
       description:
         "Optional workbook/source label for a historical template.",
+    },
+    allowLearningOnlyFallback: {
+      type: "boolean",
+      description:
+        "For historical workbook CREATE, allow a style/learning profile template even if exact imported cells are not available yet.",
+    },
+    learningProfile: {
+      type: "object",
+      properties: {
+        humanStyleBlockBalancingEnabled: { type: "boolean" },
+        preferredClientsPerStaffPerDay: { type: "number" },
+        preferredStaffPerClientPerDay: { type: "number" },
+        continuityPriority: { type: "number" },
+        clientHandoffPenaltyPriority: { type: "number" },
+        workloadBalancePriority: { type: "number" },
+        staffScheduleCompactnessPriority: { type: "number" },
+      },
+      additionalProperties: false,
     },
     targetDate: {
       type: "string",
@@ -1012,6 +1040,22 @@ export function createSchedulerWebsiteTools(context: SchedulerAiContext) {
             sourceDate,
             sourceType: input.sourceType ?? "SAVED_SCHEDULE",
             sourceName: input.sourceName,
+            allowLearningOnlyFallback:
+              input.allowLearningOnlyFallback ??
+              input.sourceType === "HISTORICAL_WORKBOOK",
+            learningProfile:
+              input.learningProfile ??
+              (input.sourceType === "HISTORICAL_WORKBOOK"
+                ? {
+                    humanStyleBlockBalancingEnabled: true,
+                    preferredClientsPerStaffPerDay: 2,
+                    preferredStaffPerClientPerDay: 2,
+                    continuityPriority: 200,
+                    clientHandoffPenaltyPriority: 200,
+                    workloadBalancePriority: 0,
+                    staffScheduleCompactnessPriority: 8,
+                  }
+                : undefined),
             ...(input.sourceType === "HISTORICAL_WORKBOOK"
               ? {
                   styleNotes: [
