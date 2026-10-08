@@ -147,7 +147,11 @@ export async function GET(request: Request) {
       .sort((left, right) => right.localeCompare(left))
       .slice(0, 8);
 
+    const absentClientIds = new Set(dayData.input.clients.map((client) => client.id));
+    const clientRows = plainClientDocuments.map((client) => ({ id: String(client._id), code: String(client.displayCode ?? ""), name: firstNameOnly(client.fullName ?? client.displayCode) }));
+
     return NextResponse.json({
+      clients: clientRows,
       date,
       locationId,
       recentSavedScheduleDates,
@@ -164,9 +168,7 @@ export async function GET(request: Request) {
           teamId: staffMember.teamId ? String(staffMember.teamId) : null,
           availableSlots: availableSlotMap.get(String(staffMember._id)) ?? [],
         })),
-      assignments: plainAssignments.map((assignment) =>
-        serializeAssignment(assignment)
-      ),
+      assignments: plainAssignments.filter((assignment) => !assignment.clientId || assignment.assignmentType !== "CLIENT_1_TO_1" || absentClientIds.has(String(typeof assignment.clientId === "object" ? assignment.clientId._id : assignment.clientId))).map((assignment) => serializeAssignment(assignment)),
       clientEvents: effectiveClients.flatMap((client) => {
         const presentation = clientPresentation.get(client.id);
         return [
