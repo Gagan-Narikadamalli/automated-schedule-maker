@@ -651,18 +651,8 @@ export function planNativeSchedulerAction(args: {
     };
   }
 
-  if (/\b(?:unplaced|unassigned|still\s+needs?\s+schedul(?:e|ed|ing)|needs?\s+to\s+be\s+scheduled)\b/i.test(raw)) {
-    return {
-      intent: "UNPLACED",
-      toolName: "get_unplaced_assignments",
-      input: {},
-      confidence: 0.98,
-      explanation: "Inspect unresolved Unplaced work.",
-    };
-  }
-
   if (
-    /\b(?:health|conflicts?|incomplete|missing\s+coverage|coverage\s+gaps?|validate|check\s+(?:the\s+)?schedule)\b/i.test(
+    /\b(?:health|conflicts?|incomplete|missing\s+coverage|coverage\s+gaps?|uncovered\s+coverage|missing\s+breaks?|staff\s+missing\s+(?:a\s+)?break|validate|check\s+(?:the\s+)?schedule)\b/i.test(
       raw
     )
   ) {
@@ -670,8 +660,19 @@ export function planNativeSchedulerAction(args: {
       intent: "HEALTH",
       toolName: "check_schedule",
       input: {},
-      confidence: 0.96,
-      explanation: "Run the schedule health check.",
+      confidence: 0.98,
+      explanation:
+        "Run the complete schedule health check for coverage, Unplaced work, protected cells, and required staff breaks.",
+    };
+  }
+
+  if (/\b(?:unplaced|unassigned|still\s+needs?\s+schedul(?:e|ed|ing)|needs?\s+to\s+be\s+scheduled)\b/i.test(raw)) {
+    return {
+      intent: "UNPLACED",
+      toolName: "get_unplaced_assignments",
+      input: {},
+      confidence: 0.98,
+      explanation: "Inspect unresolved Unplaced work.",
     };
   }
 
