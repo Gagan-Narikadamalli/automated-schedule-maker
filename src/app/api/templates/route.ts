@@ -9,6 +9,7 @@ import {
 } from "@/lib/api/auth";
 import { writeAuditLog } from "@/lib/api/audit";
 import { connectToDatabase } from "@/lib/db";
+import { HistoricalScheduleAssignment } from "@/models/HistoricalScheduleAssignment";
 import { ScheduleAssignment } from "@/models/ScheduleAssignment";
 import { ScheduleTemplate } from "@/models/ScheduleTemplate";
 
@@ -17,6 +18,9 @@ type TemplateRequest = {
   name?: string;
   dayOfWeek?: string;
   sourceDate?: string;
+  sourceType?: "SAVED_SCHEDULE" | "HISTORICAL_WORKBOOK" | "MANUAL";
+  sourceName?: string;
+  styleNotes?: string[];
 };
 
 type DeleteTemplateRequest = {
@@ -52,6 +56,12 @@ function serializeTemplate(template: PlainRecord) {
     locationId: String(template.locationId),
     name: String(template.name ?? ""),
     dayOfWeek: String(template.dayOfWeek ?? "MONDAY"),
+    sourceType: String(template.sourceType ?? "MANUAL"),
+    sourceName: String(template.sourceName ?? ""),
+    sourceDate: String(template.sourceDate ?? ""),
+    styleNotes: Array.isArray(template.styleNotes)
+      ? template.styleNotes.map((item: unknown) => String(item))
+      : [],
     assignmentCount: Array.isArray(template.assignments)
       ? template.assignments.length
       : 0,
@@ -144,6 +154,25 @@ export async function POST(request: Request) {
     const name = body.name?.trim();
     const dayOfWeek = body.dayOfWeek?.trim().toUpperCase();
     const sourceDate = body.sourceDate?.trim() || "";
+    const sourceType =
+      body.sourceType === "HISTORICAL_WORKBOOK"
+        ? "HISTORICAL_WORKBOOK"
+        : body.sourceType === "SAVED_SCHEDULE"
+          ? "SAVED_SCHEDULE"
+          : "MANUAL";
+    const sourceName =
+      body.sourceName?.trim() ||
+      (sourceType === "HISTORICAL_WORKBOOK"
+        ? "Imported workbook history"
+        : sourceType === "SAVED_SCHEDULE"
+          ? "Saved clinic schedule"
+          : "");
+    const styleNotes = Array.isArray(body.styleNotes)
+      ? body.styleNotes
+          .map((item) => String(item).trim())
+          .filter(Boolean)
+          .slice(0, 20)
+      : [];
 
     if (!locationId || !name || !dayOfWeek || !DAYS.has(dayOfWeek)) {
       return NextResponse.json(
@@ -178,32 +207,117 @@ export async function POST(request: Request) {
 
     await connectToDatabase();
 
-    const sourceAssignments = sourceDate
-      ? await ScheduleAssignment.find({ locationId, date: sourceDate }).lean()
-      : [];
+    let assignments: PlainRecord[] = [];
+    let skippedHistoricalRows = 0;
 
-    if (sourceDate && sourceAssignments.length === 0) {
-      return NextResponse.json(
-        {
-          error:
-            "The selected source date has no saved schedule assignments. Choose a populated schedule or create an empty template without a source date.",
-        },
-        { status: 400 }
+    if (sourceType === "HISTORICAL_WORKBOOK") {
+      if (!sourceDate) {
+        return NextResponse.json(
+          {
+            error:
+              "A historical workbook template requires the original sheet date.",
+          },
+          { status: 400 }
+        );
+      }
+
+      const historicalRows = (await HistoricalScheduleAssignment.find({
+        locationId,
+        scheduleDate: sourceDate,
+        dayOfWeek,
+      })
+        .sort({ startTime: 1, rawStaffName: 1 })
+        .lean()) as unknown as PlainRecord[];
+
+      if (historicalRows.length === 0) {
+        return NextResponse.json(
+          {
+            error:
+              "No imported workbook rows were found for that date/day. Import or map the sheet before saving it as a template.",
+          },
+          { status: 400 }
+        );
+      }
+
+      assignments = historicalRows
+        .map((assignment) => {
+          const assignmentType = String(assignment.assignmentType ?? "");
+          const staffId = assignment.staffId ?? null;
+          const clientId = assignment.clientId ?? null;
+
+          if (!staffId) {
+            skippedHistoricalRows += 1;
+            return null;
+          }
+
+          if (assignmentType === "CLIENT_1_TO_1" && !clientId) {
+            skippedHistoricalRows += 1;
+            return null;
+          }
+
+          if (
+            ![
+              "CLIENT_1_TO_1",
+              "BREAK",
+              "BREAK_NAP",
+              "BREAK_SPEECH",
+              "NAP",
+              "SPEECH",
+            ].includes(assignmentType)
+          ) {
+            skippedHistoricalRows += 1;
+            return null;
+          }
+
+          return {
+            startTime: String(assignment.startTime),
+            endTime: String(assignment.endTime),
+            staffId,
+            clientId,
+            assignmentType,
+            locked: false,
+          };
+        })
+        .filter((assignment): assignment is PlainRecord => assignment !== null);
+
+      if (assignments.length === 0) {
+        return NextResponse.json(
+          {
+            error:
+              "Workbook rows exist for this day, but none are fully mapped to current Livingston staff/client records yet.",
+            skippedHistoricalRows,
+          },
+          { status: 400 }
+        );
+      }
+    } else if (sourceType === "SAVED_SCHEDULE") {
+      const sourceAssignments = sourceDate
+        ? await ScheduleAssignment.find({ locationId, date: sourceDate }).lean()
+        : [];
+
+      if (sourceDate && sourceAssignments.length === 0) {
+        return NextResponse.json(
+          {
+            error:
+              "The selected source date has no saved schedule assignments. Choose a populated schedule or create an empty manual template.",
+          },
+          { status: 400 }
+        );
+      }
+
+      assignments = (sourceAssignments as unknown as PlainRecord[]).map(
+        (assignment) => ({
+          startTime: String(assignment.startTime),
+          endTime: String(assignment.endTime),
+          staffId: assignment.staffId,
+          clientId: assignment.clientId ?? null,
+          assignmentType: String(assignment.assignmentType),
+          locked:
+            Boolean(assignment.locked) ||
+            Boolean(assignment.manuallyOverridden),
+        })
       );
     }
-
-    const assignments = (sourceAssignments as unknown as PlainRecord[]).map(
-      (assignment) => ({
-        startTime: String(assignment.startTime),
-        endTime: String(assignment.endTime),
-        staffId: assignment.staffId,
-        clientId: assignment.clientId ?? null,
-        assignmentType: String(assignment.assignmentType),
-        locked:
-          Boolean(assignment.locked) ||
-          Boolean(assignment.manuallyOverridden),
-      })
-    );
 
     const template = await ScheduleTemplate.findOneAndUpdate(
       { locationId, dayOfWeek, name },
@@ -212,6 +326,10 @@ export async function POST(request: Request) {
           locationId,
           name,
           dayOfWeek,
+          sourceType,
+          sourceName,
+          sourceDate,
+          styleNotes,
           assignments,
           active: true,
         },
@@ -229,14 +347,21 @@ export async function POST(request: Request) {
       action: "SAVE_TEMPLATE",
       entityType: "SCHEDULE_TEMPLATE",
       entityId: String(template._id),
-      summary: sourceDate
-        ? `Saved template ${name} from ${sourceDate}.`
-        : `Created empty template ${name}.`,
+      summary:
+        sourceType === "HISTORICAL_WORKBOOK"
+          ? `Saved workbook template ${name} from ${sourceDate}.`
+          : sourceDate
+            ? `Saved template ${name} from ${sourceDate}.`
+            : `Created manual template ${name}.`,
       after: {
         name,
         dayOfWeek,
+        sourceType,
+        sourceName,
         sourceDate,
         assignmentCount: assignments.length,
+        skippedHistoricalRows,
+        styleNotes,
       },
     });
 
@@ -245,6 +370,7 @@ export async function POST(request: Request) {
         template: serializeTemplate(
           template.toObject() as unknown as PlainRecord
         ),
+        skippedHistoricalRows,
       },
       { status: 201 }
     );
