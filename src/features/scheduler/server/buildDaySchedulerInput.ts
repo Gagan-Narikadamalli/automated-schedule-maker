@@ -404,7 +404,7 @@ function mapRules(document: DatabaseRecord | null): ExtendedSchedulerRules {
   };
 }
 
-function applyTemplateLearningProfiles(
+export function applyTemplateLearningProfiles(
   rules: ExtendedSchedulerRules,
   templates: DatabaseRecord[]
 ): ExtendedSchedulerRules {
