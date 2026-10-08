@@ -157,20 +157,20 @@ function findFixedEventForStaffSlot(
       continue;
     }
 
-    if (client.napSlots.includes(startTime)) {
-      candidates.push({
-        client,
-        assignmentType: "BREAK_NAP",
-        priority: client.napPriorityCategory === "YOUNGER" ? 0 : 10,
-      });
-      continue;
-    }
-
     if (client.speechSlots.includes(startTime)) {
       candidates.push({
         client,
         assignmentType: "BREAK_SPEECH",
-        priority: 20,
+        priority: 0,
+      });
+      continue;
+    }
+
+    if (client.napSlots.includes(startTime)) {
+      candidates.push({
+        client,
+        assignmentType: "BREAK_NAP",
+        priority: client.napPriorityCategory === "YOUNGER" ? 10 : 20,
       });
     }
   }
@@ -572,12 +572,10 @@ export function placeStaffBreaksAfterCoverage({
       continue;
     }
 
-    const availableHours =
-      (staffMember.availableSlots.length * rules.slotLengthMinutes) / 60;
-
-    if (availableHours < rules.breakEligibilityHours) {
-      continue;
-    }
+    // Every scheduled staff member is owed one break. The old
+    // shift-length threshold is intentionally not used here; if the person has
+    // a legal 11:00 AM-2:00 PM break opportunity, Auto Generate must try to
+    // place it.
 
     if (staffAlreadyHasBreak(staffMember.id, assignments)) {
       continue;
