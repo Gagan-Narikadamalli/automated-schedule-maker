@@ -37,6 +37,24 @@
   font-style: italic;
 }
 
+.staffHeadingContent {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.staffHeadingDot {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 10px;
+  border-radius: 999px;
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.9),
+    0 1px 4px rgba(17, 61, 91, 0.18);
+}
+
 .scratchCell {
   background-color: #fbfcfd;
   background-image:
