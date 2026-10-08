@@ -28,6 +28,7 @@ type TemplateRecord = {
     preferredClientsPerStaffPerDay?: number;
     preferredStaffPerClientPerDay?: number;
   } | null;
+  updatedAt?: string;
   active: boolean;
 };
 
@@ -128,6 +129,30 @@ export function TemplateManager() {
     () => locations.find((location) => location.id === locationId),
     [locations, locationId]
   );
+
+  const primaryExactTemplateIdByDay = useMemo(() => {
+    const result = new Map<string, string>();
+
+    for (const template of templates) {
+      if (template.learningOnly || template.assignmentCount <= 0) continue;
+
+      const existingId = result.get(template.dayOfWeek);
+      if (!existingId) {
+        result.set(template.dayOfWeek, template.id);
+        continue;
+      }
+
+      const existing = templates.find((item) => item.id === existingId);
+      if (
+        String(template.updatedAt ?? "") >
+        String(existing?.updatedAt ?? "")
+      ) {
+        result.set(template.dayOfWeek, template.id);
+      }
+    }
+
+    return result;
+  }, [templates]);
 
   useEffect(() => {
     void loadLocations();
@@ -879,7 +904,18 @@ export function TemplateManager() {
               ) : (
                 templates.map((template) => (
                   <tr key={template.id}>
-                    <td>{template.name}</td>
+                    <td>
+                      <div className="template-name-cell">
+                        <span>{template.name}</span>
+                        {primaryExactTemplateIdByDay.get(
+                          template.dayOfWeek
+                        ) === template.id ? (
+                          <span className="template-primary-badge">
+                            Auto Generate primary
+                          </span>
+                        ) : null}
+                      </div>
+                    </td>
                     <td>{template.dayOfWeek}</td>
                     <td>{template.assignmentCount}</td>
                     <td>
