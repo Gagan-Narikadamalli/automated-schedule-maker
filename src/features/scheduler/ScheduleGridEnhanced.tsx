@@ -1540,8 +1540,24 @@ export function ScheduleGridEnhanced({
                   key={column.id}
                   className={`schedule-staff-heading ${column.temporary ? styles.scratchHeader : ""} ${columnIndex === staff.length ? styles.scratchDivider : ""}`}
                   title={column.temporary ? "Temporary scratch space. Scratch cells are not saved to MongoDB." : undefined}
+                  style={
+                    column.temporary
+                      ? undefined
+                      : {
+                          boxShadow: `inset 0 4px 0 ${column.color || "#9BB8CA"}`,
+                        }
+                  }
                 >
-                  {column.name}
+                  <span className={styles.staffHeadingContent}>
+                    {!column.temporary ? (
+                      <i
+                        className={styles.staffHeadingDot}
+                        style={{ backgroundColor: column.color || "#9BB8CA" }}
+                        aria-hidden="true"
+                      />
+                    ) : null}
+                    {column.name}
+                  </span>
                 </th>
               ))}
             </tr>
