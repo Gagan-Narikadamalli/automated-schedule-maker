@@ -148,16 +148,22 @@ The workbook learning focuses on structure: long continuous client/staff runs, n
 
 ## Templates
 
-Templates now support two clear creation workflows:
+Templates support two primary creation workflows:
 
-- **Save an edited/generated day exactly.** Generate a date in the Schedule Workspace, make any manual changes, then choose that same date on the Templates page and save it. The weekday is derived from the date automatically, so a Thursday can no longer accidentally be saved as a Monday template. Reusing the same template name updates that weekday template with the newly saved day.
-- **Upload an Excel workbook.** Upload an `.xlsx`, `.xls`, or `.xlsm` file, then choose the workbook sheet from the dropdown. The importer detects the time rows, maps staff column names to current clinic staff, maps client display codes such as `MaHa` / `ZiBo` to current clients, recognizes Break and Break/Nap cells, previews unmatched staff/client values, and saves the selected sheet as an exact reusable weekday template.
+- **Capture a saved day.** Choose a populated saved schedule date and a template name. The weekday is derived from the date automatically. After capture, the isolated Template Editor opens so the copied schedule can be changed without modifying the live scheduling calendar.
+- **Upload an Excel workbook.** Upload an `.xlsx`, `.xls`, or `.xlsm` file, then select a sheet from the workbook. The importer detects the date/weekday when possible, finds the time rows, maps staff column names to current clinic staff, maps client display codes such as `MaHa` / `ZiBo` to current clients, recognizes Break and Break/Nap cells, previews unmatched values, and saves the selected sheet as an exact reusable template. The isolated editor opens immediately after the import.
 
-Exact workbook/saved-day templates are revalidated when used. Auto Generate tries those same-weekday staff/client/time pairings first when they remain legal on the current day. Current availability, attendance, call-outs, Speech, Nap, breaks, hard restrictions, hour limits, and protected manager cells always override the historical template.
+Every exact template now has a **View / Edit** action. The editor has its own grid and **Save Template Changes** button; it writes only to the template record and cannot change the live day schedule. A production smoke test verifies that editing a template leaves the source live schedule byte-for-byte unchanged.
 
-Learning-only workbook profiles still exist for historical style guidance, but they are separate from exact uploaded sheet templates and cannot be applied cell-for-cell.
+Auto Generate does **not** require the Apply button. For each date, it automatically selects the newest exact active template for that weekday as its primary reusable schedule reference. The Templates table marks that record with **Auto Generate primary**. Exact staff/client/time pairings are attempted first after hard eligibility checks. A fallback client whose original staff is absent is not allowed to steal another staff member away from a still-valid exact template pairing while an unreserved eligible fallback is available.
 
-Templates can also be directly applied to a target date with revalidation, copied between dates, or archived when they should no longer influence scheduling.
+Current-day rules remain authoritative: staff availability and call-outs, client attendance/call-outs, Speech, Nap, required breaks, restrictions, service setting, hour limits, protected manager cells, and coverage safety can all override an old template.
+
+The **Apply** action is an optional manual copy workflow. Clicking Apply opens an in-app date dialog for that template; there is no global apply-date field. Direct application revalidates staff availability, client attendance, Speech/Nap-resolved coverage slots, protected cells, and duplicate client coverage before writing anything.
+
+Learning-only workbook profiles still exist for historical style guidance, but they contain no exact cells and therefore cannot be directly edited/applied like exact templates.
+
+The scheduler regression suite includes five weekday exact-template simulations plus one-staff, two-staff, one-client, and two-client call-out simulations. Feasible exact pairings are required to remain matched while uncovered/fallback work is reassigned around them.
 
 ## Manual editing and safety
 
