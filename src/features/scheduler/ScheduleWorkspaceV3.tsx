@@ -413,7 +413,7 @@ export function ScheduleWorkspaceV3() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const requestedDate = params.get("date");
-    if (requestedDate && /^\\d{4}-\\d{2}-\\d{2}$/.test(requestedDate)) {
+    if (requestedDate && /^\d{4}-\d{2}-\d{2}$/.test(requestedDate)) {
       setSelectedDate(requestedDate);
     }
   }, []);
