@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import * as XLSX from "xlsx";
 
 import {
+  detectDateFromSheetName,
   inspectWorkbookTemplate,
   parseWorkbookTemplateSheet,
 } from "../src/features/templates/workbookTemplateImport";
@@ -52,6 +53,23 @@ const inspection = inspections[0];
 assert.equal(inspection.sheetName, "Wed Oct 7 2026");
 assert.equal(inspection.detectedDate, "2026-10-07");
 assert.equal(inspection.detectedDayOfWeek, "WEDNESDAY");
+
+assert.equal(
+  detectDateFromSheetName("MON 1005", 2026),
+  "2026-10-05"
+);
+assert.equal(
+  detectDateFromSheetName("WED 930", 2026),
+  "2026-09-30"
+);
+assert.equal(
+  detectDateFromSheetName("WED 99", 2026),
+  "2026-09-09"
+);
+assert.equal(
+  detectDateFromSheetName("MON 831", 2026),
+  "2026-08-31"
+);
 assert.equal(inspection.matchedStaffCount, 4);
 assert.equal(inspection.unmatchedStaffHeaders.length, 0);
 assert.equal(inspection.unmatchedClientCodes.length, 0);
