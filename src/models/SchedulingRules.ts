@@ -70,7 +70,7 @@ const SchedulingRulesSchema = new Schema(
     },
     breakEligibilityHours: {
       type: Number,
-      default: 6,
+      default: 0,
       min: 0,
       max: 24,
     },
@@ -80,7 +80,7 @@ const SchedulingRulesSchema = new Schema(
     },
     breakWindowEnd: {
       type: String,
-      default: "13:30",
+      default: "14:00",
     },
     scheduleStartTime: {
       type: String,
@@ -252,7 +252,7 @@ const SchedulingRulesSchema = new Schema(
     },
     napMaximumMinutes: {
       type: Number,
-      default: 60,
+      default: 30,
       min: 30,
       max: 240,
     },
@@ -274,7 +274,7 @@ const SchedulingRulesSchema = new Schema(
     },
     speechMaximumMinutes: {
       type: Number,
-      default: 60,
+      default: 30,
       min: 30,
       max: 240,
     },
