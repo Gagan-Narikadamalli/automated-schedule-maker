@@ -14,8 +14,8 @@ import type {
 } from "../src/features/scheduler/engine/types";
 
 const DEFAULT_RULES: SchedulerRules = {
-  maximumClientsPerTechPerDay: 6,
-  maximumTechsPerClientPerDay: 4,
+  maximumClientsPerTechPerDay: 3,
+  maximumTechsPerClientPerDay: 3,
   minimumClientStaffAssignmentMinutes: 30,
   maximumClientStaffConsecutiveHours: 4,
   preventSameStaffClientRepeatSameDay: true,
@@ -25,10 +25,10 @@ const DEFAULT_RULES: SchedulerRules = {
   slotLengthMinutes: 30,
   preferredStaffPriority: 100,
   sameTeamPriority: 40,
-  continuityPriority: 35,
+  continuityPriority: 200,
   rotationPriority: 60,
-  workloadBalancePriority: 10,
-  clientHandoffPenaltyPriority: 25,
+  workloadBalancePriority: 0,
+  clientHandoffPenaltyPriority: 200,
   staffScheduleCompactnessPriority: 8,
   minimalFixAllowProtectedRelocation: true,
   minimalFixAllowBreakRelocation: true,
@@ -447,6 +447,53 @@ function testNewArrivalDoesNotStealOngoingClientStaff() {
     result.metrics.uncoveredClientSlots,
     0,
     "Continuity must never reduce client coverage."
+  );
+}
+
+function testPairingCanResumeAcrossClientNap() {
+  const staff = [
+    createStaff(
+      "bt-a",
+      "BT A",
+      "BT",
+      ["12:00", "12:30", "13:00", "13:30", "14:00"]
+    ),
+    createStaff(
+      "bt-b",
+      "BT B",
+      "BT",
+      ["12:00", "12:30", "13:00", "13:30", "14:00"]
+    ),
+  ];
+  const client = createClient(
+    "client-nap-continuity",
+    "NaCo",
+    ["12:00", "13:00", "13:30", "14:00"],
+    {
+      napSlots: ["12:30"],
+    }
+  );
+  const input = createInput(staff, [client]);
+
+  const result = generateSchedule(input);
+  const assigned = clientAssignments(result.assignments)
+    .filter(
+      (assignment) =>
+        assignment.clientId === "client-nap-continuity"
+    )
+    .sort((left, right) =>
+      left.startTime.localeCompare(right.startTime)
+    );
+
+  assert.deepEqual(
+    assigned.map((assignment) => assignment.staffId),
+    ["bt-a", "bt-a", "bt-a", "bt-a"],
+    "A planned Nap gap should not force the client to change technicians when the same staff member remains eligible afterward."
+  );
+  assert.equal(
+    result.metrics.uncoveredClientSlots,
+    0,
+    "Preserving continuity across Nap must keep full client coverage."
   );
 }
 
@@ -1057,6 +1104,7 @@ function runSchedulerRegressionScenarios() {
   testManualAssignmentsStayProtected();
   testManualAssignmentsCanBeRebuiltWhenPreservationIsOff();
   testNewArrivalDoesNotStealOngoingClientStaff();
+  testPairingCanResumeAcrossClientNap();
   testHandoffPenaltyPrefersNeighboringClientContinuity();
   testCompactnessPrefersAdjacentStaffWork();
   testAiEntityMatchingIgnoresCaseSpacingAndSmallTypos();
