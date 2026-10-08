@@ -59,6 +59,20 @@ function formatEventType(value: EventType): string {
   return value === "NAP" ? "Nap" : "Speech";
 }
 
+function addThirtyMinutes(value: string): string {
+  const [hoursText, minutesText] = value.split(":");
+  const total =
+    Number(hoursText) * 60 + Number(minutesText) + 30;
+
+  if (!Number.isFinite(total) || total >= 24 * 60) {
+    return "";
+  }
+
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(
+    total % 60
+  ).padStart(2, "0")}`;
+}
+
 export function FixedEventsManager() {
   const [locations, setLocations] = useState<LocationOption[]>([]);
   const [locationId, setLocationId] = useState("");
@@ -239,11 +253,25 @@ export function FixedEventsManager() {
       setMessage("Select at least one client for the shared nap window.");
       return;
     }
-    if (endTime <= startTime) {
+    const effectiveEndTime =
+      eventType === "SPEECH"
+        ? addThirtyMinutes(startTime)
+        : endTime;
+
+    if (!effectiveEndTime || effectiveEndTime <= startTime) {
       setMessage("Event end time must be later than start time.");
       return;
     }
-    if (eventType === "NAP" && (startTime < "11:30" || endTime > "14:00")) {
+
+    if (
+      eventType === "SPEECH" &&
+      !["00", "30"].includes(startTime.slice(-2))
+    ) {
+      setMessage("Speech must start on a 30-minute schedule boundary.");
+      return;
+    }
+
+    if (eventType === "NAP" && (startTime < "11:30" || effectiveEndTime > "14:00")) {
       setMessage("Nap time must stay inside the 11:30 AM to 2:00 PM window.");
       return;
     }
@@ -265,7 +293,7 @@ export function FixedEventsManager() {
               ...eventClients,
               date,
               startTime,
-              endTime,
+              endTime: effectiveEndTime,
               note,
               ...(eventType === "NAP" ? { priorityCategory } : {}),
             }
@@ -276,7 +304,7 @@ export function FixedEventsManager() {
               seriesEndDate,
               daysOfWeek: selectedDays,
               startTime,
-              endTime,
+              endTime: effectiveEndTime,
               note,
               ...(eventType === "NAP" ? { priorityCategory } : {}),
             };
@@ -479,7 +507,11 @@ export function FixedEventsManager() {
       >
         <div className={cardStyles.formSection}>
           <h3>Event type</h3>
-          <p>Only Speech and Nap are currently available. The card color follows the selected event.</p>
+          <p>
+            Speech is one client for one fixed 30-minute appointment. Nap is a
+            flexible 11:30 AM-2:00 PM placement window that can be shared by
+            multiple kids.
+          </p>
           <div className="day-selector">
             <label className="checkbox-card" style={{ backgroundColor: EVENT_COLORS.SPEECH }}>
               <input type="radio" name="eventType" checked={eventType === "SPEECH"} onChange={() => changeEventType("SPEECH")} />
@@ -560,8 +592,48 @@ export function FixedEventsManager() {
               </div>
             )}
             <label className="form-field"><span>Schedule type</span><select value={mode} onChange={(event) => setMode(event.target.value as ScheduleMode)}><option value="ONE_TIME">One-time date</option><option value="WEEKLY">Recurring weekly</option></select></label>
-            <label className="form-field"><span>{eventType === "NAP" ? "Window starts" : "Starts"}</span><input type="time" min={eventType === "NAP" ? "11:30" : undefined} max={eventType === "NAP" ? "13:30" : undefined} step="1800" value={startTime} onChange={(event) => setStartTime(event.target.value)} /></label>
-            <label className="form-field"><span>{eventType === "NAP" ? "Window ends" : "Ends"}</span><input type="time" min={eventType === "NAP" ? "12:00" : undefined} max={eventType === "NAP" ? "14:00" : undefined} step="1800" value={endTime} onChange={(event) => setEndTime(event.target.value)} /></label>
+            <label className="form-field">
+              <span>{eventType === "NAP" ? "Window starts" : "Speech starts"}</span>
+              <input
+                type="time"
+                min={eventType === "NAP" ? "11:30" : undefined}
+                max={eventType === "NAP" ? "13:30" : undefined}
+                step="1800"
+                value={startTime}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setStartTime(value);
+                  if (eventType === "SPEECH") {
+                    setEndTime(addThirtyMinutes(value));
+                  }
+                }}
+              />
+            </label>
+            <label className="form-field">
+              <span>{eventType === "NAP" ? "Window ends" : "Speech ends"}</span>
+              <input
+                type="time"
+                min={eventType === "NAP" ? "12:00" : undefined}
+                max={eventType === "NAP" ? "14:00" : undefined}
+                step="1800"
+                value={
+                  eventType === "SPEECH"
+                    ? addThirtyMinutes(startTime)
+                    : endTime
+                }
+                readOnly={eventType === "SPEECH"}
+                onChange={(event) => setEndTime(event.target.value)}
+              />
+              {eventType === "SPEECH" ? (
+                <small>Speech is always exactly 30 minutes for one client.</small>
+              ) : (
+                <small>
+                  Nap is a flexible placement window between 11:30 AM and
+                  2:00 PM. Auto Generate chooses each selected kid&apos;s
+                  actual nap block inside this range.
+                </small>
+              )}
+            </label>
             {eventType === "NAP" && (
               <label className="form-field"><span>Nap category</span><select value={priorityCategory} onChange={(event) => setPriorityCategory(event.target.value as NapPriorityCategory)}><option value="YOUNGER">Younger child — schedule first</option><option value="OLDER">Older child — schedule second</option></select></label>
             )}
