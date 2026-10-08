@@ -75,44 +75,87 @@ export async function GET(request: Request) {
     const dailyMetrics = dates.map((date, index) => {
       const dayData = dayInputs[index];
       const assignments = assignmentsByDate[index] as unknown as PlainRecord[];
+      const slotHours = dayData.extendedRules.slotLengthMinutes / 60;
       const requiredClientSlots = dayData.clients.reduce(
         (total, client) => total + client.requiredSlots.length,
         0
       );
-      const coveredClientSlots = assignments.filter(
-        (assignment) => assignment.assignmentType === "CLIENT_1_TO_1"
-      ).length;
-      const staffAvailableSlots = dayData.staff.reduce(
-        (total, staffMember) => total + staffMember.availableSlots.length,
+      const coveredClientKeys = new Set(
+        assignments
+          .filter(
+            (assignment) =>
+              assignment.assignmentType === "CLIENT_1_TO_1" &&
+              assignment.clientId &&
+              assignment.startTime
+          )
+          .map(
+            (assignment) =>
+              `${String(assignment.clientId)}:${String(assignment.startTime)}`
+          )
+      );
+      const scheduledStaffKeys = new Set(
+        assignments
+          .filter(
+            (assignment) =>
+              assignment.assignmentType === "CLIENT_1_TO_1" &&
+              assignment.staffId &&
+              assignment.startTime
+          )
+          .map(
+            (assignment) =>
+              `${String(assignment.staffId)}:${String(assignment.startTime)}`
+          )
+      );
+      const coveredClientSlots = Math.min(
+        coveredClientKeys.size,
+        requiredClientSlots
+      );
+      const uncoveredSlots = Math.max(
+        requiredClientSlots - coveredClientSlots,
         0
       );
-      const uncoveredSlots = Math.max(requiredClientSlots - coveredClientSlots, 0);
 
       return {
         date,
         day: formatDayName(date),
-        clientHoursNeeded: requiredClientSlots * 0.5,
-        clientHoursCovered: Math.min(coveredClientSlots, requiredClientSlots) * 0.5,
-        staffHoursScheduled: staffAvailableSlots * 0.5,
-        additionalLaborHours: uncoveredSlots * 0.5,
+        clientHoursNeeded: requiredClientSlots * slotHours,
+        clientHoursCovered: coveredClientSlots * slotHours,
+        staffHoursScheduled: scheduledStaffKeys.size * slotHours,
+        additionalLaborHours: uncoveredSlots * slotHours,
         staffPresent: dayData.staff.filter(
           (staffMember) => staffMember.availableSlots.length > 0
         ).length,
         staffAbsent: dayData.input.callOutStaffIds.length,
-        uncoveredHours: uncoveredSlots * 0.5,
+        uncoveredHours: uncoveredSlots * slotHours,
       };
     });
 
     const scheduledHoursByStaff = new Map<string, number>();
 
-    dayInputs.forEach((dayData) => {
-      dayData.staff.forEach((staffMember) => {
+    assignmentsByDate.forEach((records, index) => {
+      const slotHours =
+        dayInputs[index].extendedRules.slotLengthMinutes / 60;
+      const seenStaffSlots = new Set<string>();
+
+      for (const rawAssignment of records as unknown as PlainRecord[]) {
+        if (
+          rawAssignment.assignmentType !== "CLIENT_1_TO_1" ||
+          !rawAssignment.staffId ||
+          !rawAssignment.startTime
+        ) {
+          continue;
+        }
+
+        const staffId = String(rawAssignment.staffId);
+        const key = `${staffId}:${String(rawAssignment.startTime)}`;
+        if (seenStaffSlots.has(key)) continue;
+        seenStaffSlots.add(key);
+
         scheduledHoursByStaff.set(
-          staffMember.id,
-          (scheduledHoursByStaff.get(staffMember.id) ?? 0) +
-            staffMember.availableSlots.length * 0.5
+          staffId,
+          (scheduledHoursByStaff.get(staffId) ?? 0) + slotHours
         );
-      });
+      }
     });
 
     const staffHourStatus = (staffDocuments as unknown as PlainRecord[]).map(
