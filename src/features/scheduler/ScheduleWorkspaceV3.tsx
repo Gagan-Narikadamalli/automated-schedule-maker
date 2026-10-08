@@ -1103,7 +1103,7 @@ export function ScheduleWorkspaceV3() {
               const row = attendance.find((item) => item.personType === type && item.personId === person.id);
               const update = (patch: { mode?: "IN" | "OUT"; startTime?: string; endTime?: string }) => setAttendance((current) => {
                 const other = current.filter((item) => !(item.personType === type && item.personId === person.id));
-                const updated = { personId: person.id, personType: type, mode: "OUT" as const, startTime: "08:00", endTime: "17:00", ...row, ...patch };
+                const updated: (typeof attendance)[number] = { personId: person.id, personType: type as "staff" | "client", mode: "OUT", startTime: "08:00", endTime: "17:00", ...row, ...patch };
                 return [...other, updated];
               });
               const allDay = row?.startTime === "08:00" && row.endTime === "17:00";
