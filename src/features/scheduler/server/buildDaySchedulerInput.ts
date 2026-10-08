@@ -404,6 +404,77 @@ function mapRules(document: DatabaseRecord | null): ExtendedSchedulerRules {
   };
 }
 
+function applyTemplateLearningProfile(
+  rules: ExtendedSchedulerRules,
+  template: DatabaseRecord | null
+): ExtendedSchedulerRules {
+  if (
+    !rules.autoUseWeekdayTemplate ||
+    !template ||
+    !template.learningProfile ||
+    typeof template.learningProfile !== "object"
+  ) {
+    return rules;
+  }
+
+  const profile = template.learningProfile as DatabaseRecord;
+  const clampNumber = (
+    value: unknown,
+    fallback: number,
+    minimum: number,
+    maximum: number
+  ) => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric)
+      ? Math.min(Math.max(numeric, minimum), maximum)
+      : fallback;
+  };
+
+  return {
+    ...rules,
+    humanStyleBlockBalancingEnabled:
+      profile.humanStyleBlockBalancingEnabled !== undefined
+        ? Boolean(profile.humanStyleBlockBalancingEnabled)
+        : rules.humanStyleBlockBalancingEnabled,
+    preferredClientsPerStaffPerDay: clampNumber(
+      profile.preferredClientsPerStaffPerDay,
+      rules.preferredClientsPerStaffPerDay ?? 2,
+      1,
+      6
+    ),
+    preferredStaffPerClientPerDay: clampNumber(
+      profile.preferredStaffPerClientPerDay,
+      rules.preferredStaffPerClientPerDay ?? 2,
+      1,
+      6
+    ),
+    continuityPriority: clampNumber(
+      profile.continuityPriority,
+      rules.continuityPriority,
+      0,
+      500
+    ),
+    clientHandoffPenaltyPriority: clampNumber(
+      profile.clientHandoffPenaltyPriority,
+      rules.clientHandoffPenaltyPriority,
+      0,
+      500
+    ),
+    workloadBalancePriority: clampNumber(
+      profile.workloadBalancePriority,
+      rules.workloadBalancePriority,
+      0,
+      500
+    ),
+    staffScheduleCompactnessPriority: clampNumber(
+      profile.staffScheduleCompactnessPriority,
+      rules.staffScheduleCompactnessPriority,
+      0,
+      500
+    ),
+  };
+}
+
 function normalizeServiceSetting(value: unknown): ServiceSetting {
   if (value === "IN_HOME" || value === "BOTH") {
     return value;
@@ -838,7 +909,10 @@ export async function buildDaySchedulerInput(
     rawPreviousWeekdayAssignments as unknown as DatabaseRecord[];
   const earlierWeekAssignments =
     rawEarlierWeekAssignments as unknown as DatabaseRecord[];
-  const extendedRules = mapRules(rulesDocument);
+  const extendedRules = applyTemplateLearningProfile(
+    mapRules(rulesDocument),
+    templateDocument
+  );
 
   const partialCallOuts = (
     rawCallOuts as unknown as DatabaseRecord[]
@@ -949,6 +1023,12 @@ export async function buildDaySchedulerInput(
         extendedRules.preferSameTeam,
       preferStaffContinuity:
         extendedRules.preferStaffContinuity,
+      humanStyleBlockBalancingEnabled:
+        extendedRules.humanStyleBlockBalancingEnabled,
+      preferredClientsPerStaffPerDay:
+        extendedRules.preferredClientsPerStaffPerDay,
+      preferredStaffPerClientPerDay:
+        extendedRules.preferredStaffPerClientPerDay,
       slotLengthMinutes:
         extendedRules.slotLengthMinutes,
       preferredStaffPriority:
