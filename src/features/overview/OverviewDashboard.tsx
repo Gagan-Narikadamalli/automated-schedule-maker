@@ -68,6 +68,8 @@ export function OverviewDashboard() {
   const [locations, setLocations] = useState<LocationOption[]>([]);
   const [locationId, setLocationId] = useState("");
   const [weekStart, setWeekStart] = useState(getCurrentMonday);
+  const [viewMode, setViewMode] = useState<"weekly" | "daily">("weekly");
+  const [selectedDate, setSelectedDate] = useState(getCurrentMonday);
   const [data, setData] = useState<OverviewResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("Loading weekly schedule metrics...");
@@ -139,6 +141,9 @@ export function OverviewDashboard() {
       }
 
       setData(body);
+      if (body.dailyMetrics?.length && !body.dailyMetrics.some((metric) => metric.date === selectedDate)) {
+        setSelectedDate(body.dailyMetrics[0].date);
+      }
       setMessage("Weekly overview calculated from the current saved schedule.");
     } catch (error) {
       setData(null);
@@ -203,6 +208,22 @@ export function OverviewDashboard() {
     coveragePercent: 0,
   };
 
+  const selectedDay = data?.dailyMetrics?.find((metric) => metric.date === selectedDate)
+    ?? data?.dailyMetrics?.[0];
+  const dailyCoveragePercent = selectedDay
+    ? (selectedDay.clientHoursNeeded === 0 ? 100 : selectedDay.clientHoursCovered / selectedDay.clientHoursNeeded * 100)
+    : 0;
+  const overviewValues = viewMode === "daily" && selectedDay
+    ? {
+        clientHoursNeeded: selectedDay.clientHoursNeeded,
+        clientHoursCovered: selectedDay.clientHoursCovered,
+        staffHoursScheduled: selectedDay.staffHoursScheduled,
+        additionalLaborHours: selectedDay.additionalLaborHours,
+        uncoveredHours: selectedDay.uncoveredHours,
+        coveragePercent: dailyCoveragePercent,
+      }
+    : totals;
+
   const staffNeedingHours =
     data?.staffHourStatus?.filter((staffMember) => staffMember.hoursShortOfTarget > 0) ?? [];
   const staffOverMaximum =
@@ -213,13 +234,21 @@ export function OverviewDashboard() {
       <section className="section-card">
         <div className="panel-heading-row">
           <div>
-            <h2>Week Selection</h2>
+            <h2>{viewMode === "daily" ? "Daily Overview" : "Weekly Overview"}</h2>
             <p>
-              Choose the clinic and Monday for the week you want to review.
+              Switch between the full workweek and a single day without leaving this page.
             </p>
           </div>
 
           <div className="toolbar-group">
+            <div role="tablist" aria-label="Overview period" style={{ display: "flex", gap: 8, alignItems: "end" }}>
+              <button type="button" role="tab" aria-selected={viewMode === "weekly"}
+                className={viewMode === "weekly" ? "button button-primary" : "button button-secondary"}
+                onClick={() => setViewMode("weekly")}>Weekly Overview</button>
+              <button type="button" role="tab" aria-selected={viewMode === "daily"}
+                className={viewMode === "daily" ? "button button-primary" : "button button-secondary"}
+                onClick={() => setViewMode("daily")}>Daily Overview</button>
+            </div>
             <label className="form-field compact-field">
               <span>Location</span>
               <select
@@ -244,6 +273,17 @@ export function OverviewDashboard() {
                 onChange={(event) => setWeekStart(event.target.value)}
               />
             </label>
+            {viewMode === "daily" && (
+              <label className="form-field compact-field">
+                <span>Day to review</span>
+                <select value={selectedDay?.date ?? selectedDate} disabled={loading || !data?.dailyMetrics?.length}
+                  onChange={(event) => setSelectedDate(event.target.value)}>
+                  {(viewMode === "daily" ? (selectedDay ? [selectedDay] : []) : (data?.dailyMetrics ?? [])).map((metric) => (
+                    <option key={metric.date} value={metric.date}>{metric.day} — {metric.date}</option>
+                  ))}
+                </select>
+              </label>
+            )}
           </div>
         </div>
       </section>
@@ -251,30 +291,43 @@ export function OverviewDashboard() {
       <section className="metric-grid">
         <article className="metric-card">
           <span>Client hours needed</span>
-          <strong>{totals.clientHoursNeeded.toFixed(1)}</strong>
+          <strong>{overviewValues.clientHoursNeeded.toFixed(1)}</strong>
         </article>
         <article className="metric-card">
           <span>Client hours covered</span>
-          <strong>{totals.clientHoursCovered.toFixed(1)}</strong>
+          <strong>{overviewValues.clientHoursCovered.toFixed(1)}</strong>
         </article>
         <article className="metric-card">
           <span>Staff client hours scheduled</span>
-          <strong>{totals.staffHoursScheduled.toFixed(1)}</strong>
+          <strong>{overviewValues.staffHoursScheduled.toFixed(1)}</strong>
         </article>
         <article className="metric-card">
           <span>Additional labor needed</span>
-          <strong>{totals.additionalLaborHours.toFixed(1)}</strong>
+          <strong>{overviewValues.additionalLaborHours.toFixed(1)}</strong>
         </article>
         <article className="metric-card">
           <span>Scheduling coverage</span>
-          <strong>{totals.coveragePercent.toFixed(1)}%</strong>
+          <strong>{overviewValues.coveragePercent.toFixed(1)}%</strong>
         </article>
       </section>
+
+      {viewMode === "daily" && selectedDay && (
+        <section className="section-card">
+          <h2>{selectedDay.day}, {selectedDay.date} — Attendance and Coverage</h2>
+          <div className="metric-grid">
+            <article className="metric-card"><span>Staff available</span><strong>{selectedDay.staffPresent}</strong></article>
+            <article className="metric-card"><span>Staff absent</span><strong>{selectedDay.staffAbsent}</strong></article>
+            <article className="metric-card"><span>Uncovered hours</span><strong>{selectedDay.uncoveredHours.toFixed(1)} h</strong></article>
+            <article className="metric-card"><span>Coverage</span><strong>{dailyCoveragePercent.toFixed(1)}%</strong></article>
+          </div>
+          <p>Coverage is calculated from the saved schedule for this selected day. Open the Daily Schedule page to adjust assignments.</p>
+        </section>
+      )}
 
       <section className="section-card">
         <div className="panel-heading-row">
           <div>
-            <h2>Daily Breakdown</h2>
+            <h2>{viewMode === "weekly" ? "Daily Breakdown" : "Selected Day Breakdown"}</h2>
             <p>
               Required client coverage is compared with the current saved client
               assignments, actual staff client-assignment hours, and availability for each weekday.
@@ -339,7 +392,7 @@ export function OverviewDashboard() {
         </div>
       </section>
 
-      <section className="section-card">
+      {viewMode === "weekly" && <section className="section-card">
         <h2>Staff Hour Balance</h2>
         <div className="metric-grid">
           <article className="metric-card">
@@ -352,7 +405,7 @@ export function OverviewDashboard() {
           </article>
           <article className="metric-card">
             <span>Uncovered client hours</span>
-            <strong>{totals.uncoveredHours.toFixed(1)}</strong>
+            <strong>{overviewValues.uncoveredHours.toFixed(1)}</strong>
           </article>
         </div>
 
@@ -386,7 +439,8 @@ export function OverviewDashboard() {
         </div>
 
         <div className="inline-message">{message}</div>
-      </section>
+      </section>}
+      {viewMode === "daily" && <div className="inline-message">{message}</div>}
     </div>
   );
 }
