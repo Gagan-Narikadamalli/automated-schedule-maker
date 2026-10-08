@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySchedulerInput";
+import { applyFixedNapSessions } from "@/features/scheduler/server/applyFixedNapSessions";
 import {
   forbiddenResponse,
   requireApiSession,
@@ -58,23 +59,31 @@ export async function POST(request: Request) {
 
     await connectToDatabase();
 
-    const [templateResult, dayData, protectedTargetResult] = await Promise.all([
-      ScheduleTemplate.findOne({
-        _id: templateId,
-        locationId,
-        active: true,
-      }).lean(),
-      buildDaySchedulerInput(locationId, targetDate),
-      ScheduleAssignment.find({
-        locationId,
-        date: targetDate,
-        $or: [
-          { source: "MANUAL" },
-          { manuallyOverridden: true },
-          { locked: true },
-        ],
-      }).lean(),
-    ]);
+    const [templateResult, baseDayData, protectedTargetResult] =
+      await Promise.all([
+        ScheduleTemplate.findOne({
+          _id: templateId,
+          locationId,
+          active: true,
+        }).lean(),
+        buildDaySchedulerInput(locationId, targetDate),
+        ScheduleAssignment.find({
+          locationId,
+          date: targetDate,
+          $or: [
+            { source: "MANUAL" },
+            { manuallyOverridden: true },
+            { locked: true },
+          ],
+        }).lean(),
+      ]);
+
+    const napApplication = await applyFixedNapSessions(
+      locationId,
+      targetDate,
+      baseDayData.input
+    );
+    const effectiveInput = napApplication.input;
 
     if (!templateResult) {
       return NextResponse.json(
@@ -98,16 +107,32 @@ export async function POST(request: Request) {
     const protectedTarget = protectedTargetResult as unknown as PlainRecord[];
     const protectedCells = new Set(
       protectedTarget.map(
-        (assignment) => `${String(assignment.staffId)}-${String(assignment.startTime)}`
+        (assignment) =>
+          `${String(assignment.staffId)}-${String(assignment.startTime)}`
       )
     );
+    const protectedClientSlots = new Set(
+      protectedTarget
+        .filter(
+          (assignment) =>
+            assignment.assignmentType === "CLIENT_1_TO_1" &&
+            assignment.clientId
+        )
+        .map(
+          (assignment) =>
+            `${String(assignment.clientId)}-${String(assignment.startTime)}`
+        )
+    );
     const staffAvailability = new Map(
-      dayData.staff.map((staffMember) => [
+      effectiveInput.staff.map((staffMember) => [
         staffMember.id,
         new Set(staffMember.availableSlots),
       ])
     );
-    const activeClientIds = new Set(dayData.clients.map((client) => client.id));
+    const clientsById = new Map(
+      effectiveInput.clients.map((client) => [client.id, client])
+    );
+    const occupiedClientSlots = new Set(protectedClientSlots);
     const warnings: string[] = [];
     const validAssignments: PlainRecord[] = [];
 
@@ -137,11 +162,32 @@ export async function POST(request: Request) {
         continue;
       }
 
-      if (clientId && !activeClientIds.has(clientId)) {
+      if (clientId && !clientsById.has(clientId)) {
         warnings.push(
           `Skipped ${startTime} for client ${clientId}; that client is not active for the target date.`
         );
         continue;
+      }
+
+      if (assignmentType === "CLIENT_1_TO_1" && clientId) {
+        const targetClient = clientsById.get(clientId);
+
+        if (!targetClient?.requiredSlots.includes(startTime)) {
+          warnings.push(
+            `Skipped ${startTime} for client ${clientId}; the client is not scheduled for 1:1 coverage at that time after attendance, Speech, and Nap rules were applied.`
+          );
+          continue;
+        }
+
+        const clientSlotKey = `${clientId}-${startTime}`;
+        if (occupiedClientSlots.has(clientSlotKey)) {
+          warnings.push(
+            `Skipped ${startTime} for client ${clientId}; the client already has protected or template 1:1 coverage at that time.`
+          );
+          continue;
+        }
+
+        occupiedClientSlots.add(clientSlotKey);
       }
 
       validAssignments.push({
