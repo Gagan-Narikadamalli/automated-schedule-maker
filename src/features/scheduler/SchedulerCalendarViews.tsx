@@ -46,6 +46,8 @@ type ScheduleAssignment = {
 
 type ClientEvent = {
   clientId: string;
+  clientCode?: string;
+  clientColor?: string;
   startTime: string;
   eventType: "NAP" | "SPEECH";
 };
@@ -348,6 +350,16 @@ function ClientScheduleView({
         color: client?.color || existing?.color || "#D9F4EE",
       });
     }
+    for (const event of clientEvents) {
+      if (!byId.has(event.clientId)) {
+        byId.set(event.clientId, {
+          id: event.clientId,
+          code: event.clientCode || "Client",
+          name: event.clientCode || "Client",
+          color: event.clientColor || "#D9F4EE",
+        });
+      }
+    }
     for (const record of unplaced) {
       if (!record.clientId) continue;
       if (!byId.has(record.clientId)) {
@@ -360,7 +372,7 @@ function ClientScheduleView({
       }
     }
     return [...byId.values()].sort((a, b) => a.code.localeCompare(b.code));
-  }, [assignments, unplaced]);
+  }, [assignments, clientEvents, unplaced]);
 
   function cellFor(clientIdValue: string, startTime: string): ClientCellResult | null {
     const matching = assignments.filter(
