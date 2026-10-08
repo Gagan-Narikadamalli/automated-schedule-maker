@@ -73,12 +73,32 @@ function extractDeterministicStaffClientLookup(
   message: string
 ): string | null {
   const patterns = [
-    /\bfor\s+(.+?)\s*,?\s*who\s+is\s+(?:the\s+)?client\b/i,
-    /\bfor\s+(.+?)\s*,?\s*(?:what|which)\s+client\b/i,
+    /\bfor\s+(.+?)(?:\s+on\s+.+?)?\s*,?\s*who\s+is\s+(?:the\s+)?client\b/i,
+    /\bfor\s+(.+?)(?:\s+on\s+.+?)?\s*,?\s*(?:what|which)\s+client\b/i,
+    /\b(?:who\s+is\s+(?:the\s+)?client|(?:what|which)\s+client)\s+for\s+(.+?)(?=\s+(?:on|at|from|today|tomorrow)\b|[?.!,]|$)/i,
+    /\bwho\s+is\s+(.+?)'s\s+client\b/i,
     /\bwhich\s+client\s+(?:is\s+)?(.+?)\s+with\b/i,
     /\bwho\s+does\s+(.+?)\s+have\b/i,
     /\bwho\s+is\s+(.+?)\s+with\b/i,
     /\bwhat\s+clients?\s+(?:does|is)\s+(.+?)(?:\s+(?:have|with|from|at|today|tomorrow|on)\b|[?.!,]|$)/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = message.match(pattern);
+    if (match?.[1]) return cleanLookupReference(match[1]);
+  }
+
+  return null;
+}
+
+function extractDeterministicClientStaffLookup(
+  message: string
+): string | null {
+  const patterns = [
+    /\bfor\s+(.+?)(?:\s+on\s+.+?)?\s*,?\s*who\s+is\s+(?:the\s+)?(?:staff|therapist|bt|rbt)\b/i,
+    /\bwho\s+is\s+(?:the\s+)?(?:staff|therapist|bt|rbt)\s+for\s+(.+?)(?=\s+(?:on|at|from|today|tomorrow)\b|[?.!,]|$)/i,
+    /\bwho\s+(?:is\s+)?(?:covering|with)\s+(.+?)(?=\s+(?:at|from|between|today|tomorrow|on)\b|[?.!,]|$)/i,
+    /\bcoverage\s+(?:for|of)\s+(.+?)(?=\s+(?:at|from|between|today|tomorrow|on)\b|[?.!,]|$)/i,
   ];
 
   for (const pattern of patterns) {
@@ -149,6 +169,72 @@ function formatDeterministicStaffClientLookup(
     ...segments.map(
       (segment: Record<string, any>) =>
         `- ${String(segment.clientCode)} ${String(
+          segment.startTime ?? "?"
+        )}-${String(segment.endTime ?? "?")}`
+    ),
+  ].join("\n");
+}
+
+function formatDeterministicClientStaffLookup(
+  outputValue: unknown,
+  date: string,
+  clientReference: string
+): string {
+  const output =
+    outputValue && typeof outputValue === "object" && !Array.isArray(outputValue)
+      ? (outputValue as Record<string, any>)
+      : {};
+
+  if (output.needsClarification === true) {
+    return String(
+      output.message ||
+        `I need a more specific client reference than "${clientReference}".`
+    );
+  }
+
+  if (typeof output.message === "string" && output.message.trim()) {
+    if (
+      output.profileStatus ||
+      output.scheduleAvailable === false ||
+      output.count === 0
+    ) {
+      return output.message.trim();
+    }
+  }
+
+  if (output.scheduleAvailable === false) {
+    return `The schedule for ${date} has not been generated yet. Would you like me to generate it?`;
+  }
+
+  const segments = Array.isArray(output.segments)
+    ? output.segments
+        .map((value: unknown) =>
+          value && typeof value === "object" && !Array.isArray(value)
+            ? (value as Record<string, any>)
+            : {}
+        )
+        .filter(
+          (segment: Record<string, any>) =>
+            Boolean(segment.staffName) &&
+            segment.assignmentType === "CLIENT_1_TO_1"
+        )
+    : [];
+
+  const clientCode =
+    typeof output.resolvedClientCode === "string" &&
+    output.resolvedClientCode.trim()
+      ? output.resolvedClientCode.trim()
+      : clientReference;
+
+  if (segments.length === 0) {
+    return `${clientCode} has no saved 1:1 staff coverage on ${date}.`;
+  }
+
+  return [
+    `${clientCode}'s staff coverage on ${date}:`,
+    ...segments.map(
+      (segment: Record<string, any>) =>
+        `- ${String(segment.staffName)} ${String(
           segment.startTime ?? "?"
         )}-${String(segment.endTime ?? "?")}`
     ),
@@ -599,12 +685,21 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
       !attachmentPreviewOnly
         ? extractDeterministicStaffClientLookup(message)
         : null;
+    const deterministicClientLookup =
+      !attachmentPreviewOnly && !deterministicStaffLookup
+        ? extractDeterministicClientStaffLookup(message)
+        : null;
 
-    if (deterministicStaffLookup) {
-      const lookupInput = {
-        staffName: deterministicStaffLookup,
-        includeBreaks: false,
-      };
+    if (deterministicStaffLookup || deterministicClientLookup) {
+      const lookupInput = deterministicStaffLookup
+        ? {
+            staffName: deterministicStaffLookup,
+            includeBreaks: false,
+          }
+        : {
+            clientCode: deterministicClientLookup as string,
+            includeBreaks: false,
+          };
       const lookupTool =
         readTools.lookup_schedule as unknown as DirectExecutableTool;
       const lookupOutput = lookupTool.execute
@@ -614,11 +709,17 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
             error: "Schedule lookup is unavailable.",
           };
 
-      resultText = formatDeterministicStaffClientLookup(
-        lookupOutput,
-        resolvedDate.date,
-        deterministicStaffLookup
-      );
+      resultText = deterministicStaffLookup
+        ? formatDeterministicStaffClientLookup(
+            lookupOutput,
+            resolvedDate.date,
+            deterministicStaffLookup
+          )
+        : formatDeterministicClientStaffLookup(
+            lookupOutput,
+            resolvedDate.date,
+            deterministicClientLookup as string
+          );
       resultSteps = [
         {
           toolCalls: [
