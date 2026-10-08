@@ -121,8 +121,8 @@ const DEFAULT_RULES: RulesForm = {
   fullTimeMaximumWeeklyHours: 40,
   partTimeMinimumWeeklyHours: 0,
   partTimeMaximumWeeklyHours: 29,
-  maximumClientsPerTechPerDay: 6,
-  maximumTechsPerClientPerDay: 4,
+  maximumClientsPerTechPerDay: 3,
+  maximumTechsPerClientPerDay: 3,
   minimumClientStaffAssignmentMinutes: 30,
   maximumClientStaffConsecutiveHours: 4,
   preventSameStaffClientRepeatSameDay: true,
@@ -148,13 +148,13 @@ const DEFAULT_RULES: RulesForm = {
   speechMaximumMinutes: 30,
   preferredStaffPriority: 100,
   sameTeamPriority: 40,
-  continuityPriority: 35,
+  continuityPriority: 200,
   rotationPriority: 60,
-  workloadBalancePriority: 10,
+  workloadBalancePriority: 0,
   historicalPairingPriority: 70,
   historicalSlotPriority: 90,
   historicalBreakPriority: 80,
-  clientHandoffPenaltyPriority: 25,
+  clientHandoffPenaltyPriority: 200,
   staffScheduleCompactnessPriority: 8,
   minimalFixAllowProtectedRelocation: true,
   minimalFixAllowBreakRelocation: true,
@@ -1397,9 +1397,8 @@ export function SchedulingSettings() {
           </label>
 
           <label className="form-field">
-            <span>Max clients per technician per day</span>
+            <span>Preferred max clients per staff per day</span>
             <EditableNumberInput
-              
               min="1"
               value={rules.maximumClientsPerTechPerDay}
               onChange={(event) =>
@@ -1409,12 +1408,15 @@ export function SchedulingSettings() {
                 )
               }
             />
+            <small>
+              Default is 3 so staff normally stay with only 2-3 clients in long
+              continuous blocks. Coverage can exceed this only as a last resort.
+            </small>
           </label>
 
           <label className="form-field">
-            <span>Max technicians per client per day</span>
+            <span>Preferred max staff per client per day</span>
             <EditableNumberInput
-              
               min="1"
               value={rules.maximumTechsPerClientPerDay}
               onChange={(event) =>
@@ -1424,6 +1426,12 @@ export function SchedulingSettings() {
                 )
               }
             />
+            <small>
+              Default is 3 to reduce client handoffs. The scheduler keeps the
+              current staff/client pairing together until a break, Speech/Nap,
+              availability boundary, or the four-hour continuous maximum
+              requires a handoff.
+            </small>
           </label>
 
           <label className="form-field">
