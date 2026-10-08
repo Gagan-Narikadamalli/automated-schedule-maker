@@ -985,31 +985,30 @@ export async function buildDaySchedulerInput(
     assignmentDocuments
   );
 
-  const templateReferences =
+  const primaryExactTemplate =
     extendedRules.autoUseWeekdayTemplate
-      ? templateDocuments.flatMap((template, templateIndex) => {
-          if (
-            template.learningOnly === true ||
-            !Array.isArray(template.assignments) ||
-            template.assignments.length === 0
-          ) {
-            return [];
-          }
+      ? templateDocuments.find(
+          (template) =>
+            template.learningOnly !== true &&
+            Array.isArray(template.assignments) &&
+            template.assignments.length > 0
+        ) ?? null
+      : null;
 
-          return mapReferenceAssignments(
-            template.assignments,
-            "TEMPLATE",
-            staff,
-            clients,
-            `Reference from weekday template ${String(
-              template.name ?? ""
-            )}.`
-          ).map((reference) => ({
-            ...reference,
-            id: `template-${templateIndex}-${reference.id}`,
-          }));
-        })
-      : [];
+  const templateReferences = primaryExactTemplate
+    ? mapReferenceAssignments(
+        primaryExactTemplate.assignments,
+        "TEMPLATE",
+        staff,
+        clients,
+        `Primary exact reference from weekday template ${String(
+          primaryExactTemplate.name ?? ""
+        )}.`
+      ).map((reference) => ({
+        ...reference,
+        id: `template-primary-${reference.id}`,
+      }))
+    : [];
 
   const historicalReferenceDates = [
     ...new Set(
@@ -1137,16 +1136,12 @@ export async function buildDaySchedulerInput(
     clients,
     partialCallOuts,
     autoTemplateName:
-      extendedRules.autoUseWeekdayTemplate &&
-      templateDocuments.length > 0
-        ? templateDocuments.length === 1
-          ? String(templateDocuments[0].name ?? "") || null
-          : `${templateDocuments.length} weekday templates: ${templateDocuments
-              .slice(0, 3)
-              .map((template) => String(template.name ?? ""))
-              .filter(Boolean)
-              .join(", ")}${templateDocuments.length > 3 ? ", ..." : ""}`
-        : null,
+      primaryExactTemplate
+        ? String(primaryExactTemplate.name ?? "") || null
+        : extendedRules.autoUseWeekdayTemplate &&
+            templateDocuments.length > 0
+          ? `${templateDocuments.length} learning/reference profile(s)`
+          : null,
     previousReferenceDate: latestPreviousReferenceDate,
     historicalReferenceDates:
       extendedRules.autoUsePreviousWeekdaySchedule
