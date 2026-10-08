@@ -21,6 +21,14 @@ type TemplateRequest = {
   sourceType?: "SAVED_SCHEDULE" | "HISTORICAL_WORKBOOK" | "MANUAL";
   sourceName?: string;
   styleNotes?: string[];
+  assignments?: Array<{
+    startTime?: string;
+    endTime?: string;
+    staffId?: string;
+    clientId?: string | null;
+    assignmentType?: string;
+    locked?: boolean;
+  }>;
   allowLearningOnlyFallback?: boolean;
   learningProfile?: {
     humanStyleBlockBalancingEnabled?: boolean;
@@ -283,8 +291,44 @@ export async function POST(request: Request) {
     let assignments: PlainRecord[] = [];
     let skippedHistoricalRows = 0;
     let learningOnly = false;
+    const suppliedAssignments = Array.isArray(body.assignments)
+      ? body.assignments
+          .map((assignment) => ({
+            startTime: String(assignment.startTime ?? "").trim(),
+            endTime: String(assignment.endTime ?? "").trim(),
+            staffId: String(assignment.staffId ?? "").trim(),
+            clientId:
+              assignment.clientId === null ||
+              assignment.clientId === undefined ||
+              String(assignment.clientId).trim() === ""
+                ? null
+                : String(assignment.clientId).trim(),
+            assignmentType: String(
+              assignment.assignmentType ?? ""
+            ).trim(),
+            locked: Boolean(assignment.locked),
+          }))
+          .filter(
+            (assignment) =>
+              assignment.startTime &&
+              assignment.endTime &&
+              assignment.staffId &&
+              [
+                "CLIENT_1_TO_1",
+                "BREAK",
+                "BREAK_NAP",
+                "BREAK_SPEECH",
+                "NAP",
+                "SPEECH",
+              ].includes(assignment.assignmentType) &&
+              (assignment.assignmentType !== "CLIENT_1_TO_1" ||
+                Boolean(assignment.clientId))
+          )
+      : [];
 
-    if (sourceType === "HISTORICAL_WORKBOOK") {
+    if (suppliedAssignments.length > 0) {
+      assignments = suppliedAssignments;
+    } else if (sourceType === "HISTORICAL_WORKBOOK") {
       if (!sourceDate) {
         return NextResponse.json(
           {
