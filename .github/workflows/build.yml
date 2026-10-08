@@ -25,6 +25,9 @@ jobs:
       - name: Test automatic scheduler rules
         run: npm run test:scheduler
 
+      - name: Test timed attendance overrides
+        run: npx tsx scripts/test-attendance-windows.ts
+
       - name: Build application
         run: npm run build
         env:
