@@ -8,6 +8,7 @@ import { ClientCallOut } from "@/models/ClientCallOut";
 import { ClientAttendanceException } from "@/models/ClientAttendanceException";
 import { Staff } from "@/models/Staff";
 import { Client } from "@/models/Client";
+import { ScheduleAssignment } from "@/models/ScheduleAssignment";
 
 type AttendanceSelection = { personId: string; personType: "staff" | "client"; mode: "IN" | "OUT"; startTime: string; endTime: string };
 const TIME = /^(?:[01]\d|2[0-3]):(?:00|30)$/;
@@ -115,13 +116,26 @@ export async function PUT(request: Request) {
       await ClientCallOut.deleteMany({ locationId, date });
       await ClientAttendanceException.deleteMany({ locationId, date });
     }
+    // A confirmed absence supersedes even manually locked time blocks:
+    // an unavailable person cannot keep assigned clients or breaks.
+    const absenceWindows = entries.filter((item) => item.mode === "OUT");
+    const invalidated = absenceWindows.map((item) => ({
+      ...(personType === "staff" ? { staffId: item.personId } : { clientId: item.personId }),
+      startTime: { $gte: item.startTime, $lt: item.endTime },
+    }));
+    const cleared = invalidated.length > 0
+      ? await ScheduleAssignment.deleteMany({
+          locationId, date, $or: invalidated,
+        })
+      : { deletedCount: 0 };
+
     await writeAuditLog({
       locationId, userId: auth.session.userId, action: "SYNC",
       entityType: "ATTENDANCE_OVERRIDES", entityId: `${personType}:${date}`,
       summary: `Updated ${entries.length} ${personType} attendance override(s) for ${date}.`,
       before, after: entries,
     });
-    return NextResponse.json({ success: true, overrides: entries });
+    return NextResponse.json({ success: true, overrides: entries, clearedAssignmentCount: cleared.deletedCount });
   } catch (error) {
     console.error("Failed to save attendance windows:", error);
     return NextResponse.json({ error: "Attendance windows could not be saved." }, { status: 500 });
