@@ -96,6 +96,26 @@ assert.equal(naturalStaffClientLookup.toolName, "lookup_schedule");
 assert.equal(naturalStaffClientLookup.input.staffName, "Anias");
 assert.equal(naturalStaffClientLookup.input.includeBreaks, false);
 
+const naturalStaffClientLookupDateAfterName = plan(
+  "For Anias on October 6th, who is the client?"
+);
+assert.equal(naturalStaffClientLookupDateAfterName.intent, "STAFF_LOOKUP");
+assert.equal(naturalStaffClientLookupDateAfterName.input.staffName, "Anias");
+assert.equal(naturalStaffClientLookupDateAfterName.input.includeBreaks, false);
+
+const naturalStaffClientLookupReverse = plan(
+  "On October 6th, who is the client for Anias?"
+);
+assert.equal(naturalStaffClientLookupReverse.intent, "STAFF_LOOKUP");
+assert.equal(naturalStaffClientLookupReverse.input.staffName, "Anias");
+
+const naturalClientStaffLookup = plan(
+  "On October 6th for ZiBo who is the staff?"
+);
+assert.equal(naturalClientStaffLookup.intent, "CLIENT_LOOKUP");
+assert.equal(naturalClientStaffLookup.toolName, "lookup_schedule");
+assert.equal(naturalClientStaffLookup.input.clientCode, "ZiBo");
+
 const clientLookup = plan("who is covering CaMe at 10 am");
 assert.equal(clientLookup.toolName, "lookup_schedule");
 assert.equal(clientLookup.input.clientCode, "CaMe");
