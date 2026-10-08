@@ -44,6 +44,54 @@ const TemplateAssignmentSchema = new Schema(
   }
 );
 
+const TemplateLearningProfileSchema = new Schema(
+  {
+    humanStyleBlockBalancingEnabled: {
+      type: Boolean,
+      default: true,
+    },
+    preferredClientsPerStaffPerDay: {
+      type: Number,
+      default: 2,
+      min: 1,
+      max: 6,
+    },
+    preferredStaffPerClientPerDay: {
+      type: Number,
+      default: 2,
+      min: 1,
+      max: 6,
+    },
+    continuityPriority: {
+      type: Number,
+      default: 200,
+      min: 0,
+      max: 500,
+    },
+    clientHandoffPenaltyPriority: {
+      type: Number,
+      default: 200,
+      min: 0,
+      max: 500,
+    },
+    workloadBalancePriority: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 500,
+    },
+    staffScheduleCompactnessPriority: {
+      type: Number,
+      default: 8,
+      min: 0,
+      max: 500,
+    },
+  },
+  {
+    _id: false,
+  }
+);
+
 const ScheduleTemplateSchema = new Schema(
   {
     locationId: {
@@ -75,6 +123,14 @@ const ScheduleTemplateSchema = new Schema(
     styleNotes: {
       type: [String],
       default: [],
+    },
+    learningOnly: {
+      type: Boolean,
+      default: false,
+    },
+    learningProfile: {
+      type: TemplateLearningProfileSchema,
+      default: null,
     },
     dayOfWeek: {
       type: String,
