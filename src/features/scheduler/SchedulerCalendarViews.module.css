@@ -446,6 +446,23 @@
   font-size: 0.82rem;
 }
 
+.clientCellTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.staffDot {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 9px;
+  border-radius: 999px;
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.85),
+    0 1px 3px rgba(18, 68, 101, 0.18);
+}
+
 .clientCell span {
   font-size: 0.7rem;
   color: #557286;
