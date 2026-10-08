@@ -66,6 +66,7 @@ type ScheduleResponse = {
   locationId?: string;
   date?: string;
   staff?: ScheduleStaff[];
+  rosterStaff?: Array<{ id: string; name: string }>;
   clients?: Array<{ id: string; code: string; name: string }>;
   assignments?: ScheduleAssignment[];
   recentSavedScheduleDates?: string[];
@@ -347,6 +348,9 @@ export function ScheduleWorkspaceV3() {
   const [placementRecord, setPlacementRecord] = useState<UnplacedRecord | null>(null);
   const [detailsRecord, setDetailsRecord] = useState<UnplacedRecord | null>(null);
   const [showCallOutPanel, setShowCallOutPanel] = useState(false);
+  const [rosterStaff, setRosterStaff] = useState<Array<{ id: string; name: string }>>([]);
+  const [attendance, setAttendance] = useState<Array<{ personType: "staff" | "client"; personId: string; mode: "IN" | "OUT"; startTime: string; endTime: string }>>([]);
+  const [savedAttendance, setSavedAttendance] = useState<typeof attendance>([]);
   const [callOutTab, setCallOutTab] = useState<"staff" | "clients">("staff");
   const [clients, setClients] = useState<Array<{ id: string; code: string; name: string }>>([]);
   const [callOutClientIds, setCallOutClientIds] = useState<string[]>([]);
@@ -493,6 +497,15 @@ export function ScheduleWorkspaceV3() {
     setSavedCallOutClientIds(clientData.selectedClientIds ?? []);
   }
 
+  async function loadAttendance(loc = locationId, day = selectedDate) {
+    if (!loc || loc.startsWith("demo-")) { setAttendance([]); setSavedAttendance([]); return; }
+    const response = await fetch(`/api/attendance-overrides?locationId=${encodeURIComponent(loc)}&date=${encodeURIComponent(day)}`, { cache: "no-store" });
+    const data = await readJson<{ overrides?: typeof attendance; error?: string }>(response);
+    if (!response.ok) throw new Error(data.error || "Attendance overrides could not be loaded.");
+    setAttendance(data.overrides ?? []);
+    setSavedAttendance(data.overrides ?? []);
+  }
+
   async function loadSchedule(requestedLocationId = locationId, requestedDate = selectedDate) {
     if (!requestedLocationId || !requestedDate) return;
     if (requestedLocationId.startsWith("demo-")) {
@@ -511,6 +524,7 @@ export function ScheduleWorkspaceV3() {
       const nextStaff = data.staff ?? [];
       const nextAssignments = data.assignments ?? [];
       setStaff(nextStaff);
+      setRosterStaff(data.rosterStaff ?? []);
       setClients(data.clients ?? []);
       setInitialGrid(buildGrid(nextStaff, nextAssignments));
       setRequiredClientSlots(data.requiredClientSlots ?? 0);
@@ -518,6 +532,7 @@ export function ScheduleWorkspaceV3() {
       await Promise.all([
         loadUnplacedAssignments(requestedLocationId, requestedDate),
         loadCallOuts(requestedLocationId, requestedDate),
+        loadAttendance(requestedLocationId, requestedDate),
       ]);
       const recentDates = data.recentSavedScheduleDates ?? [];
       setStatusMessage(
@@ -720,6 +735,32 @@ export function ScheduleWorkspaceV3() {
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "The unplaced assignment could not be marked resolved.");
     }
+  }
+
+  async function saveTimedAttendance() {
+    if (demoMode) { setStatusMessage("Attendance changes cannot be saved in preview mode."); return; }
+    try {
+      setWorking(true);
+      const type = callOutTab === "staff" ? "staff" : "client";
+      const response = await fetch("/api/attendance-overrides", {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ locationId, date: selectedDate, personType: type,
+          overrides: attendance.filter((item) => item.personType === type) }),
+      });
+      const data = await readJson<{ error?: string }>(response);
+      if (!response.ok) throw new Error(data.error || "Attendance could not be saved.");
+      setShowCallOutPanel(false);
+      const generated = await fetch("/api/schedule/generate", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ locationId, date: selectedDate }),
+      });
+      const result = await readJson<GenerateResponse>(generated);
+      await loadSchedule();
+      setStatusMessage(generated.ok ? "Attendance saved and the day was regenerated using new availability."
+        : `Attendance saved, but schedule regeneration needs review: ${result.error || "Unknown error"}`);
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Saving attendance failed.");
+    } finally { setWorking(false); }
   }
 
   function toggleCallOutStaff(staffId: string) {
@@ -1046,6 +1087,54 @@ export function ScheduleWorkspaceV3() {
       )}
 
       {showCallOutPanel && (
+        <section className="callout-panel">
+          <div className="panel-heading-row">
+            <div><h2>Attendance Changes for {selectedDate}</h2>
+              <p>Call In adds availability even without a regular shift. Call Out blocks the selected period. Whole day means 8 AM–5 PM.</p></div>
+            <button className="button button-secondary" type="button" disabled={working} onClick={() => { setAttendance(savedAttendance); setShowCallOutPanel(false); }}>Close</button>
+          </div>
+          <div role="tablist" style={{ display: "flex", gap: 12, marginBottom: 16 }}>
+            <button type="button" role="tab" aria-selected={callOutTab === "staff"} className={callOutTab === "staff" ? "button button-primary" : "button button-secondary"} onClick={() => setCallOutTab("staff")}>Staff</button>
+            <button type="button" role="tab" aria-selected={callOutTab === "clients"} className={callOutTab === "clients" ? "button button-primary" : "button button-secondary"} onClick={() => setCallOutTab("clients")}>Clients</button>
+          </div>
+          <div className="callout-staff-list">
+            {(callOutTab === "staff" ? rosterStaff : clients.map((client) => ({ id: client.id, name: client.code }))).map((person) => {
+              const type = callOutTab === "staff" ? "staff" : "client";
+              const row = attendance.find((item) => item.personType === type && item.personId === person.id);
+              const update = (patch: { mode?: "IN" | "OUT"; startTime?: string; endTime?: string }) => setAttendance((current) => {
+                const other = current.filter((item) => !(item.personType === type && item.personId === person.id));
+                const updated = { personId: person.id, personType: type, mode: "OUT" as const, startTime: "08:00", endTime: "17:00", ...row, ...patch };
+                return [...other, updated];
+              });
+              const allDay = row?.startTime === "08:00" && row.endTime === "17:00";
+              return <div className="checkbox-card" key={person.id} style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "stretch", minWidth: 210 }}>
+                <strong>{person.name}</strong>
+                <select disabled={working} aria-label={`Attendance status for ${person.name}`} value={row?.mode ?? "NONE"}
+                  onChange={(event) => event.target.value === "NONE"
+                    ? setAttendance((current) => current.filter((item) => !(item.personType === type && item.personId === person.id)))
+                    : update({ mode: event.target.value as "IN" | "OUT" })}>
+                  <option value="NONE">Normal schedule</option>
+                  <option value="IN">Call In</option>
+                  <option value="OUT">Call Out</option>
+                </select>
+                {row && <>
+                  <label><input type="checkbox" checked={allDay} disabled={working}
+                    onChange={(event) => update(event.target.checked ? { startTime: "08:00", endTime: "17:00" } : { startTime: "08:00", endTime: "12:00" })} /> Whole day (8 AM–5 PM)</label>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <input type="time" min="08:00" max="16:30" step={1800} aria-label={`Start for ${person.name}`} disabled={working || allDay}
+                      value={row.startTime} style={{ width: "50%", minWidth: 0 }} onChange={(event) => update({ startTime: event.target.value })} />
+                    <input type="time" min="08:30" max="17:00" step={1800} aria-label={`End for ${person.name}`} disabled={working || allDay}
+                      value={row.endTime} style={{ width: "50%", minWidth: 0 }} onChange={(event) => update({ endTime: event.target.value })} />
+                  </div>
+                </>}
+              </div>;
+            })}
+          </div>
+          <button type="button" className="button button-primary" disabled={working} onClick={() => void saveTimedAttendance()}>{working ? "Saving..." : `Save ${callOutTab === "staff" ? "Staff" : "Client"} Attendance`}</button>
+        </section>
+      )}
+
+      {false && showCallOutPanel && (
         <section className="callout-panel">
           <div className="panel-heading-row">
             <div>
