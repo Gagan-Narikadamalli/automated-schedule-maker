@@ -5,6 +5,7 @@ import { connectToDatabase } from "@/lib/db";
 import { AttendanceOverride } from "@/models/AttendanceOverride";
 import { CallOut } from "@/models/CallOut";
 import { ClientCallOut } from "@/models/ClientCallOut";
+import { ClientAttendanceException } from "@/models/ClientAttendanceException";
 import { Staff } from "@/models/Staff";
 import { Client } from "@/models/Client";
 
@@ -29,10 +30,11 @@ export async function GET(request: Request) {
   if (!sessionCanAccessLocation(auth.session, locationId)) return forbiddenResponse();
   try {
     await connectToDatabase();
-    const [saved, legacyStaff, legacyClients] = await Promise.all([
+    const [saved, legacyStaff, legacyClients, legacyClientChanges] = await Promise.all([
       AttendanceOverride.find({ locationId, date }).lean(),
       CallOut.find({ locationId, date }).lean(),
       ClientCallOut.find({ locationId, date }).lean(),
+      ClientAttendanceException.find({ locationId, date }).lean(),
     ]);
     const entries = new Map<string, AttendanceSelection>();
     for (const row of legacyStaff) {
@@ -44,6 +46,14 @@ export async function GET(request: Request) {
     for (const row of legacyClients) {
       const personId = String(row.clientId);
       entries.set(`client:${personId}`, { personType: "client", personId, mode: "OUT", startTime: DAY_START, endTime: DAY_END });
+    }
+    for (const row of legacyClientChanges) {
+      const personId = String(row.clientId);
+      entries.set(`client:${personId}`, { personType: "client", personId,
+        mode: row.changeType === "CALL_IN" ? "IN" : "OUT",
+        startTime: normalizedLegacyTime(String(row.startTime ?? ""), DAY_START),
+        endTime: normalizedLegacyTime(String(row.endTime ?? ""), DAY_END),
+      });
     }
     for (const row of saved) {
       const item: AttendanceSelection = {
@@ -103,6 +113,7 @@ export async function PUT(request: Request) {
     } else {
       // Client attendance is now slot-specific; full-day legacy absences are migrated.
       await ClientCallOut.deleteMany({ locationId, date });
+      await ClientAttendanceException.deleteMany({ locationId, date });
     }
     await writeAuditLog({
       locationId, userId: auth.session.userId, action: "SYNC",
