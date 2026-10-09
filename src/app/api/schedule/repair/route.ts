@@ -158,7 +158,8 @@ export async function POST(request: Request) {
     const schedulerInput = {
       ...originalSchedulerInput,
       existingAssignments: originalSchedulerInput.existingAssignments
-        .filter(item => !invalidIds.has(item.id)),
+        .filter(item => !invalidIds.has(item.id))
+        .map(item => ({...item, locked:true})),
     };
     const priorityUnplaced = (await UnplacedAssignment.find({
       locationId, date, status: "UNPLACED", clientId: { $ne: null },
@@ -202,18 +203,9 @@ export async function POST(request: Request) {
     );
 
     const removalFilter = {
-      _id: {
-        $in: removedOriginalIds,
-      },
+      _id: { $in: removedOriginalIds },
       locationId,
       date,
-      ...(repairMode === "CALL_OUT"
-        ? {
-            manuallyOverridden: {
-              $ne: true,
-            },
-          }
-        : {}),
     };
 
     const removedSnapshots =
