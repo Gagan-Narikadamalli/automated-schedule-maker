@@ -1,3 +1,4 @@
+import { selectBestWeekdayTemplate } from "@/features/scheduler/server/selectBestWeekdayTemplate";
 import { getSlotsInsideTimeRange } from "@/features/scheduler/engine/dateUtils";
 import { resolveFlexibleEventWindows } from "@/features/scheduler/engine/flexibleEventWindows";
 import type {
@@ -55,7 +56,7 @@ export async function applyFixedNapSessions(
     manualNapSlots.set(assignment.clientId, slots);
   }
 
-  const primaryTemplate = (rawTemplates as unknown as DatabaseRecord[]).find((template) => Array.isArray(template.assignments) && template.assignments.length > 0);
+  const primaryTemplate = selectBestWeekdayTemplate(rawTemplates as unknown as DatabaseRecord[], input.staff, input.clients);
   const templateNapSlots = new Map<string, Set<string>>();
   if (input.rules.autoUseWeekdayTemplate && primaryTemplate) {
     // New client-view nap cells and older imported NAP/BREAK_NAP assignment
