@@ -127,6 +127,12 @@ export function TemplateManager() {
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
   const [message, setMessage] = useState("Loading schedule templates...");
+  const [notification, setNotification] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+
+  function notify(kind: "success" | "error", text: string) {
+    setNotification({ kind, text });
+    setMessage(text);
+  }
 
   const selectedLocation = useMemo(
     () => locations.find((location) => location.id === locationId),
@@ -231,7 +237,7 @@ export function TemplateManager() {
       }
 
       setTemplates(data.templates ?? []);
-      setMessage("Templates loaded from MongoDB.");
+      // Do not overwrite a successful action notification during list refresh.
     } catch (error) {
       setMessage(
         error instanceof Error ? error.message : "Templates could not be loaded."
@@ -455,7 +461,7 @@ export function TemplateManager() {
       }
 
       await loadTemplates();
-      setMessage("Template archived. Historical schedules are unchanged.");
+      notify("success", "Template archived successfully. Existing schedules were not changed.");
     } catch (error) {
       setMessage(
         error instanceof Error
@@ -481,7 +487,7 @@ export function TemplateManager() {
       setSelectedTemplateIds((current) => current.filter((id) => !deleteCandidates.includes(id)));
       setDeleteCandidates([]);
       await loadTemplates(locationId);
-      setMessage("Selected templates permanently deleted. Live schedules remain unchanged.");
+      notify("success", "Selected templates deleted successfully. Existing schedules were not changed.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Templates could not be deleted.");
     } finally {
@@ -1092,16 +1098,22 @@ export function TemplateManager() {
         <ul>{templates.filter((item) => deleteCandidates.includes(item.id)).map((item) =>
           <li key={item.id}>{item.name} — {displayDay(item.dayOfWeek)}</li>)}</ul>
       </ManagementModal>
+      {notification ? (
+        <div role="status" aria-live="polite"
+          style={{ position: "fixed", right: 20, bottom: 22, zIndex: 2000, width: "min(420px, calc(100vw - 40px))", padding: "13px 16px", borderRadius: 12, background: notification.kind === "success" ? "#e5f7ed" : "#fff0f0", color: notification.kind === "success" ? "#145336" : "#9a2424", border: "1px solid #b8d6c5", boxShadow: "0 8px 30px #091b2a26", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <span style={{ fontWeight: 750 }}>{notification.kind === "success" ? "✓ " : ""}{notification.text}</span>
+          <button type="button" aria-label="Dismiss notification" onClick={() => setNotification(null)} style={{ border: 0, background: "transparent", fontSize: 22, cursor: "pointer" }}>×</button>
+        </div>
+      ) : null}
       <TemplateEditorModal
         open={Boolean(editorTemplateId)}
         locationId={locationId}
         templateId={editorTemplateId}
         onClose={() => setEditorTemplateId(null)}
         onSaved={async () => {
+          setEditorTemplateId(null);
           await loadTemplates();
-          setMessage(
-            "Template changes saved. Auto Generate will use the updated exact weekday template without modifying the current live schedule."
-          );
+          notify("success", "Template changes saved successfully. The updated template is ready for Auto Generate.");
         }}
       />
     </div>
