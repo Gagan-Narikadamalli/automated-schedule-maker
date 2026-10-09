@@ -914,6 +914,16 @@ function findBestStaffMember(
       } => candidate !== null
     )
     .sort((left, right) => {
+      // Coverage-role eligibility is a clinic safety boundary before reusable
+      // schedule preferences. Last-week/template matching only competes inside
+      // the same coverage tier (BT/RBT first, then auxiliary roles).
+      const roleDifference =
+        coverageRoleTier(left.staffMember) -
+        coverageRoleTier(right.staffMember);
+      if (roleDifference !== 0) {
+        return roleDifference;
+      }
+
       const leftPreviousWeekStrength = exactReferenceMatchStrength(
         left.staffMember.id,
         requirement.client.id,
@@ -929,8 +939,8 @@ function findBestStaffMember(
         "COPIED"
       );
 
-      // Priority 1: reproduce the immediately previous same-weekday pairing
-      // whenever it still passes all hard eligibility constraints.
+      // Priority 1 inside the valid coverage tier: reproduce the immediately
+      // previous same-weekday pairing whenever it still passes hard constraints.
       if (leftPreviousWeekStrength !== rightPreviousWeekStrength) {
         return rightPreviousWeekStrength - leftPreviousWeekStrength;
       }
@@ -961,17 +971,6 @@ function findBestStaffMember(
         return leftReservedForOtherPreviousWeek ? 1 : -1;
       }
 
-      // Coverage-role eligibility remains a clinic safety boundary:
-      // an available BT/RBT should not be displaced by an auxiliary manager,
-      // BCBA, or other role solely because a template contains that older
-      // pairing. Within the same coverage tier, the current template is next.
-      const roleDifference =
-        coverageRoleTier(left.staffMember) -
-        coverageRoleTier(right.staffMember);
-      if (roleDifference !== 0) {
-        return roleDifference;
-      }
-
       const leftTemplateStrength = exactReferenceMatchStrength(
         left.staffMember.id,
         requirement.client.id,
@@ -987,8 +986,8 @@ function findBestStaffMember(
         "TEMPLATE"
       );
 
-      // Priority 2: use the current weekday template when last week's exact
-      // assignment is unavailable, after preserving the clinic role boundary.
+      // Priority 2 inside the same coverage tier: use the current weekday
+      // template when last week's exact assignment is unavailable.
       if (leftTemplateStrength !== rightTemplateStrength) {
         return rightTemplateStrength - leftTemplateStrength;
       }
