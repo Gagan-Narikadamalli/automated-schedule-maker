@@ -504,30 +504,32 @@ export function enrichBreakAssignmentsWithFixedEvents(
   clients: SchedulerClient[],
   slotLengthMinutes: number
 ): SchedulerAssignment[] {
+  // A client nap suppresses required coverage; it is not another 1:1 block.
+  // Link at most one staff break to a given client nap in each time slot.
+  const linkedNapSlots = new Set<string>();
+  for (const assignment of assignments) {
+    if (assignment.assignmentType === "BREAK_NAP" && assignment.clientId) {
+      linkedNapSlots.add(`${assignment.clientId}|${assignment.startTime}`);
+    }
+  }
   return assignments.map((assignment) => {
-    if (assignment.assignmentType !== "BREAK") {
-      return assignment;
-    }
-
+    if (assignment.assignmentType !== "BREAK") return assignment;
     const fixedEvent = findSupervisedFixedEventClient(
-      assignment,
-      assignments,
-      clients,
-      slotLengthMinutes
+      assignment, assignments, clients, slotLengthMinutes
     );
-
-    if (!fixedEvent) {
-      return assignment;
+    if (!fixedEvent) return assignment;
+    const key = `${fixedEvent.client.id}|${assignment.startTime}`;
+    if (fixedEvent.assignmentType === "BREAK_NAP") {
+      if (linkedNapSlots.has(key)) return assignment;
+      linkedNapSlots.add(key);
     }
-
     return {
       ...assignment,
       clientId: fixedEvent.client.id,
       assignmentType: fixedEvent.assignmentType,
-      note:
-        fixedEvent.assignmentType === "BREAK_NAP"
-          ? `Break combined with ${fixedEvent.client.displayCode} nap supervision.`
-          : `Break combined with ${fixedEvent.client.displayCode} speech supervision.`,
+      note: fixedEvent.assignmentType === "BREAK_NAP"
+        ? `Break aligned with ${fixedEvent.client.displayCode}'s nap; no client coverage is required during the nap.`
+        : `Break combined with ${fixedEvent.client.displayCode} speech supervision.`,
     };
   });
 }
