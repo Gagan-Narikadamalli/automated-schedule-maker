@@ -177,9 +177,8 @@ function schedulePenalty(
     // usually easier to operate than one person owning the entire day or many
     // short technician fragments. This remains a soft target only.
     if (ownAssignments.length >= 8) {
-      if (distinctStaff < desiredStaff) {
-        penalty += (desiredStaff - distinctStaff) * 70;
-      }
+      // The number of different caregivers is a ceiling preference, not a
+      // quota. Never split a healthy continuous pairing merely to reach two.
       if (distinctStaff > desiredStaff) {
         penalty += (distinctStaff - desiredStaff) * 95;
       }
@@ -203,10 +202,8 @@ function schedulePenalty(
 
     const distinctClients = staffClientIds(member.id, assignments).size;
 
-    if (distinctClients < preferredClientsPerStaff) {
-      penalty +=
-        (preferredClientsPerStaff - distinctClients) * 110;
-    }
+    // A staff member working continuously with one client is preferable to
+    // inserting an unrelated client just to reach a daily variety target.
 
     if (distinctClients > rules.maximumClientsPerTechPerDay) {
       penalty +=
@@ -481,6 +478,10 @@ export function balanceScheduleLikeHuman({
       rules.slotLengthMinutes
     );
 
+    const handoffCount = (items: SchedulerAssignment[]) =>
+      clients.reduce((total, client) => total + Math.max(clientRuns(client.id, items).length - 1, 0), 0);
+    const originalHandoffs = handoffCount(working);
+
     for (const candidate of candidates) {
       const containsExactTemplateMatch = candidate.pairs.some(
         ({ left, right }) =>
@@ -501,7 +502,9 @@ export function balanceScheduleLikeHuman({
         rules
       );
 
-      if (!swapped) {
+      if (!swapped || handoffCount(swapped) > originalHandoffs) {
+        // A cosmetic balancing swap must not create an extra caregiver
+        // handoff. Necessary coverage/break swaps are handled elsewhere.
         continue;
       }
 
