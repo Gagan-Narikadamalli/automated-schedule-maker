@@ -29,6 +29,7 @@ type UpdateTemplateRequest = {
   name?: string;
   dayOfWeek?: string;
   assignments?: TemplateAssignmentInput[];
+  clientNapSlots?: Array<{ clientId: string; startTime: string }>;
 };
 
 const DAYS = new Set([
@@ -75,6 +76,7 @@ function serializeTemplate(template: PlainRecord) {
       ? template.styleNotes.map((item: unknown) => String(item))
       : [],
     learningOnly: Boolean(template.learningOnly),
+    clientNapSlots: Array.isArray(template.clientNapSlots) ? template.clientNapSlots.map((nap: PlainRecord) => ({ clientId: String(nap.clientId), startTime: String(nap.startTime) })) : [],
     assignments: Array.isArray(template.assignments)
       ? template.assignments.map((assignment: PlainRecord) =>
           serializeAssignment(assignment)
@@ -232,6 +234,10 @@ export async function PUT(
           )
       : [];
 
+    const clientNapSlots = [...new Map((body.clientNapSlots ?? []).map((item) => [`${item.clientId}|${item.startTime}`, { clientId: String(item.clientId), startTime: String(item.startTime) }])).values()];
+    if (clientNapSlots.some((nap) => !/^[0-9a-fA-F]{24}$/.test(nap.clientId) || !/^(?:0[89]|1[0-6]):(?:00|30)$/.test(nap.startTime))) {
+      return NextResponse.json({ error: "Client naps require an active client and a 30-minute slot between 8 AM and 5 PM." }, { status: 400 });
+    }
     await connectToDatabase();
 
     const before = await ScheduleTemplate.findOne({
@@ -262,6 +268,7 @@ export async function PUT(
       ...new Set(
         assignments
           .map((item) => item.clientId)
+          .concat(clientNapSlots.map((item) => item.clientId))
           .filter((value): value is string => Boolean(value))
       ),
     ];
@@ -310,6 +317,7 @@ export async function PUT(
           name,
           dayOfWeek,
           assignments,
+          clientNapSlots,
           learningOnly: false,
         },
       },
