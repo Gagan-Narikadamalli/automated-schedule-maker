@@ -178,7 +178,7 @@ export async function POST(request: Request) {
         }
         if(duplicates.length)return NextResponse.json({error:"Workbook has conflicting exact cells; no changes made.",conflicts:duplicates},{status:409});
         const protectedRows=await ScheduleAssignment.find({
-          locationId,date,$or:[{source:"MANUAL"},{locked:true},{manuallyOverridden:true},
+          locationId,date,$or:[{source:"MANUAL"},{manuallyOverridden:true},
             {assignmentType:{$in:["SPEECH","UNAVAILABLE"]}}]
         }).lean() as unknown as Array<{staffId:unknown;clientId?:unknown;startTime:string;assignmentType:string}>;
         const desiredByKey=new Map(desired.map(item=>[key(item),item]));
@@ -193,7 +193,7 @@ export async function POST(request: Request) {
         },{status:409});
         const persisted=await persistScheduleReplacementSafely({
           locationId,date,replacements:desired,
-          replaceableFilter:{manuallyOverridden:{$ne:true},locked:{$ne:true},
+          replaceableFilter:{manuallyOverridden:{$ne:true},
             source:{$in:["AUTO","TEMPLATE","COPIED"]}},
         });
         const actual=await ScheduleAssignment.find({locationId,date}).lean() as unknown as
