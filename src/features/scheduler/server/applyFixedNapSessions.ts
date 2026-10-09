@@ -8,6 +8,7 @@ import { connectToDatabase } from "@/lib/db";
 import { ClientAttendanceException } from "@/models/ClientAttendanceException";
 import { AttendanceOverride } from "@/models/AttendanceOverride";
 import { NapSession } from "@/models/NapSession";
+import { ScheduleTemplate } from "@/models/ScheduleTemplate";
 
 type DatabaseRecord = Record<string, any>;
 
@@ -31,7 +32,8 @@ export async function applyFixedNapSessions(
 ): Promise<FixedNapApplicationResult> {
   await connectToDatabase();
 
-  const [rawSessions, rawAttendanceChanges, rawOverrides] = await Promise.all([
+  const weekday = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"][new Date(`${date}T12:00:00Z`).getUTCDay()];
+  const [rawSessions, rawAttendanceChanges, rawOverrides, rawTemplates] = await Promise.all([
     NapSession.find({ locationId, date })
       .sort({ priorityCategory: 1, startTime: 1 })
       .lean(),
@@ -39,9 +41,22 @@ export async function applyFixedNapSessions(
       .sort({ startTime: 1 })
       .lean(),
     AttendanceOverride.find({ locationId, date, personType: "client" }).lean(),
+    ScheduleTemplate.find({ locationId, dayOfWeek: weekday, active: true, learningOnly: false }).sort({ updatedAt: -1, createdAt: -1 }).lean(),
   ]);
 
   const sessions = rawSessions as unknown as DatabaseRecord[];
+  const primaryTemplate = (rawTemplates as unknown as DatabaseRecord[]).find((template) => Array.isArray(template.assignments) && template.assignments.length > 0);
+  const templateNapSlots = new Map<string, Set<string>>();
+  if (input.rules.autoUseWeekdayTemplate && primaryTemplate && Array.isArray(primaryTemplate.clientNapSlots)) {
+    for (const record of primaryTemplate.clientNapSlots as DatabaseRecord[]) {
+      const clientId = String(record.clientId);
+      const slot = String(record.startTime);
+      if (!/^\\d{2}:\\d{2}$/.test(slot)) continue;
+      const slots = templateNapSlots.get(clientId) ?? new Set<string>();
+      slots.add(slot);
+      templateNapSlots.set(clientId, slots);
+    }
+  }
   const attendanceChanges = rawAttendanceChanges as unknown as DatabaseRecord[];
   const clientOverrides = new Map((rawOverrides as unknown as DatabaseRecord[]).map((entry) => [String(entry.personId), entry]));
   const sessionsByClient = new Map<string, DatabaseRecord[]>();
@@ -78,7 +93,7 @@ export async function applyFixedNapSessions(
     const clientSessions = sessionsByClient.get(client.id) ?? [];
     const allowedSlots = [...client.requiredSlots];
 
-    if (clientSessions.length > 0) {
+    if (clientSessions.length > 0 || (templateNapSlots.get(client.id)?.size ?? 0) > 0) {
       return clientSessions
         .filter((session) => {
           const startTime = String(session.startTime ?? "");
@@ -134,7 +149,10 @@ export async function applyFixedNapSessions(
     const clientAttendanceChanges =
       attendanceChangesByClient.get(client.id) ?? [];
     const napSlots = [
-      ...(napSlotsByClient.get(client.id) ?? new Set<string>()),
+      ...new Set([
+        ...(napSlotsByClient.get(client.id) ?? new Set<string>()),
+        ...(clientSessions.length === 0 ? (templateNapSlots.get(client.id) ?? new Set<string>()) : []),
+      ]),
     ].sort();
 
     const priorityCategory: NapPriorityCategory =
