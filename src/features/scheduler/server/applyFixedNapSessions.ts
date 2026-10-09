@@ -1,4 +1,3 @@
-import { selectBestWeekdayTemplate } from "@/features/scheduler/server/selectBestWeekdayTemplate";
 import { getSlotsInsideTimeRange } from "@/features/scheduler/engine/dateUtils";
 import { resolveFlexibleEventWindows } from "@/features/scheduler/engine/flexibleEventWindows";
 import type {
@@ -9,12 +8,9 @@ import { connectToDatabase } from "@/lib/db";
 import { ClientAttendanceException } from "@/models/ClientAttendanceException";
 import { AttendanceOverride } from "@/models/AttendanceOverride";
 import { NapSession } from "@/models/NapSession";
-import { ScheduleTemplate } from "@/models/ScheduleTemplate";
 
 type DatabaseRecord = Record<string, any>;
 
-const DEFAULT_NAP_WINDOW_START = "11:30";
-const DEFAULT_NAP_WINDOW_END = "14:00";
 
 export type FixedNapApplicationResult = {
   input: SchedulerInput;
@@ -33,50 +29,16 @@ export async function applyFixedNapSessions(
 ): Promise<FixedNapApplicationResult> {
   await connectToDatabase();
 
-  const weekday = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"][new Date(`${date}T12:00:00Z`).getUTCDay()];
-  const [rawSessions, rawAttendanceChanges, rawOverrides, rawTemplates] = await Promise.all([
+  const [rawSessions, rawAttendanceChanges, rawOverrides] = await Promise.all([
     NapSession.find({ locationId, date })
-      .sort({ priorityCategory: 1, startTime: 1 })
-      .lean(),
+      .sort({ priorityCategory: 1, startTime: 1 }).lean(),
     ClientAttendanceException.find({ locationId, date })
-      .sort({ startTime: 1 })
-      .lean(),
+      .sort({ startTime: 1 }).lean(),
     AttendanceOverride.find({ locationId, date, personType: "client" }).lean(),
-    ScheduleTemplate.find({ locationId, dayOfWeek: weekday, active: true, learningOnly: false }).sort({ updatedAt: -1, createdAt: -1 }).lean(),
   ]);
-
+  // Only explicit Nap events can pause client coverage. Templates, profile
+  // patterns, linked staff breaks, and default windows must never invent naps.
   const sessions = rawSessions as unknown as DatabaseRecord[];
-  // Manually linked BREAK_NAP assignments are client-specific nap evidence.
-  // Do not infer a client's nap from an unlinked generic staff break.
-  const manualNapSlots = new Map<string, Set<string>>();
-  for (const assignment of input.existingAssignments) {
-    if (!["BREAK_NAP", "NAP"].includes(assignment.assignmentType) || !assignment.clientId) continue;
-    const slots = manualNapSlots.get(assignment.clientId) ?? new Set<string>();
-    slots.add(assignment.startTime);
-    manualNapSlots.set(assignment.clientId, slots);
-  }
-
-  const primaryTemplate = selectBestWeekdayTemplate(rawTemplates as unknown as DatabaseRecord[], input.staff, input.clients);
-  const templateNapSlots = new Map<string, Set<string>>();
-  if (input.rules.autoUseWeekdayTemplate && primaryTemplate) {
-    // New client-view nap cells and older imported NAP/BREAK_NAP assignment
-    // records describe the same client-specific event.
-    const templateNapRecords = [
-      ...(Array.isArray(primaryTemplate.clientNapSlots) ? primaryTemplate.clientNapSlots : []),
-      ...(Array.isArray(primaryTemplate.assignments)
-        ? (primaryTemplate.assignments as DatabaseRecord[]).filter((row) =>
-          (row.assignmentType === "NAP" || row.assignmentType === "BREAK_NAP") && Boolean(row.clientId))
-        : []),
-    ] as DatabaseRecord[];
-    for (const record of templateNapRecords) {
-      const clientId = String(record.clientId ?? "");
-      const slot = String(record.startTime ?? "");
-      if (!clientId || !/^\d{2}:\d{2}$/.test(slot)) continue;
-      const slots = templateNapSlots.get(clientId) ?? new Set<string>();
-      slots.add(slot);
-      templateNapSlots.set(clientId, slots);
-    }
-  }
   const attendanceChanges = rawAttendanceChanges as unknown as DatabaseRecord[];
   const clientOverrides = new Map((rawOverrides as unknown as DatabaseRecord[]).map((entry) => [String(entry.personId), entry]));
   const sessionsByClient = new Map<string, DatabaseRecord[]>();
@@ -100,50 +62,24 @@ export async function applyFixedNapSessions(
     ]);
   }
 
-  /**
-   * Speech is already removed from requiredSlots by buildDaySchedulerInput.
-   * Nap is therefore resolved second. A saved Nap special event narrows a
-   * child's placement window; when no special Nap event exists, every client
-   * who is actually present during the clinic nap period receives one default
-   * flexible nap window from 11:30 AM-2:00 PM.
-   *
-   * The actual duration still comes from Clinic Settings (normally 30 minutes).
-   */
-  const napWindows = input.clients.flatMap((client) => {
-    const clientSessions = sessionsByClient.get(client.id) ?? [];
-    const allowedSlots = [...client.requiredSlots];
-
-    if (clientSessions.length > 0 || (manualNapSlots.get(client.id)?.size ?? 0) > 0 || (templateNapSlots.get(client.id)?.size ?? 0) > 0) {
-      return clientSessions
-        .filter((session) => {
-          const startTime = String(session.startTime ?? "");
-          const endTime = String(session.endTime ?? "");
-          return Boolean(startTime && endTime && endTime > startTime);
-        })
-        .map((session, index) => ({
-          key: `fixed-nap-${String(session._id ?? index)}`,
-          clientId: client.id,
-          startTime: String(session.startTime),
-          endTime: String(session.endTime),
-          allowedSlots,
-          priority:
-            String(session.priorityCategory ?? "OLDER") === "YOUNGER"
-              ? 10
-              : 20,
-        }));
-    }
-
-    return [
-      {
-        key: `default-nap-${client.id}`,
+  // Every eligible nap window must originate in a saved Nap event for
+  // this exact date. Clients without an event receive no nap slots.
+  const napWindows = input.clients.flatMap((client) =>
+    (sessionsByClient.get(client.id) ?? [])
+      .filter((session) => {
+        const startTime = String(session.startTime ?? "");
+        const endTime = String(session.endTime ?? "");
+        return Boolean(startTime && endTime && endTime > startTime);
+      })
+      .map((session, index) => ({
+        key: `fixed-nap-${String(session._id ?? index)}`,
         clientId: client.id,
-        startTime: DEFAULT_NAP_WINDOW_START,
-        endTime: DEFAULT_NAP_WINDOW_END,
-        allowedSlots,
-        priority: 30,
-      },
-    ];
-  });
+        startTime: String(session.startTime),
+        endTime: String(session.endTime),
+        allowedSlots: [...client.requiredSlots],
+        priority: String(session.priorityCategory ?? "OLDER") === "YOUNGER" ? 10 : 20,
+      }))
+  );
 
   const resolvedNapSlots = resolveFlexibleEventWindows(napWindows, {
     enabled: input.rules.napDurationRulesEnabled ?? true,
@@ -168,12 +104,7 @@ export async function applyFixedNapSessions(
     const clientSessions = sessionsByClient.get(client.id) ?? [];
     const clientAttendanceChanges =
       attendanceChangesByClient.get(client.id) ?? [];
-    const napSlots = [
-      ...new Set([
-        ...(napSlotsByClient.get(client.id) ?? new Set<string>()),
-        ...(clientSessions.length === 0 ? (manualNapSlots.get(client.id) ?? templateNapSlots.get(client.id) ?? new Set<string>()) : []),
-      ]),
-    ].sort();
+    const napSlots = [...(napSlotsByClient.get(client.id) ?? new Set<string>())].sort();
 
     const priorityCategory: NapPriorityCategory =
       clientSessions.some(
