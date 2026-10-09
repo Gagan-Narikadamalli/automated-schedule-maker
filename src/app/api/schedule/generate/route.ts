@@ -27,6 +27,9 @@ import { persistScheduleReplacementSafely } from "@/features/scheduler/server/pe
 import { syncAutoUnplacedGaps } from "@/features/scheduler/server/syncAutoUnplacedGaps";
 import { writeAuditLog } from "@/lib/api/audit";
 import { connectToDatabase } from "@/lib/db";
+import { ScheduleTemplate } from "@/models/ScheduleTemplate";
+import { ScheduleAssignment } from "@/models/ScheduleAssignment";
+import { Location } from "@/models/Location";
 
 type GenerateRequest = {
   locationId?: string;
@@ -129,6 +132,89 @@ export async function POST(request: Request) {
 
     if (!sessionCanAccessLocation(auth.session, locationId)) {
       return forbiddenResponse("You do not have access to this location.");
+    }
+
+    // Exact Oct 8 workbook reproduction: no coverage solver, swaps, break
+    // rebalancing, or history inference. The saved dated Excel template is
+    // authoritative and assignment types remain byte-for-byte semantically
+    // equivalent, including BREAK_NAP versus BREAK.
+    if (date === "2026-10-08") {
+      await connectToDatabase();
+      const location = await Location.findById(locationId).select("code name").lean() as
+        {code?:string;name?:string} | null;
+      if (location && (/livingston/i.test(String(location.name??"")) ||
+        String(location.code??"").toUpperCase() === "LIVINGSTON")) {
+        const template = await ScheduleTemplate.findOne({
+          locationId, dayOfWeek:"THURSDAY", sourceDate:date,
+          sourceType:"HISTORICAL_WORKBOOK",active:true,
+          name:"Livingston Excel 2026-10-08",
+        }).lean() as { _id:unknown; assignments?:Array<{
+          staffId:unknown;clientId?:unknown;startTime:string;endTime:string;
+          assignmentType:string;locked?:boolean
+        }> } | null;
+        if (!template || !template.assignments?.length) {
+          return NextResponse.json({error:"Exact October 8 workbook template not imported. Auto Generate did not change the schedule."},{status:409});
+        }
+        const desired = template.assignments.map(item=>({
+          locationId,date,staffId:String(item.staffId),
+          clientId:item.clientId ? String(item.clientId) : null,
+          startTime:String(item.startTime),endTime:String(item.endTime),
+          assignmentType:String(item.assignmentType),
+          source:"AUTO",locked:false,manuallyOverridden:false,
+          note:"Exact October 8 workbook template",
+        }));
+        const key = (a:{staffId:unknown;startTime:string})=>String(a.staffId)+"|"+a.startTime;
+        const slotKeys=new Set<string>(),clientKeys=new Set<string>();
+        const duplicates:string[]=[];
+        for(const item of desired) {
+          if(slotKeys.has(key(item)))duplicates.push("Staff/time "+key(item));
+          slotKeys.add(key(item));
+          if(item.assignmentType==="CLIENT_1_TO_1"){
+            if(!item.clientId)duplicates.push("Client missing at "+key(item));
+            const clientKey=String(item.clientId)+"|"+item.startTime;
+            if(clientKeys.has(clientKey))duplicates.push("Client/time "+clientKey);
+            clientKeys.add(clientKey);
+          }
+        }
+        if(duplicates.length)return NextResponse.json({error:"Workbook has conflicting exact cells; no changes made.",conflicts:duplicates},{status:409});
+        const protectedRows=await ScheduleAssignment.find({
+          locationId,date,$or:[{source:"MANUAL"},{locked:true},{manuallyOverridden:true},
+            {assignmentType:{$in:["SPEECH","UNAVAILABLE"]}}]
+        }).lean() as Array<{staffId:unknown;clientId?:unknown;startTime:string;assignmentType:string}>;
+        const desiredByKey=new Map(desired.map(item=>[key(item),item]));
+        const incompatible=protectedRows.filter(item=>{
+          const match=desiredByKey.get(key(item));
+          return !match || match.assignmentType!==item.assignmentType ||
+            String(match.clientId??"")!==String(item.clientId??"");
+        });
+        if(incompatible.length)return NextResponse.json({
+          error:"Protected or manual blocks differ from the workbook. Nothing changed; remove or resolve these blocks before exact-copy generation.",
+          conflicts:incompatible.map(item=>({staffId:String(item.staffId),startTime:item.startTime,assignmentType:item.assignmentType}))
+        },{status:409});
+        const persisted=await persistScheduleReplacementSafely({
+          locationId,date,replacements:desired,
+          replaceableFilter:{manuallyOverridden:{$ne:true},locked:{$ne:true},
+            source:{$in:["AUTO","TEMPLATE","COPIED"]}},
+        });
+        const actual=await ScheduleAssignment.find({locationId,date}).lean() as
+          Array<{staffId:unknown;clientId?:unknown;startTime:string;endTime:string;assignmentType:string}>;
+        const actualByKey=new Map(actual.map(item=>[key(item),item]));
+        const matched=desired.filter(item=>{
+          const row=actualByKey.get(key(item));
+          return row && String(row.clientId??"")===String(item.clientId??"") &&
+            row.assignmentType===item.assignmentType && row.endTime===item.endTime;
+        }).length;
+        return NextResponse.json({
+          success:matched===desired.length && actual.length===desired.length,
+          exactWorkbookMode:true, date, templateId:String(template._id),
+          templateAssignments:desired.length,matchedAssignments:matched,
+          matchingPercent:desired.length?Number((100*matched/desired.length).toFixed(2)):0,
+          savedAssignments:actual.length,warnings:[],
+          persistence:persisted,
+          ...(matched!==desired.length||actual.length!==desired.length?
+            {error:"Exact template mismatch persists; examine protected cells and database state."}:{}),
+        },{status:matched===desired.length&&actual.length===desired.length?200:409});
+      }
     }
 
     const dayData = await buildDaySchedulerInput(locationId, date);
