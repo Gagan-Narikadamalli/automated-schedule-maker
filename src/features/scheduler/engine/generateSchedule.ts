@@ -895,6 +895,11 @@ function findBestStaffMember(
       } => candidate !== null
     )
     .sort((left, right) => {
+      // In normal coverage, always prioritize an available qualified BT/RBT
+      // over an auxiliary role, even if an older template lists otherwise.
+      const leftBT = coverageRoleTier(left.staffMember) === 0;
+      const rightBT = coverageRoleTier(right.staffMember) === 0;
+      if (leftBT !== rightBT) return leftBT ? -1 : 1;
       const leftTemplateStrength = exactReferenceMatchStrength(
         left.staffMember.id,
         requirement.client.id,
