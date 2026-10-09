@@ -403,6 +403,14 @@ export function ScheduleGridEnhanced({
     return found;
   }
 
+  function requestNapSelectionForPositions(positions: CellPosition[]) {
+    const preset = SCHEDULE_PRESETS.find((item) => item.assignmentType === "BREAK_NAP");
+    if (!preset || !positions.length) return;
+    const nearby = nearbyClientsForStaff(positions[0].column, positions[0].row);
+    setNapClientId(nearby[0] ?? "");
+    setNapPicker({ preset, rows: positions });
+  }
+
   function requestNapSelection(preset: SchedulePreset) {
     if (!manualMode) {
       onConflict("Turn on Manual Mode to link a staff break with a client's nap.");
@@ -415,9 +423,7 @@ export function ScheduleGridEnhanced({
       }
     }
     if (!positions.length) return;
-    const nearby = nearbyClientsForStaff(positions[0].column, positions[0].row);
-    setNapClientId(nearby[0] ?? "");
-    setNapPicker({ preset, rows: positions });
+    requestNapSelectionForPositions(positions);
   }
 
   async function applyLinkedNap() {
@@ -425,6 +431,16 @@ export function ScheduleGridEnhanced({
     const client = clients.find((item) => item.id === napClientId);
     if (!client) {
       onConflict("Select a valid client before saving the Break + Nap.");
+      return;
+    }
+    // Link the client to an existing 1:1 staff relationship, not an arbitrary
+    // staff member who only appears at the nap.
+    const unpaired = napPicker.rows.filter((position) =>
+      !grid.some((scheduleRow) => scheduleRow[position.column]?.assignmentType === "CLIENT_1_TO_1" &&
+        scheduleRow[position.column]?.clientId === client.id)
+    );
+    if (unpaired.length) {
+      onConflict("The selected client has no 1:1 assignment with one or more selected staff members. Assign their existing caregiver first, or select the correct staff column.");
       return;
     }
     const preset = napPicker.preset;
@@ -1020,6 +1036,12 @@ export function ScheduleGridEnhanced({
   async function saveEditedCell(row: number, column: number, text: string) {
     const currentCell = grid[row][column];
     let updatedCell = createScheduleCellFromText(text, currentCell);
+    if (manualMode && updatedCell.assignmentType === "BREAK_NAP" && !updatedCell.clientId) {
+      setEditingCell(null);
+      setSelection({ anchor: { row, column }, focus: { row, column } });
+      requestNapSelectionForPositions([{ row, column }]);
+      return;
+    }
     const unavailable = currentCell.assignmentType === "UNAVAILABLE";
     const replacing = isOccupied(currentCell) && currentCell.text !== updatedCell.text;
 
