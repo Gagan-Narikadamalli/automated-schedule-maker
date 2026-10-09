@@ -15,4 +15,13 @@ assert.ok(!conflict.assignments.some(a => a.staffId === "s1" && a.startTime === 
 const manuallyLinked = synchronizeTemplateNaps([{ staffId: "s2", clientId: "c2", startTime: "12:00", endTime: "12:30", assignmentType: "BREAK_NAP", locked: false }], []);
 assert.deepEqual(manuallyLinked.naps, [{ clientId: "c2", startTime: "12:00" }]);
 assert.equal(manuallyLinked.warnings.length, 0);
+const longNap = synchronizeTemplateNaps(
+  [
+    { staffId: "s1", clientId: "c1", startTime: "11:30", endTime: "12:00", assignmentType: "CLIENT_1_TO_1", locked: false },
+    { staffId: "s1", clientId: "c1", startTime: "13:00", endTime: "13:30", assignmentType: "CLIENT_1_TO_1", locked: false },
+  ],
+  [{ clientId: "c1", startTime: "12:00" }, { clientId: "c1", startTime: "12:30" }]
+);
+assert.equal(longNap.warnings.length, 0);
+assert.equal(longNap.assignments.filter(a => a.assignmentType === "BREAK_NAP" && a.staffId === "s1").length, 2, "an hour-long nap must link both half-hour breaks to the same staff member");
 console.log("Template nap/staff break synchronization tests passed.");
