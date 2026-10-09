@@ -15,7 +15,6 @@ import { placeStaffBreaksAfterCoverage } from "@/features/scheduler/engine/place
 import { calculateSchedulerReadiness } from "@/features/scheduler/engine/preflight";
 import { enrichBreakAssignmentsWithFixedEvents } from "@/features/scheduler/engine/reserveBreaks";
 import type {
-  SchedulerAssignment,
   SchedulerResult,
   SchedulerStaff,
 } from "@/features/scheduler/engine/types";
@@ -33,15 +32,6 @@ type GenerateRequest = {
   locationId?: string;
   date?: string;
 };
-
-function isAutomaticBreak(assignment: SchedulerAssignment): boolean {
-  return (
-    assignment.source === "AUTO" &&
-    (assignment.assignmentType === "BREAK" ||
-      assignment.assignmentType === "BREAK_NAP" ||
-      assignment.assignmentType === "BREAK_SPEECH")
-  );
-}
 
 function buildCoverageByRole(
   assignments: SchedulerAssignment[],
