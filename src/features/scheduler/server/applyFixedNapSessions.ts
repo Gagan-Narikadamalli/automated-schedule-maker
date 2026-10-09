@@ -45,6 +45,16 @@ export async function applyFixedNapSessions(
   ]);
 
   const sessions = rawSessions as unknown as DatabaseRecord[];
+  // Manually linked BREAK_NAP assignments are client-specific nap evidence.
+  // Do not infer a client's nap from an unlinked generic staff break.
+  const manualNapSlots = new Map<string, Set<string>>();
+  for (const assignment of input.existingAssignments) {
+    if (assignment.assignmentType !== "BREAK_NAP" || !assignment.clientId) continue;
+    const slots = manualNapSlots.get(assignment.clientId) ?? new Set<string>();
+    slots.add(assignment.startTime);
+    manualNapSlots.set(assignment.clientId, slots);
+  }
+
   const primaryTemplate = (rawTemplates as unknown as DatabaseRecord[]).find((template) => Array.isArray(template.assignments) && template.assignments.length > 0);
   const templateNapSlots = new Map<string, Set<string>>();
   if (input.rules.autoUseWeekdayTemplate && primaryTemplate && Array.isArray(primaryTemplate.clientNapSlots)) {
@@ -93,7 +103,7 @@ export async function applyFixedNapSessions(
     const clientSessions = sessionsByClient.get(client.id) ?? [];
     const allowedSlots = [...client.requiredSlots];
 
-    if (clientSessions.length > 0 || (templateNapSlots.get(client.id)?.size ?? 0) > 0) {
+    if (clientSessions.length > 0 || (manualNapSlots.get(client.id)?.size ?? 0) > 0 || (templateNapSlots.get(client.id)?.size ?? 0) > 0) {
       return clientSessions
         .filter((session) => {
           const startTime = String(session.startTime ?? "");
@@ -151,7 +161,7 @@ export async function applyFixedNapSessions(
     const napSlots = [
       ...new Set([
         ...(napSlotsByClient.get(client.id) ?? new Set<string>()),
-        ...(clientSessions.length === 0 ? (templateNapSlots.get(client.id) ?? new Set<string>()) : []),
+        ...(clientSessions.length === 0 ? (manualNapSlots.get(client.id) ?? templateNapSlots.get(client.id) ?? new Set<string>()) : []),
       ]),
     ].sort();
 
