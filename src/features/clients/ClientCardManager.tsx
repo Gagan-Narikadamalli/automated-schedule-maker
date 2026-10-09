@@ -240,6 +240,7 @@ export function ClientCardManager() {
   const [modalOpen, setModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
   const [message, setMessage] = useState("Loading clients...");
   const { requestActionDialog, actionDialog } = useActionConfirmDialog();
 
@@ -376,6 +377,7 @@ export function ClientCardManager() {
     setWeeklyAttendanceSchedule(
       createWeeklySchedule("08:00", "16:00", false)
     );
+    setSaveError("");
     setModalOpen(true);
   }
 
@@ -515,7 +517,7 @@ export function ClientCardManager() {
       !form.lastName.trim() ||
       !form.startDate
     ) {
-      setMessage("Client first name, last name, and start date are required.");
+      setSaveError("Client first name, last name, and start date are required.");
       return;
     }
 
@@ -530,7 +532,7 @@ export function ClientCardManager() {
       : null;
 
     if (attendanceScheduleError) {
-      setMessage(attendanceScheduleError);
+      setSaveError(attendanceScheduleError);
       return;
     }
 
@@ -563,12 +565,14 @@ export function ClientCardManager() {
     });
 
     try {
+      setSaveError("");
       setSaving(true);
       const response = await fetch(
         editingId ? `/api/clients/${editingId}` : "/api/clients",
         {
           method: editingId ? "PATCH" : "POST",
           headers: { "Content-Type": "application/json" },
+          signal: AbortSignal.timeout(25000),
           body: JSON.stringify({
             locationId: selectedLocationId,
             firstName: form.firstName.trim(),
@@ -585,12 +589,12 @@ export function ClientCardManager() {
             assignedBcbaId: form.assignedBcbaId || null,
             assignedInternIds: form.assignedInternIds,
             attendancePatterns,
-            napPatterns: [],
             staffRelationships,
           }),
         }
       );
-      const data = (await response.json()) as ClientsResponse;
+      const rawResponse = await response.text();
+      const data = (rawResponse ? JSON.parse(rawResponse) : {}) as ClientsResponse;
 
       if (!response.ok) {
         throw new Error(data.error || "Client could not be saved.");
@@ -598,14 +602,16 @@ export function ClientCardManager() {
 
       const savedCode = displayCode;
       closeModal(true);
-      await loadLocationData(selectedLocationId);
-      setMessage(
+      // The profile has already been saved. A list refresh failure must not
+      // be reported as a failed save or keep the editor open.
+      void loadLocationData(selectedLocationId);
+      setSaveError(
         attendancePatterns.length > 0
           ? `${savedCode} was saved and is available to the scheduler.`
           : `${savedCode} was saved. Add attendance days/hours before the automatic scheduler can schedule this client.`
       );
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Client could not be saved.");
+      setSaveError(error instanceof Error ? error.message : "Client could not be saved.");
     } finally {
       setSaving(false);
     }
@@ -871,6 +877,11 @@ export function ClientCardManager() {
           </>
         }
       >
+        {saveError ? (
+          <div role="alert" style={{ position: "sticky", top: 0, zIndex: 12, marginBottom: 12, padding: "12px 16px", border: "1px solid #e49c9c", borderRadius: 10, background: "#fff0f0", color: "#842424", fontWeight: 750 }}>
+            Save was not completed: {saveError}
+          </div>
+        ) : null}
         <div className={cardStyles.formSection}>
           <h3>Client essentials</h3>
           <p>
