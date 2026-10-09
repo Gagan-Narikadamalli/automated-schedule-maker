@@ -28,6 +28,9 @@ jobs:
       - name: Test timed attendance overrides
         run: npx tsx scripts/test-attendance-windows.ts
 
+      - name: Test template nap and break linking
+        run: npx tsx scripts/test-template-nap-links.ts
+
       - name: Build application
         run: npm run build
         env:
