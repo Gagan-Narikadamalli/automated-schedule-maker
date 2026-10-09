@@ -957,6 +957,26 @@ function findBestStaffMember(
         return roleDifference;
       }
 
+      const previousAssignment = previousClientAssignment(
+        requirement,
+        assignments,
+        input.rules.slotLengthMinutes
+      );
+      const isRotationClient =
+        requirement.client.supportLevel === "ROTATION" ||
+        requirement.client.supportLevel === "HIGH_SUPPORT";
+
+      if (previousAssignment && !isRotationClient) {
+        const leftContinues =
+          left.staffMember.id === previousAssignment.staffId;
+        const rightContinues =
+          right.staffMember.id === previousAssignment.staffId;
+
+        if (leftContinues !== rightContinues) {
+          return leftContinues ? -1 : 1;
+        }
+      }
+
       const leftPreviousWeekdayStrength = exactReferenceMatchStrength(
         left.staffMember.id,
         requirement.client.id,
@@ -977,26 +997,6 @@ function findBestStaffMember(
       // displaced by a historical lower-priority relief-role assignment.
       if (leftPreviousWeekdayStrength !== rightPreviousWeekdayStrength) {
         return rightPreviousWeekdayStrength - leftPreviousWeekdayStrength;
-      }
-
-      const previousAssignment = previousClientAssignment(
-        requirement,
-        assignments,
-        input.rules.slotLengthMinutes
-      );
-      const isRotationClient =
-        requirement.client.supportLevel === "ROTATION" ||
-        requirement.client.supportLevel === "HIGH_SUPPORT";
-
-      if (previousAssignment && !isRotationClient) {
-        const leftContinues =
-          left.staffMember.id === previousAssignment.staffId;
-        const rightContinues =
-          right.staffMember.id === previousAssignment.staffId;
-
-        if (leftContinues !== rightContinues) {
-          return leftContinues ? -1 : 1;
-        }
       }
 
       if (right.score !== left.score) {
