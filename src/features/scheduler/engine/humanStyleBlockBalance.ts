@@ -481,6 +481,9 @@ export function balanceScheduleLikeHuman({
       rules.slotLengthMinutes
     );
 
+    const originalHandoffs = clients.reduce((total, client) =>
+      total + Math.max(0, clientRuns(client.id, working).length - 1), 0);
+
     for (const candidate of candidates) {
       const containsExactTemplateMatch = candidate.pairs.some(
         ({ left, right }) =>
@@ -502,6 +505,12 @@ export function balanceScheduleLikeHuman({
       );
 
       if (!swapped) {
+        continue;
+      }
+      const swappedHandoffs = clients.reduce((total, client) =>
+        total + Math.max(0, clientRuns(client.id, swapped).length - 1), 0);
+      if (swappedHandoffs > originalHandoffs) {
+        // Stylistic balancing cannot fragment an otherwise healthy pairing.
         continue;
       }
 
