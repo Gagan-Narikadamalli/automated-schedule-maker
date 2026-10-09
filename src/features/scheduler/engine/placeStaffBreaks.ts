@@ -140,17 +140,37 @@ function findFixedEventForStaffSlot(
   clients: SchedulerClient[],
   slotLengthMinutes: number
 ): FixedEventCandidate | null {
-  const previousTime = shiftTime(startTime, -slotLengthMinutes);
-  const nextTime = shiftTime(startTime, slotLengthMinutes);
-  const adjacentClientIds = assignments
-    .filter(
-      (assignment) =>
-        assignment.staffId === staffId &&
-        assignment.assignmentType === "CLIENT_1_TO_1" &&
-        Boolean(assignment.clientId) &&
-        (assignment.startTime === previousTime || assignment.startTime === nextTime)
-    )
-    .map((assignment) => assignment.clientId as string);
+  // Consider both ends of a continuous nap/speech range. A 90-minute nap
+  // should still link to the caregiver who covered the client before nap,
+  // rather than considering only the immediately adjacent half hour.
+  const adjacentClientIds: string[] = [];
+  for (const client of clients) {
+    const eventSlots = client.napSlots.includes(startTime)
+      ? client.napSlots : client.speechSlots.includes(startTime)
+        ? client.speechSlots : [];
+    if (!eventSlots.length) continue;
+    const slots = new Set(eventSlots);
+    let first = startTime;
+    let last = startTime;
+    while (true) {
+      const prior = shiftTime(first, -slotLengthMinutes);
+      if (!prior || !slots.has(prior)) break;
+      first = prior;
+    }
+    while (true) {
+      const after = shiftTime(last, slotLengthMinutes);
+      if (!after || !slots.has(after)) break;
+      last = after;
+    }
+    const previous = shiftTime(first, -slotLengthMinutes);
+    const next = shiftTime(last, slotLengthMinutes);
+    if (assignments.some((assignment) =>
+      assignment.staffId === staffId &&
+      assignment.assignmentType === "CLIENT_1_TO_1" &&
+      assignment.clientId === client.id &&
+      (assignment.startTime === previous || assignment.startTime === next)
+    )) adjacentClientIds.push(client.id);
+  }
 
   const candidates: FixedEventCandidate[] = [];
 
@@ -342,7 +362,12 @@ function findBestFreeBreaks(
           detail.fixedEvent ? detail.fixedEvent.priority : 100
         )
       );
+      // A natural client nap break wins over generic free time, even if a
+      // historical generic break happens elsewhere. We should not give the
+      // caregiver a separate Break when their own client is napping.
+      const hasNapBreak = details.some((detail) => detail.fixedEvent?.assignmentType === "BREAK_NAP");
       const score =
+        (hasNapBreak ? -100000 : 0) +
         eventPriority * 10 +
         timeDistanceFromNoon(startTime) -
         Math.min(historicalCount, 4) * historicalPriority;
