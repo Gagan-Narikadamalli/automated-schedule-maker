@@ -22,6 +22,11 @@ export function pinWorkbookTemplates(input: SchedulerInput): {
   const clientSlots = new Set<string>();
   let primaryCount = 0;
   let secondaryCount = 0;
+  const primaryClientIds = new Set(input.referenceAssignments
+    .filter(item => item.source === "TEMPLATE" &&
+      item.note?.startsWith("Priority 1 saved workbook template:") &&
+      item.assignmentType === "CLIENT_1_TO_1" && Boolean(item.clientId))
+    .map(item => item.clientId));
 
   // The references are already provided in layer order by the database
   // builder: first exact-date workbook, then previous-week workbook.
@@ -43,7 +48,9 @@ export function pinWorkbookTemplates(input: SchedulerInput): {
     } else if (staffSlots.has(staffKey)) {
       reason = "A higher-priority workbook block already occupies this staff/time cell";
     } else if (reference.assignmentType === "CLIENT_1_TO_1") {
-      if (!client || !client.requiredSlots.includes(reference.startTime)) {
+      if (reference.note?.startsWith("Priority 2") && primaryClientIds.has(reference.clientId)) {
+        reason = "Client already appears in the primary week template";
+      } else if (!client || !client.requiredSlots.includes(reference.startTime)) {
         reason = "Client is absent or outside required service time";
       } else if (clientSlots.has(clientKey)) {
         reason = "A higher-priority workbook block already covers this client/time cell";
