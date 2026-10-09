@@ -604,44 +604,17 @@ function testHumanStyleBlockExchangeBalancesLongRuns() {
     },
   });
 
-  assert.ok(
-    result.blockSwapCount >= 1,
-    "Human-style balancing should exchange an afternoon block when two long continuous blocks can be cleanly swapped."
-  );
+  assert.equal(result.blockSwapCount, 0,
+    "Styling must not split the original healthy client runs merely to reach a target variety.");
+  const afterCoverage = result.assignments.filter(a => a.assignmentType === "CLIENT_1_TO_1");
+  for (const original of assignments.filter(a => a.assignmentType === "CLIENT_1_TO_1")) {
+    assert.ok(afterCoverage.some(a =>
+      a.staffId === original.staffId && a.clientId === original.clientId &&
+      a.startTime === original.startTime
+    ), "A stable baseline must preserve its original staff/client pairing.");
+  }
+  assert.ok(result.penaltyAfter <= result.penaltyBefore);
 
-  const izzyClients = new Set(
-    result.assignments
-      .filter(
-        (assignment) =>
-          assignment.staffId === "izzy" &&
-          assignment.assignmentType === "CLIENT_1_TO_1"
-      )
-      .map((assignment) => assignment.clientId)
-  );
-  const dezzClients = new Set(
-    result.assignments
-      .filter(
-        (assignment) =>
-          assignment.staffId === "dezz" &&
-          assignment.assignmentType === "CLIENT_1_TO_1"
-      )
-      .map((assignment) => assignment.clientId)
-  );
-
-  assert.equal(
-    izzyClients.size,
-    2,
-    "Izzy should end with two stable clients rather than owning only ZiBo all day."
-  );
-  assert.equal(
-    dezzClients.size,
-    2,
-    "Dezz should keep a two-client day after the clean block exchange."
-  );
-  assert.ok(
-    result.penaltyAfter < result.penaltyBefore,
-    "The human-style exchange must improve the schedule quality score."
-  );
 }
 
 function testPairingCanResumeAcrossClientNap() {
