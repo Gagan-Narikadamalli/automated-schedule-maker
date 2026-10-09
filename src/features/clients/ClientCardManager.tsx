@@ -547,7 +547,7 @@ export function ClientCardManager() {
     );
 
     if (displayCode.length < 4) {
-      setMessage(
+      setSaveError(
         "First name and last name must each contain at least two letters so the calendar code can be generated."
       );
       return;
