@@ -1,3 +1,4 @@
+import { selectBestWeekdayTemplate } from "@/features/scheduler/server/selectBestWeekdayTemplate";
 import {
   getDayKeys,
   getSlotsInsideTimeRange,
@@ -1010,15 +1011,9 @@ export async function buildDaySchedulerInput(
     assignmentDocuments
   );
 
-  const primaryExactTemplate =
-    extendedRules.autoUseWeekdayTemplate
-      ? templateDocuments.find(
-          (template) =>
-            template.learningOnly !== true &&
-            Array.isArray(template.assignments) &&
-            template.assignments.length > 0
-        ) ?? null
-      : null;
+  const primaryExactTemplate = extendedRules.autoUseWeekdayTemplate
+    ? selectBestWeekdayTemplate(templateDocuments, staff, clients)
+    : null;
 
   const templateReferences = primaryExactTemplate
     ? mapReferenceAssignments(
