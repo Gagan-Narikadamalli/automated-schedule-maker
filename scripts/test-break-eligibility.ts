@@ -124,7 +124,7 @@ function testBreakDoesNotRemoveOnlyEligibleTechnician() {
   );
 }
 
-function testLongNapBreaksPreserveClientRelationship() {
+function testNapWindowKeepsAutomaticBreaksPlain() {
   const linkedClient = {
     ...createClient("ClientA", {}),
     napSlots: ["12:00", "12:30", "13:00"],
@@ -147,14 +147,10 @@ function testLongNapBreaksPreserveClientRelationship() {
   const enriched = enrichBreakAssignmentsWithFixedEvents(assignments, [linkedClient], 30);
   for (const slot of ["12:00", "12:30", "13:00"]) {
     assert.ok(enriched.some((item) =>
-      item.staffId === "staff-a" && item.clientId === "ClientA" &&
-      item.startTime === slot && item.assignmentType === "BREAK_NAP"
-    ), `The entire nap period must retain the correct staff-client relationship at ${slot}`);
+      item.staffId === "staff-a" && !item.clientId &&
+      item.startTime === slot && item.assignmentType === "BREAK"
+    ), `Automatic break at ${slot} must stay a plain BREAK even during a nap window`);
   }
-  assert.ok(enriched.some((item) =>
-    item.staffId === "staff-b" && item.startTime === "12:30" &&
-    item.assignmentType === "BREAK" && !item.clientId
-  ), "An unrelated staff member's break must not acquire a child's nap");
 }
 
 function testNapBreakForRegularBTWinsOverEmptyGenericSlot() {
@@ -182,12 +178,15 @@ function testNapBreakForRegularBTWinsOverEmptyGenericSlot() {
       breakEligibilityHours: 0, slotLengthMinutes: 30 },
     schedulerRules: { ...SCHEDULER_RULES, preventSameStaffClientRepeatSameDay: false },
   });
-  const btBreaks = result.assignments.filter(a => a.staffId === "bt" &&
-    ["BREAK", "BREAK_NAP"].includes(a.assignmentType));
+  const btBreaks = result.assignments.filter(
+    (a) => a.staffId === "bt" && a.assignmentType === "BREAK"
+  );
   assert.equal(btBreaks.length, 1, "BT must get exactly one break");
-  assert.equal(btBreaks[0].assignmentType, "BREAK_NAP", "Use client's own nap, not an unrelated free break");
-  assert.equal(btBreaks[0].clientId, "ZiBo");
-  assert.ok(["12:00", "12:30"].includes(btBreaks[0].startTime));
+  assert.equal(btBreaks[0].clientId, undefined, "Automatic breaks must not encode a nap client");
+  assert.ok(
+    ["12:00", "12:30"].includes(btBreaks[0].startTime),
+    "A nap window may still be the preferred time for the plain BREAK"
+  );
   assert.equal(result.assignments.filter(a => a.assignmentType === "CLIENT_1_TO_1" &&
     a.clientId === "ZiBo" && a.staffId === "bt").length, 3,
     "Do not move client to relief when nap already provides the regular BT a break");
@@ -216,11 +215,13 @@ function testClientNapCannotBeClaimedByTwoStaffBreaks() {
       breakEligibilityHours:0,slotLengthMinutes:30 },
     schedulerRules:{...SCHEDULER_RULES, preventSameStaffClientRepeatSameDay:false},
   });
-  const linked = result.assignments.filter(a=>a.assignmentType==="BREAK_NAP" && a.clientId==="ZiBo");
-  for (const time of ["12:00","12:30"]) {
-    assert.ok(linked.filter(a=>a.startTime===time).length<=1,
-      "A client nap must not be claimed by two simultaneous staff breaks");
-  }
+  const automaticBreaks = result.assignments.filter(
+    (a) => a.assignmentType === "BREAK"
+  );
+  assert.ok(
+    automaticBreaks.every((a) => !a.clientId),
+    "Automatic breaks must never claim a client nap"
+  );
 }
 
 function testEnrichmentNeverDuplicatesNapLink() {
@@ -232,16 +233,27 @@ function testEnrichmentNeverDuplicatesNapLink() {
     { id: "break-second", staffId: "second", startTime: "12:00", assignmentType: "BREAK", source: "AUTO", locked: false },
   ];
   const enriched = enrichBreakAssignmentsWithFixedEvents(assignments, [client], 30);
-  assert.equal(enriched.filter(a => a.assignmentType === "BREAK_NAP" && a.clientId === "ZiBo" && a.startTime === "12:00").length, 1,
-    "A single client nap must not be attached to two staff breaks");
-  assert.equal(enriched.filter(a => ["BREAK", "BREAK_NAP"].includes(a.assignmentType) && a.startTime === "12:00").length, 2,
-    "The other staff still receives a break, but not a duplicate linked client nap");
+  assert.equal(
+    enriched.filter(
+      (a) => a.assignmentType === "BREAK" && a.startTime === "12:00"
+    ).length,
+    2,
+    "Both staff breaks remain plain BREAK records"
+  );
+  assert.ok(
+    enriched.every(
+      (a) =>
+        a.assignmentType !== "BREAK_NAP" &&
+        a.assignmentType !== "BREAK_SPEECH"
+    ),
+    "Automatic enrichment must not create combined break/nap or break/speech records"
+  );
 }
 
 function runBreakEligibilityRegressionScenarios() {
   testBreakDoesNotRemoveOnlyEligibleTechnician();
   testNapBreakForRegularBTWinsOverEmptyGenericSlot();
-  testLongNapBreaksPreserveClientRelationship();
+  testNapWindowKeepsAutomaticBreaksPlain();
   testClientNapCannotBeClaimedByTwoStaffBreaks();
   testEnrichmentNeverDuplicatesNapLink();
   console.log("Break eligibility regression scenarios passed.");
