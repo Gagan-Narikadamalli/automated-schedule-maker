@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ManagementModal } from "@/components/ManagementModal";
 
 import styles from "./TemplateEditorModal.module.css";
+import { synchronizeTemplateNaps } from "./templateNapLinks";
 
 type TemplateAssignment = {
   id?: string;
@@ -178,7 +179,6 @@ export function TemplateEditorModal({
         setName(data.template.name);
         setDayOfWeek(data.template.dayOfWeek);
         setAssignments(data.template.assignments ?? []);
-      setClientNapSlots(data.template.clientNapSlots ?? []);
         setClientNapSlots(data.template.clientNapSlots ?? []);
         setMessage(
           "Template-only editor. Changes here do not touch any live schedule until you explicitly apply the template."
@@ -244,7 +244,7 @@ export function TemplateEditorModal({
       current = addMinutes(current, 30);
     }
     return defaults;
-  }, [assignments]);
+  }, [assignments, clientNapSlots]);
 
   const napKeys = useMemo(() => new Set(clientNapSlots.map((nap) => `${nap.clientId}|${nap.startTime}`)), [clientNapSlots]);
 
@@ -263,6 +263,21 @@ export function TemplateEditorModal({
     setClientNapSlots((current) => enabled
       ? [...current.filter((item) => item.clientId !== clientId || item.startTime !== startTime), { clientId, startTime }]
       : current.filter((item) => item.clientId !== clientId || item.startTime !== startTime));
+    if (!enabled) {
+      setAssignments((current) => current.filter((item) =>
+        !(item.assignmentType === "BREAK_NAP" && item.clientId === clientId && item.startTime === startTime)));
+    }
+  }
+  function setNapRange(clientId: string, from: string, until: string) {
+    if (until <= from) { setMessage("Nap end must be later than its start."); return; }
+    const range: string[] = [];
+    for (let time = from; time < until && range.length < 18; time = addMinutes(time, 30)) range.push(time);
+    setClientNapSlots((current) => [
+      ...current.filter((item) => item.clientId !== clientId),
+      ...range.map((startTime) => ({ clientId, startTime })),
+    ]);
+    setAssignments((current) => current.filter((item) =>
+      !(item.assignmentType === "BREAK_NAP" && item.clientId === clientId && !range.includes(item.startTime))));
   }
 
   function updateCell(
@@ -296,6 +311,12 @@ export function TemplateEditorModal({
         ];
       }
 
+      if (value.startsWith("NAP_CLIENT:")) {
+        const clientId = value.slice("NAP_CLIENT:".length);
+        setClientNapSlots((current) => [...current.filter((item) => !(item.clientId === clientId && item.startTime === startTime)), { clientId, startTime }]);
+        return [...next, { startTime, endTime: addMinutes(startTime, 30), staffId, clientId, assignmentType: "BREAK_NAP", locked: false }];
+      }
+
       if (value.startsWith("TYPE:")) {
         return [
           ...next,
@@ -319,6 +340,8 @@ export function TemplateEditorModal({
 
     try {
       setSaving(true);
+      const linked = synchronizeTemplateNaps(assignments, clientNapSlots);
+      if (linked.warnings.length) { setMessage("Review template nap conflicts before saving: " + linked.warnings.slice(0, 4).join(" ")); return; }
       setMessage("Saving template changes...");
 
       const response = await fetch(
@@ -330,8 +353,8 @@ export function TemplateEditorModal({
             locationId,
             name: name.trim(),
             dayOfWeek,
-            assignments,
-            clientNapSlots,
+            assignments: linked.assignments,
+            clientNapSlots: linked.naps,
           }),
         }
       );
@@ -343,6 +366,7 @@ export function TemplateEditorModal({
 
       setTemplate(data.template);
       setAssignments(data.template.assignments ?? []);
+      setClientNapSlots(data.template.clientNapSlots ?? []);
       setName(data.template.name);
       setDayOfWeek(data.template.dayOfWeek);
       setMessage(
@@ -451,6 +475,28 @@ export function TemplateEditorModal({
           <div className={styles.notice}>
             Client naps are stored in this template. Staff View previews a Break + Nap for the employee paired with that client near the nap time. Explicit staff cells are never silently overwritten.
           </div>
+          {view === "client" && <div className={styles.napRangePanel}>
+            {clients.map((client) => {
+              const times = clientNapSlots.filter((nap) => nap.clientId === client.id).map((nap) => nap.startTime).sort();
+              const from = times[0] ?? "11:30";
+              const until = times.length ? addMinutes(times[times.length - 1], 30) : "12:00";
+              return <div key={client.id} className={styles.napRangeRow}>
+                <strong><i style={{ backgroundColor: client.color }} />{client.code}</strong>
+                <label>From <select value={from} onChange={(event) => setNapRange(client.id, event.target.value, until > event.target.value ? until : addMinutes(event.target.value, 30))}>
+                  {slots.filter((slot) => slot < "17:00").map((slot) => <option key={slot} value={slot}>{formatTime(slot)}</option>)}
+                </select></label>
+                <label>To <select value={until} onChange={(event) => setNapRange(client.id, from, event.target.value)}>
+                  {slots.filter((slot) => slot >= addMinutes(from, 30) && slot < "17:00").map((slot) => <option key={slot} value={slot}>{formatTime(slot)}</option>)}
+                  <option value="17:00">5:00 PM</option>
+                </select></label>
+                <button type="button" className="button button-secondary" onClick={() => {
+                  setClientNapSlots((current) => current.filter((nap) => nap.clientId !== client.id));
+                  setAssignments((current) => current.filter((assignment) => !(assignment.assignmentType === "BREAK_NAP" && assignment.clientId === client.id)));
+                }}>Clear nap</button>
+                {!times.length && <span>Choose a range to add nap</span>}
+              </div>;
+            })}
+          </div>}
           <div className={styles.gridWrap}>
             {view === "client" ? <table className={styles.grid}>
               <thead><tr><th className={styles.timeHeader}>Time</th>{clients.map((client) => <th key={client.id}><span className={styles.staffHeader}><i style={{ backgroundColor: client.color }} />{client.code}</span></th>)}</tr></thead>
@@ -493,7 +539,7 @@ export function TemplateEditorModal({
                       return (
                         <td key={member.id}>
                           <select
-                            value={napPreview ? "TYPE:BREAK_NAP" : assignmentValue(assignment)}
+                            value={napPreview ? `NAP_CLIENT:${pairedNap?.clientId}` : (assignment?.assignmentType === "BREAK_NAP" && assignment.clientId ? `NAP_CLIENT:${assignment.clientId}` : assignmentValue(assignment))}
                             style={{
                               background: cellBackground(
                                 assignment ?? (napPreview ? { startTime: slot, endTime: addMinutes(slot, 30), staffId: member.id, clientId: pairedNap?.clientId ?? null, assignmentType: "BREAK_NAP", locked: false } : undefined),
@@ -521,9 +567,10 @@ export function TemplateEditorModal({
                             </optgroup>
                             <optgroup label="Events / breaks">
                               <option value="TYPE:BREAK">Break</option>
-                              <option value="TYPE:BREAK_NAP">
-                                Break + Nap
-                              </option>
+                              <optgroup label="Break + Client Nap">
+                                {clients.map((client) => <option key={client.id} value={`NAP_CLIENT:${client.id}`}>Break + {client.code} Nap</option>)}
+                              </optgroup>
+                              <option value="TYPE:BREAK_NAP">Break + Nap (unlinked)</option>
                               <option value="TYPE:BREAK_SPEECH">
                                 Break + Speech
                               </option>
