@@ -411,7 +411,7 @@ export function ScheduleGridEnhanced({
     setNapPicker({ preset, rows: positions });
   }
 
-  function requestNapSelection(preset: SchedulePreset) {
+  function requestNapSelection() {
     if (!manualMode) {
       onConflict("Turn on Manual Mode to link a staff break with a client's nap.");
       return;
@@ -473,7 +473,7 @@ export function ScheduleGridEnhanced({
 
   async function applyPresetToSelection(preset: SchedulePreset) {
     if (preset.assignmentType === "BREAK_NAP") {
-      requestNapSelection(preset);
+      requestNapSelection();
       return;
     }
     const nextGrid = cloneGrid(grid);
