@@ -193,10 +193,41 @@ function testNapBreakForRegularBTWinsOverEmptyGenericSlot() {
     "Do not move client to relief when nap already provides the regular BT a break");
 }
 
+function testClientNapCannotBeClaimedByTwoStaffBreaks() {
+  const slots = ["11:30", "12:00", "12:30", "13:00"];
+  const staff = ["first", "second"].map(id => ({
+    ...createStaff(id, id, "BT"), availableSlots: slots,
+  }));
+  const client = {
+    ...createClient("ZiBo", {}),
+    requiredSlots: ["11:30", "13:00"],
+    napSlots: ["12:00", "12:30"],
+  };
+  const initial: SchedulerAssignment[] = [
+    { id:"before", staffId:"first", clientId:"ZiBo", startTime:"11:30",
+      assignmentType:"CLIENT_1_TO_1", source:"AUTO", locked:false },
+    { id:"after", staffId:"second", clientId:"ZiBo", startTime:"13:00",
+      assignmentType:"CLIENT_1_TO_1", source:"AUTO", locked:false },
+  ];
+  const result = placeStaffBreaksAfterCoverage({
+    staff, clients:[client], assignments:initial, referenceAssignments:[],
+    callOutStaffIds:[],
+    rules:{ breakWindowStart:"11:30",breakWindowEnd:"13:00", defaultBreakMinutes:30,
+      breakEligibilityHours:0,slotLengthMinutes:30 },
+    schedulerRules:{...SCHEDULER_RULES, preventSameStaffClientRepeatSameDay:false},
+  });
+  const linked = result.assignments.filter(a=>a.assignmentType==="BREAK_NAP" && a.clientId==="ZiBo");
+  for (const time of ["12:00","12:30"]) {
+    assert.ok(linked.filter(a=>a.startTime===time).length<=1,
+      "A client nap must not be claimed by two simultaneous staff breaks");
+  }
+}
+
 function runBreakEligibilityRegressionScenarios() {
   testBreakDoesNotRemoveOnlyEligibleTechnician();
   testNapBreakForRegularBTWinsOverEmptyGenericSlot();
   testLongNapBreaksPreserveClientRelationship();
+  testClientNapCannotBeClaimedByTwoStaffBreaks();
   console.log("Break eligibility regression scenarios passed.");
 }
 
