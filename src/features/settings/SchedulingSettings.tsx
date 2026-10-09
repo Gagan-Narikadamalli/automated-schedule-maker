@@ -131,7 +131,7 @@ const DEFAULT_RULES: RulesForm = {
   preferredClientsPerStaffPerDay: 2,
   preferredStaffPerClientPerDay: 2,
   minimumClientStaffAssignmentMinutes: 30,
-  maximumClientStaffConsecutiveHours: 4,
+  maximumClientStaffConsecutiveHours: 5,
   preventSameStaffClientRepeatSameDay: false,
   allowSameStaffClientRepeatForCoverageException: true,
   breakSchedulingEnabled: true,
@@ -392,12 +392,12 @@ export function SchedulingSettings() {
     }
 
     if (
-      ![3, 3.5, 4].includes(
+      ![3, 3.5, 4, 4.5, 5].includes(
         rules.maximumClientStaffConsecutiveHours
       )
     ) {
       setMessage(
-        "Maximum continuous client/staff time must be 3, 3.5, or 4 hours."
+        "Maximum continuous client/staff time must be between 3 and 5 hours in half-hour increments."
       );
       return;
     }
@@ -1345,10 +1345,12 @@ export function SchedulingSettings() {
               <option value={3}>3 hours</option>
               <option value={3.5}>3.5 hours</option>
               <option value={4}>4 hours</option>
+              <option value={4.5}>4.5 hours</option>
+              <option value={5}>5 hours</option>
             </select>
             <small>
               The automatic scheduler rotates to another eligible staff member
-              when this continuous limit is reached.
+              at the continuous hard limit. Prefer four-hour blocks; a final hour can stay with the same client when it completes the shift.
             </small>
           </label>
 
