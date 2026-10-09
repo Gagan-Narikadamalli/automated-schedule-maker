@@ -223,11 +223,27 @@ function testClientNapCannotBeClaimedByTwoStaffBreaks() {
   }
 }
 
+function testEnrichmentNeverDuplicatesNapLink() {
+  const client = { ...createClient("ZiBo", {}), napSlots: ["12:00"], requiredSlots: ["11:30", "12:30"] };
+  const assignments: SchedulerAssignment[] = [
+    { id: "before", staffId: "first", clientId: "ZiBo", startTime: "11:30", assignmentType: "CLIENT_1_TO_1", source: "AUTO", locked: false },
+    { id: "after", staffId: "second", clientId: "ZiBo", startTime: "12:30", assignmentType: "CLIENT_1_TO_1", source: "AUTO", locked: false },
+    { id: "break-first", staffId: "first", startTime: "12:00", assignmentType: "BREAK", source: "AUTO", locked: false },
+    { id: "break-second", staffId: "second", startTime: "12:00", assignmentType: "BREAK", source: "AUTO", locked: false },
+  ];
+  const enriched = enrichBreakAssignmentsWithFixedEvents(assignments, [client], 30);
+  assert.equal(enriched.filter(a => a.assignmentType === "BREAK_NAP" && a.clientId === "ZiBo" && a.startTime === "12:00").length, 1,
+    "A single client nap must not be attached to two staff breaks");
+  assert.equal(enriched.filter(a => ["BREAK", "BREAK_NAP"].includes(a.assignmentType) && a.startTime === "12:00").length, 2,
+    "The other staff still receives a break, but not a duplicate linked client nap");
+}
+
 function runBreakEligibilityRegressionScenarios() {
   testBreakDoesNotRemoveOnlyEligibleTechnician();
   testNapBreakForRegularBTWinsOverEmptyGenericSlot();
   testLongNapBreaksPreserveClientRelationship();
   testClientNapCannotBeClaimedByTwoStaffBreaks();
+  testEnrichmentNeverDuplicatesNapLink();
   console.log("Break eligibility regression scenarios passed.");
 }
 
