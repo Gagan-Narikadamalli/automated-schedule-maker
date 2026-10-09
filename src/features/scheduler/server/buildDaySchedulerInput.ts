@@ -875,9 +875,13 @@ function mapReferenceAssignments(
     references.push({
       id: `${source.toLowerCase()}-${index}-${staffId}-${startTime}`,
       staffId,
-      clientId,
+      clientId: assignmentType === "CLIENT_1_TO_1" ? clientId : undefined,
       startTime,
-      assignmentType,
+      assignmentType:
+        assignmentType === "BREAK_NAP" ||
+        assignmentType === "BREAK_SPEECH"
+          ? "BREAK"
+          : assignmentType,
       source,
       locked: false,
       note: label,
