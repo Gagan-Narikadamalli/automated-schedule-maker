@@ -39,6 +39,7 @@ type ScheduleGridProps = {
   staff: StaffColumn[];
   initialGrid: DemoGridCell[][];
   manualMode: boolean;
+  clients?: Array<{ id: string; code: string; color?: string }>;
   placementCell?: DemoGridCell | null;
   onPlacementComplete?: () => Promise<void> | void;
   onConflict: (message: string) => void;
@@ -144,6 +145,7 @@ export function ScheduleGridEnhanced({
   staff,
   initialGrid,
   manualMode,
+  clients = [],
   placementCell = null,
   onPlacementComplete,
   onConflict,
@@ -159,6 +161,8 @@ export function ScheduleGridEnhanced({
   const [editingCell, setEditingCell] = useState<CellPosition | null>(null);
   const [draggedCell, setDraggedCell] = useState<CellPosition | null>(null);
   const [draggedCells, setDraggedCells] = useState<CellPosition[]>([]);
+  const [napPicker, setNapPicker] = useState<{ preset: SchedulePreset; rows: CellPosition[] } | null>(null);
+  const [napClientId, setNapClientId] = useState("");
   const [dragOverCell, setDragOverCell] = useState<CellPosition | null>(null);
   const [moveSource, setMoveSource] = useState<CellPosition | null>(null);
   const [dragSelecting, setDragSelecting] = useState(false);
@@ -385,7 +389,77 @@ export function ScheduleGridEnhanced({
     }
   }
 
+  function nearbyClientsForStaff(column: number, row: number): string[] {
+    const found: string[] = [];
+    for (let distance = 1; distance <= grid.length; distance++) {
+      for (const nearRow of [row - distance, row + distance]) {
+        const cell = grid[nearRow]?.[column];
+        if (cell?.assignmentType === "CLIENT_1_TO_1" && cell.clientId && !found.includes(cell.clientId)) {
+          found.push(cell.clientId);
+        }
+      }
+      if (found.length) break;
+    }
+    return found;
+  }
+
+  function requestNapSelection(preset: SchedulePreset) {
+    if (!manualMode) {
+      onConflict("Turn on Manual Mode to link a staff break with a client's nap.");
+      return;
+    }
+    const positions: CellPosition[] = [];
+    for (let row = normalizedSelection.firstRow; row <= normalizedSelection.lastRow; row++) {
+      for (let column = normalizedSelection.firstColumn; column <= normalizedSelection.lastColumn; column++) {
+        if (!isScratchColumn(column)) positions.push({ row, column });
+      }
+    }
+    if (!positions.length) return;
+    const nearby = nearbyClientsForStaff(positions[0].column, positions[0].row);
+    setNapClientId(nearby[0] ?? "");
+    setNapPicker({ preset, rows: positions });
+  }
+
+  async function applyLinkedNap() {
+    if (!napPicker || !napClientId) return;
+    const client = clients.find((item) => item.id === napClientId);
+    if (!client) {
+      onConflict("Select a valid client before saving the Break + Nap.");
+      return;
+    }
+    const preset = napPicker.preset;
+    const nextGrid = cloneGrid(grid);
+    const mutations: ScheduleGridMutation[] = [];
+    let occupied = 0;
+    let unavailable = 0;
+    const selected = napPicker.rows;
+    for (const { row, column } of selected) {
+      const current = grid[row][column];
+      if (current.assignmentType === "UNAVAILABLE") unavailable++;
+      else if (isOccupied(current)) occupied++;
+      const next = {
+        ...createPresetScheduleCell(preset, current),
+        text: `Break/Nap · ${client.code}`,
+        clientId: client.id,
+        clientCode: client.code,
+      };
+      nextGrid[row][column] = next;
+      mutations.push(mutationForCell(row, column, current, next, current.assignmentType === "UNAVAILABLE"));
+    }
+    if (!(await confirmManualOverride(occupied, unavailable, "replaced by Break + Nap"))) return;
+    const saved = await commitMutations(nextGrid, mutations, true);
+    if (saved) {
+      setNapPicker(null);
+      setNapClientId("");
+      onConflict(`Linked ${client.code}'s nap to ${selected.length} staff break block(s). Existing staff-client assignments outside these blocks are unchanged.`);
+    }
+  }
+
   async function applyPresetToSelection(preset: SchedulePreset) {
+    if (preset.assignmentType === "BREAK_NAP") {
+      requestNapSelection(preset);
+      return;
+    }
     const nextGrid = cloneGrid(grid);
     const mutations: ScheduleGridMutation[] = [];
     const displaced: string[] = [];
@@ -1651,6 +1725,34 @@ export function ScheduleGridEnhanced({
         </table>
       </div>
 
+      {napPicker && (
+        <div role="dialog" aria-modal="true" aria-label="Link client nap to staff break"
+          style={{ position: "fixed", inset: 0, background: "rgba(5,24,42,.55)", display: "grid", placeItems: "center", zIndex: 1000, padding: 20 }}>
+          <div style={{ width: "min(100%, 480px)", padding: 24, background: "#fff", borderRadius: 16, boxShadow: "0 16px 54px #081d3260" }}>
+            <h3 style={{ marginTop: 0 }}>Break + Client Nap</h3>
+            <p>Choose the child who is napping while the selected staff member takes a break. Clients already paired with this staff member are listed first.</p>
+            <label style={{ display: "grid", gap: 8, fontWeight: 700 }}>
+              Client
+              <select value={napClientId} onChange={(event) => setNapClientId(event.target.value)}
+                style={{ width: "100%", padding: 12, borderRadius: 9, border: "1px solid #b9cbd9" }}>
+                <option value="">Select a client</option>
+                {[...clients].sort((a,b) => {
+                  const first = napPicker.rows[0];
+                  const preferred = nearbyClientsForStaff(first.column, first.row);
+                  return Number(preferred.includes(b.id)) - Number(preferred.includes(a.id)) || a.code.localeCompare(b.code);
+                }).map((client) => <option key={client.id} value={client.id}>
+                  {client.code}{napPicker.rows.some((pos) => nearbyClientsForStaff(pos.column, pos.row).includes(client.id)) ? " · Existing staff pairing" : ""}
+                </option>)}
+              </select>
+            </label>
+            <p style={{ fontSize: 13, color: "#516879" }}>This assigns the nap to the client and the break to the selected staff/time blocks. It does not create a new 1:1 pairing.</p>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+              <button type="button" className="button button-secondary" disabled={saving} onClick={() => setNapPicker(null)}>Cancel</button>
+              <button type="button" className="button button-primary" disabled={saving || !napClientId} onClick={() => void applyLinkedNap()}>Save Break + Nap</button>
+            </div>
+          </div>
+        </div>
+      )}
       {confirmation.dialog}
     </div>
   );
