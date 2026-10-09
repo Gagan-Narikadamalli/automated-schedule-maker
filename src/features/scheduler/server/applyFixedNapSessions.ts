@@ -25,7 +25,8 @@ export type FixedNapApplicationResult = {
 export async function applyFixedNapSessions(
   locationId: string,
   date: string,
-  input: SchedulerInput
+  input: SchedulerInput,
+  options: { ignoreNapSessions?: boolean } = {}
 ): Promise<FixedNapApplicationResult> {
   await connectToDatabase();
 
@@ -38,7 +39,7 @@ export async function applyFixedNapSessions(
   ]);
   // Only explicit Nap events can pause client coverage. Templates, profile
   // patterns, linked staff breaks, and default windows must never invent naps.
-  const sessions = rawSessions as unknown as DatabaseRecord[];
+  const sessions = options.ignoreNapSessions ? [] : rawSessions as unknown as DatabaseRecord[];
   const attendanceChanges = rawAttendanceChanges as unknown as DatabaseRecord[];
   const clientOverrides = new Map((rawOverrides as unknown as DatabaseRecord[]).map((entry) => [String(entry.personId), entry]));
   const sessionsByClient = new Map<string, DatabaseRecord[]>();
