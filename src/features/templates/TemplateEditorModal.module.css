@@ -182,3 +182,11 @@
 .napRangeRow span{color:#6a8190;font-size:.75rem}
 .napCell{min-height:39px;display:flex;align-items:center;justify-content:center;gap:7px;border:1px solid #cadce6;border-radius:8px;font-weight:800;font-size:.75rem;color:#22506c;cursor:pointer;padding:5px}
 .napCell input{accent-color:#198b85;width:16px;height:16px}
+
+.linkPanel{display:grid;gap:12px;border:2px solid #67a9c7;background:#f1f9ff;border-radius:14px;padding:16px}
+.linkPanel strong{color:#123b58;font-size:1rem}
+.linkPanel p{margin:3px 0;color:#466579;line-height:1.5}
+.linkPanel label{display:grid;gap:5px;font-weight:800;color:#31566c}
+.linkPanel select{padding:10px;border:1px solid #b8cfdc;border-radius:9px;background:white;color:#16394f;max-width:100%}
+.linkActions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px}
+.linkError{border:1px solid #f0b4b4;border-radius:8px;padding:10px;background:#fff1f1;color:#892222!important}
