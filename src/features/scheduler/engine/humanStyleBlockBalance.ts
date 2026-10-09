@@ -137,10 +137,6 @@ function schedulePenalty(
   rules: SchedulerRules
 ): number {
   let penalty = 0;
-  const preferredClientsPerStaff = Math.max(
-    rules.preferredClientsPerStaffPerDay ?? 2,
-    1
-  );
   const preferredStaffPerClient = Math.max(
     rules.preferredStaffPerClientPerDay ?? 2,
     1
