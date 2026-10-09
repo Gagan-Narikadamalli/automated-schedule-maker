@@ -1250,6 +1250,7 @@ export function ScheduleWorkspaceV3() {
               <ScheduleGridEnhanced
               key={`${locationId}-${selectedDate}-${gridVersion}-${fullDayCallOutStaffIds.join("-")}`}
               staff={visibleStaff}
+              clients={clients.map((client) => ({ id: client.id, code: client.code }))}
               initialGrid={visibleGrid}
               manualMode={manualMode}
               placementCell={placementCell}
