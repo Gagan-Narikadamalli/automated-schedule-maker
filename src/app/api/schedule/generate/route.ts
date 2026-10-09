@@ -27,9 +27,7 @@ import { persistScheduleReplacementSafely } from "@/features/scheduler/server/pe
 import { syncAutoUnplacedGaps } from "@/features/scheduler/server/syncAutoUnplacedGaps";
 import { writeAuditLog } from "@/lib/api/audit";
 import { connectToDatabase } from "@/lib/db";
-import { ScheduleTemplate } from "@/models/ScheduleTemplate";
-import { ScheduleAssignment } from "@/models/ScheduleAssignment";
-import { Location } from "@/models/Location";
+import { pinWorkbookTemplates } from "@/features/scheduler/engine/pinWorkbookTemplates";
 
 type GenerateRequest = {
   locationId?: string;
@@ -134,77 +132,6 @@ export async function POST(request: Request) {
       return forbiddenResponse("You do not have access to this location.");
     }
 
-    // Exact Oct 8 workbook reproduction: no coverage solver, swaps, break
-    // rebalancing, or history inference. The saved dated Excel template is
-    // authoritative and assignment types remain byte-for-byte semantically
-    // equivalent, including BREAK_NAP versus BREAK.
-    if (date === "2026-10-08") {
-      await connectToDatabase();
-      const location = await Location.findById(locationId).select("code name").lean() as
-        {code?:string;name?:string} | null;
-      if (location && (/livingston/i.test(String(location.name??"")) ||
-        String(location.code??"").toUpperCase() === "LIVINGSTON")) {
-        const template = await ScheduleTemplate.findOne({
-          locationId, dayOfWeek:"THURSDAY", sourceDate:date,
-          sourceType:"HISTORICAL_WORKBOOK",active:true,
-          name:"Livingston Excel 2026-10-08",
-        }).lean() as { _id:unknown; assignments?:Array<{
-          staffId:unknown;clientId?:unknown;startTime:string;endTime:string;
-          assignmentType:string;locked?:boolean
-        }> } | null;
-        if (!template || !template.assignments?.length) {
-          return NextResponse.json({error:"Exact October 8 workbook template not imported. Auto Generate did not change the schedule."},{status:409});
-        }
-        const desired = template.assignments.map(item=>({
-          locationId,date,staffId:String(item.staffId),
-          clientId:item.clientId ? String(item.clientId) : null,
-          startTime:String(item.startTime),endTime:String(item.endTime),
-          assignmentType:String(item.assignmentType),
-          source:"AUTO",locked:false,manuallyOverridden:false,
-          note:"Exact October 8 workbook template",
-        }));
-        const key = (a:{staffId:unknown;startTime:string})=>String(a.staffId)+"|"+a.startTime;
-        const slotKeys=new Set<string>(),clientKeys=new Set<string>();
-        const duplicates:string[]=[];
-        for(const item of desired) {
-          if(slotKeys.has(key(item)))duplicates.push("Staff/time "+key(item));
-          slotKeys.add(key(item));
-          if(item.assignmentType==="CLIENT_1_TO_1"){
-            if(!item.clientId)duplicates.push("Client missing at "+key(item));
-            const clientKey=String(item.clientId)+"|"+item.startTime;
-            if(clientKeys.has(clientKey))duplicates.push("Client/time "+clientKey);
-            clientKeys.add(clientKey);
-          }
-        }
-        if(duplicates.length)return NextResponse.json({error:"Workbook has conflicting exact cells; no changes made.",conflicts:duplicates},{status:409});
-        // Explicit Auto Generate is a fresh exact workbook rebuild. Manual,
-        // locked, nap-linked, and previously AUTO-created blocks for this date
-        // are all replaceable. Validate the template BEFORE touching the day.
-        const persisted=await persistScheduleReplacementSafely({
-          locationId,date,replacements:desired,
-          replaceableFilter:{},
-        });
-        const actual=await ScheduleAssignment.find({locationId,date}).lean() as unknown as
-          Array<{staffId:unknown;clientId?:unknown;startTime:string;endTime:string;assignmentType:string}>;
-        const actualByKey=new Map(actual.map(item=>[key(item),item]));
-        const matched=desired.filter(item=>{
-          const row=actualByKey.get(key(item));
-          return row && String(row.clientId??"")===String(item.clientId??"") &&
-            row.assignmentType===item.assignmentType && row.endTime===item.endTime;
-        }).length;
-        return NextResponse.json({
-          success:matched===desired.length && actual.length===desired.length,
-          exactWorkbookMode:true, date, templateId:String(template._id),
-          templateAssignments:desired.length,matchedAssignments:matched,
-          matchingPercent:desired.length?Number((100*matched/desired.length).toFixed(2)):0,
-          savedAssignments:actual.length,warnings:[],
-          persistence:persisted,
-          ...(matched!==desired.length||actual.length!==desired.length?
-            {error:"Exact template mismatch persists; examine protected cells and database state."}:{}),
-        },{status:matched===desired.length&&actual.length===desired.length?200:409});
-      }
-    }
-
     const dayData = await buildDaySchedulerInput(locationId, date);
     const fixedNapApplication = await applyFixedNapSessions(
       locationId,
@@ -229,9 +156,11 @@ export async function POST(request: Request) {
       dayData.extendedRules
     );
 
-    const protectedAssignments = schedulerInput.existingAssignments.filter(
-      shouldKeepExistingAssignment
-    );
+    // Fresh generation starts from workbook pins, not previously generated/manual cells.
+    // Repair mode is a separate action and retains the saved schedule.
+    const templatePinning = pinWorkbookTemplates(schedulerInput);
+    const protectedAssignments = templatePinning.pinned;
+
 
     // Coverage is built first. Fixed nap and speech windows have already been
     // removed from required client coverage, so those events cannot be pushed
@@ -278,7 +207,13 @@ export async function POST(request: Request) {
       breakPlan.assignments,
       schedulerInput.clients,
       dayData.extendedRules.slotLengthMinutes
-    );
+    ).map(assignment => {
+      // Workbook BREAK, BREAK_NAP and BREAK_SPEECH must remain exactly as saved.
+      const pinned = templatePinning.pinned.find(item =>
+        item.staffId === assignment.staffId && item.startTime === assignment.startTime
+      );
+      return pinned ? {...assignment, assignmentType:pinned.assignmentType} : assignment;
+    });
     const finalCoverage = auditFinalCoverage(
       schedulerInput.clients,
       enrichedAssignments,
@@ -315,9 +250,7 @@ export async function POST(request: Request) {
 
     await connectToDatabase();
 
-    const autoAssignments = enrichedAssignments.filter(
-      (assignment) => assignment.source === "AUTO"
-    );
+    const autoAssignments = enrichedAssignments;
     const generatedRecords = autoAssignments.map((assignment) => ({
       locationId,
       date,
@@ -336,10 +269,7 @@ export async function POST(request: Request) {
       locationId,
       date,
       replacements: generatedRecords,
-      replaceableFilter: {
-        manuallyOverridden: { $ne: true },
-        source: { $in: ["AUTO", "TEMPLATE", "COPIED"] },
-      },
+      replaceableFilter: {},
     });
 
     if (persistence.blockedEmptyReplacement) {
@@ -431,6 +361,10 @@ export async function POST(request: Request) {
       warnings,
       uncoveredRequirements: finalCoverage.uncoveredRequirements,
       managerGapCount,
+      templateMatchedBlocks: templatePinning.pinned.length,
+      primaryTemplateBlocks: templatePinning.primaryCount,
+      secondaryTemplateBlocks: templatePinning.secondaryCount,
+      templateRejectedBlocks: templatePinning.rejected,
       reservedBreakCount: breakPlan.reservedBreaks.length,
       reliefSwapCount: breakPlan.reliefSwapCount,
       humanStyleBlockSwapCount: breakPlan.humanStyleBlockSwapCount,
