@@ -124,9 +124,9 @@ function coverageRoleTier(role: StaffRole): number {
       return 1;
     case "OFFICE_MANAGER":
       return 2;
-    case "OTHER":
-      return 3;
     case "BCBA":
+      return 3;
+    case "OTHER":
       return 4;
     default:
       return 5;
