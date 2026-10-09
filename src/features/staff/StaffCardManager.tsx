@@ -427,11 +427,10 @@ export function StaffCardManager() {
   async function saveStaff() {
     if (
       !selectedLocationId ||
-      !form.firstName.trim() ||
-      !form.lastName.trim() ||
+      !(form.firstName.trim() || form.lastName.trim()) ||
       !form.startDate
     ) {
-      setSaveError("First name, last name, and start date are required.");
+      setSaveError("A name and start date are required.");
       return;
     }
 
