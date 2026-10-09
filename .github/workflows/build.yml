@@ -25,6 +25,9 @@ jobs:
       - name: Test automatic scheduler rules
         run: npm run test:scheduler
 
+      - name: Test BT break priority and nap alignment
+        run: npx tsx scripts/test-break-eligibility.ts
+
       - name: Test timed attendance overrides
         run: npx tsx scripts/test-attendance-windows.ts
 
