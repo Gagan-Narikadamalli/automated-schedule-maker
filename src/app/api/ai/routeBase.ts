@@ -917,10 +917,10 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
     }
 
     if (failedWriteActions.length > 0) {
-      const failures = failedWriteActions.map(item => `${item.toolName}: ${item.error}`).join("\\n");
+      const failures = failedWriteActions.map(item => `${item.toolName}: ${item.error}`).join("\n");
       reply = changed
-        ? `I completed some changes, but the following actions failed:\\n${failures}\\nThe failed actions have not been confirmed as saved. Please correct the details or ask me to retry.`
-        : `Sorry, I could not complete that scheduling command. The scheduler reported:\\n${failures}\\nNo changes from the failed action have been confirmed. Please correct the details or ask me to retry.`;
+        ? `I completed some changes, but the following actions failed:\n${failures}\nThe failed actions have not been confirmed as saved. Please correct the details or ask me to retry.`
+        : `Sorry, I could not complete that scheduling command. The scheduler reported:\n${failures}\nNo changes from the failed action have been confirmed. Please correct the details or ask me to retry.`;
     } else if (noActionExecuted) {
       reply = "Sorry, I could not reliably determine and execute the requested scheduling action. I have not changed your schedule. Please clarify the date and the exact action you want, or ask me to try again.";
     } else if (!writeToolsEnabled && actionIntent && !attachmentPreviewOnly) {
