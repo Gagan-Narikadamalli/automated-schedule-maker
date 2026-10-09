@@ -43,21 +43,6 @@ function isAutomaticBreak(assignment: SchedulerAssignment): boolean {
   );
 }
 
-function shouldKeepExistingAssignment(
-  assignment: SchedulerAssignment
-): boolean {
-  if (isAutomaticBreak(assignment)) {
-    return false;
-  }
-
-  return (
-    assignment.locked ||
-    assignment.source === "MANUAL" ||
-    assignment.assignmentType === "SPEECH" ||
-    assignment.assignmentType === "UNAVAILABLE"
-  );
-}
-
 function buildCoverageByRole(
   assignments: SchedulerAssignment[],
   staff: SchedulerStaff[],
