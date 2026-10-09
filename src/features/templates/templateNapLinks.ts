@@ -7,8 +7,13 @@ export function shiftSlot(time: string, offset: number): string {
   return `${String(Math.floor(mins / 60)).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}`;
 }
 
-export function pairedStaff(assignments: TemplateSlot[], clientId: string, time: string): string | null {
-  const near = [shiftSlot(time, -30), shiftSlot(time, 30)];
+export function pairedStaff(assignments: TemplateSlot[], clientId: string, time: string, naps: ClientNapSlot[] = []): string | null {
+  const ownNaps = new Set(naps.filter(n => n.clientId === clientId).map(n => n.startTime));
+  let first = time;
+  let last = time;
+  while (ownNaps.has(shiftSlot(first, -30))) first = shiftSlot(first, -30);
+  while (ownNaps.has(shiftSlot(last, 30))) last = shiftSlot(last, 30);
+  const near = [shiftSlot(first, -30), shiftSlot(last, 30)];
   for (const nearTime of near) {
     const pairing = assignments.find(item => item.assignmentType === "CLIENT_1_TO_1" && item.clientId === clientId && item.startTime === nearTime);
     if (pairing) return pairing.staffId;
@@ -32,7 +37,7 @@ export function synchronizeTemplateNaps(assignments: TemplateSlot[], naps: Clien
   const warnings: string[] = [];
   for (const nap of unique) {
     const staffId = linked.find(a => a.clientId === nap.clientId && a.startTime === nap.startTime)?.staffId ??
-      pairedStaff(assignments, nap.clientId, nap.startTime);
+      pairedStaff(assignments, nap.clientId, nap.startTime, unique);
     if (!staffId) {
       warnings.push(`No adjacent staff/client pairing for client ${nap.clientId} at ${nap.startTime}; the nap is saved but no staff break can be inferred.`);
       continue;
