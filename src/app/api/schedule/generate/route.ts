@@ -13,13 +13,11 @@ import { getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
 import { generateSchedule } from "@/features/scheduler/engine/generateSchedule";
 import { placeStaffBreaksAfterCoverage } from "@/features/scheduler/engine/placeStaffBreaks";
 import { calculateSchedulerReadiness } from "@/features/scheduler/engine/preflight";
-import { enrichBreakAssignmentsWithFixedEvents } from "@/features/scheduler/engine/reserveBreaks";
 import type {
   SchedulerAssignment,
   SchedulerResult,
   SchedulerStaff,
 } from "@/features/scheduler/engine/types";
-import { applyFixedNapSessions } from "@/features/scheduler/server/applyFixedNapSessions";
 import { applyHistoricalTraining } from "@/features/scheduler/server/applyHistoricalTraining";
 import { applyLivingstonWorkbookTrial } from "@/features/scheduler/server/applyLivingstonWorkbookTrial";
 import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySchedulerInput";
@@ -109,11 +107,16 @@ export async function POST(request: Request) {
     }
 
     const dayData = await buildDaySchedulerInput(locationId, date);
-    const fixedNapApplication = await applyFixedNapSessions(
-      locationId,
-      date,
-      dayData.input
-    );
+    // Auto Generate is template-first. Nap sessions are manager-managed and
+    // must not suppress workbook client coverage or invent nap-derived breaks.
+    // Repair can still take date-specific nap changes into account separately.
+    const fixedNapApplication = {
+      input: dayData.input,
+      applied: false,
+      sessionCount: 0,
+      clientCount: 0,
+      attendanceChangeCount: 0,
+    };
 
     const workbookTraining = await applyLivingstonWorkbookTrial(
       locationId,
@@ -175,11 +178,7 @@ export async function POST(request: Request) {
       schedulerRules: schedulerInput.rules,
     });
 
-    const enrichedAssignments = enrichBreakAssignmentsWithFixedEvents(
-      breakPlan.assignments,
-      schedulerInput.clients,
-      dayData.extendedRules.slotLengthMinutes
-    ).map(assignment => {
+    const enrichedAssignments = breakPlan.assignments.map(assignment => {
       // Workbook BREAK, BREAK_NAP and BREAK_SPEECH must remain exactly as saved.
       const pinned = templatePinning.pinned.find(item =>
         item.staffId === assignment.staffId && item.startTime === assignment.startTime
