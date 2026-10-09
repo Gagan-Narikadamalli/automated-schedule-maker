@@ -537,6 +537,26 @@ function previousClientAssignment(
   );
 }
 
+function caregiverBeforeNap(
+  requirement: ClientRequirement,
+  assignments: SchedulerAssignment[],
+  slotLengthMinutes: number
+): string | null {
+  const napTimes = new Set(requirement.client.napSlots);
+  const previous = timeToMinutes(requirement.startTime);
+  if (previous === null) return null;
+  const priorTime = minutesToTime(previous - slotLengthMinutes);
+  if (!napTimes.has(priorTime)) return null;
+  let cursor = previous - slotLengthMinutes;
+  while (cursor >= 0 && napTimes.has(minutesToTime(cursor))) cursor -= slotLengthMinutes;
+  if (cursor < 0) return null;
+  return assignments.find(a =>
+    a.clientId === requirement.client.id &&
+    a.startTime === minutesToTime(cursor) &&
+    a.assignmentType === "CLIENT_1_TO_1"
+  )?.staffId ?? null;
+}
+
 function supportPriority(client: SchedulerClient): number {
   if (client.supportLevel === "HIGH_SUPPORT") {
     return 3;
@@ -1016,6 +1036,16 @@ function findBestStaffMember(
         leftReservedForOtherTemplate !== rightReservedForOtherTemplate
       ) {
         return leftReservedForOtherTemplate ? 1 : -1;
+      }
+
+      // Nap is a natural handoff boundary. When two eligible BTs are
+      // available, prefer a different BT after the nap instead of silently
+      // restoring the same pairing for the rest of the day.
+      const beforeNapStaffId = caregiverBeforeNap(requirement, assignments, input.rules.slotLengthMinutes);
+      if (beforeNapStaffId) {
+        const leftRotates = left.staffMember.id !== beforeNapStaffId;
+        const rightRotates = right.staffMember.id !== beforeNapStaffId;
+        if (leftRotates !== rightRotates) return leftRotates ? -1 : 1;
       }
 
       const previousAssignment = previousClientAssignment(
