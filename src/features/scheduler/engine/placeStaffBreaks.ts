@@ -124,9 +124,9 @@ function coverageRoleTier(role: StaffRole): number {
       return 1;
     case "OFFICE_MANAGER":
       return 2;
-    case "BCBA":
-      return 3;
     case "OTHER":
+      return 3;
+    case "BCBA":
       return 4;
     default:
       return 5;
@@ -140,37 +140,17 @@ function findFixedEventForStaffSlot(
   clients: SchedulerClient[],
   slotLengthMinutes: number
 ): FixedEventCandidate | null {
-  // Consider both ends of a continuous nap/speech range. A 90-minute nap
-  // should still link to the caregiver who covered the client before nap,
-  // rather than considering only the immediately adjacent half hour.
-  const adjacentClientIds: string[] = [];
-  for (const client of clients) {
-    const eventSlots = client.napSlots.includes(startTime)
-      ? client.napSlots : client.speechSlots.includes(startTime)
-        ? client.speechSlots : [];
-    if (!eventSlots.length) continue;
-    const slots = new Set(eventSlots);
-    let first = startTime;
-    let last = startTime;
-    while (true) {
-      const prior = shiftTime(first, -slotLengthMinutes);
-      if (!prior || !slots.has(prior)) break;
-      first = prior;
-    }
-    while (true) {
-      const after = shiftTime(last, slotLengthMinutes);
-      if (!after || !slots.has(after)) break;
-      last = after;
-    }
-    const previous = shiftTime(first, -slotLengthMinutes);
-    const next = shiftTime(last, slotLengthMinutes);
-    if (assignments.some((assignment) =>
-      assignment.staffId === staffId &&
-      assignment.assignmentType === "CLIENT_1_TO_1" &&
-      assignment.clientId === client.id &&
-      (assignment.startTime === previous || assignment.startTime === next)
-    )) adjacentClientIds.push(client.id);
-  }
+  const previousTime = shiftTime(startTime, -slotLengthMinutes);
+  const nextTime = shiftTime(startTime, slotLengthMinutes);
+  const adjacentClientIds = assignments
+    .filter(
+      (assignment) =>
+        assignment.staffId === staffId &&
+        assignment.assignmentType === "CLIENT_1_TO_1" &&
+        Boolean(assignment.clientId) &&
+        (assignment.startTime === previousTime || assignment.startTime === nextTime)
+    )
+    .map((assignment) => assignment.clientId as string);
 
   const candidates: FixedEventCandidate[] = [];
 
@@ -321,21 +301,11 @@ function findBestFreeBreaks(
           clients,
           rules.slotLengthMinutes
         );
-        // A child's nap is a single event. Several staff may be free, but
-        // only one break may claim that child as its linked nap in a slot.
-        const duplicateLinkedNap = fixedEvent?.assignmentType === "BREAK_NAP" &&
-          assignments.some((assignment) =>
-            assignment.assignmentType === "BREAK_NAP" &&
-            assignment.clientId === fixedEvent.client.id &&
-            assignment.startTime === slotTime &&
-            assignment.staffId !== staffMember.id
-          );
-        const availableFixedEvent = duplicateLinkedNap ? null : fixedEvent;
         const insideNormalWindow =
           slotTime >= rules.breakWindowStart &&
           slotTime < rules.breakWindowEnd;
         const insideNapExtension =
-          availableFixedEvent?.assignmentType === "BREAK_NAP" &&
+          fixedEvent?.assignmentType === "BREAK_NAP" &&
           slotTime >= rules.breakWindowStart &&
           slotTime < NAP_BREAK_WINDOW_END;
 
@@ -345,7 +315,7 @@ function findBestFreeBreaks(
 
         return {
           slotTime,
-          fixedEvent: availableFixedEvent,
+          fixedEvent,
         };
       });
 
@@ -372,12 +342,7 @@ function findBestFreeBreaks(
           detail.fixedEvent ? detail.fixedEvent.priority : 100
         )
       );
-      // A natural client nap break wins over generic free time, even if a
-      // historical generic break happens elsewhere. We should not give the
-      // caregiver a separate Break when their own client is napping.
-      const hasNapBreak = details.some((detail) => detail.fixedEvent?.assignmentType === "BREAK_NAP");
       const score =
-        (hasNapBreak ? -100000 : 0) +
         eventPriority * 10 +
         timeDistanceFromNoon(startTime) -
         Math.min(historicalCount, 4) * historicalPriority;
