@@ -432,6 +432,7 @@ export function ClientCardManager() {
       return;
     }
     setModalOpen(false);
+    setSaveError("");
     setEditingId(null);
     setForm(emptyClientForm());
     setAttendanceDraft(emptyAttendance());
@@ -609,7 +610,7 @@ export function ClientCardManager() {
       // The profile has already been saved. A list refresh failure must not
       // be reported as a failed save or keep the editor open.
       void loadLocationData(selectedLocationId);
-      setSaveError(
+      setMessage(
         attendancePatterns.length > 0
           ? `${savedCode} was saved and is available to the scheduler.`
           : `${savedCode} was saved. Add attendance days/hours before the automatic scheduler can schedule this client.`
