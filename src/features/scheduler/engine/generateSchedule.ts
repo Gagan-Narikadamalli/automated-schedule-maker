@@ -269,38 +269,14 @@ function buildPreferredContinuousPairingPlan(
     requirement.client.maxConsecutiveBlocksWithSameStaff > 0
       ? requirement.client.maxConsecutiveBlocksWithSameStaff
       : Number.POSITIVE_INFINITY;
-  const absoluteMaximumBlocks = Math.min(globalMaximumBlocks, clientMaximumBlocks);
-  const preferredFourHourBlocks = Math.max(
-    Math.floor(240 / input.rules.slotLengthMinutes), 1
-  );
-  const firstPairMinutes = startMinutes - priorBlocks * input.rules.slotLengthMinutes;
-  const afterFourHours = minutesToTime(firstPairMinutes + 240);
-  const lastStaffSlot = [...staffMember.availableSlots].sort().at(-1);
-  // Extend an otherwise uninterrupted four-hour pairing only if exactly
-  // one more hour of this staff member's shift remains, both final slots
-  // are required by the same client, and the configured limit permits it.
-  const finalHourSlots = [
-    afterFourHours,
-    minutesToTime(firstPairMinutes + 240 + input.rules.slotLengthMinutes),
-  ];
-  const closesAtEndOfFifthHour = lastStaffSlot ===
-    minutesToTime(firstPairMinutes + 300 - input.rules.slotLengthMinutes);
-  const canCompleteFinalHour =
-    input.rules.slotLengthMinutes === 30 &&
-    absoluteMaximumBlocks >= preferredFourHourBlocks + 2 &&
-    closesAtEndOfFifthHour &&
-    finalHourSlots.every((slot) =>
-      staffMember.availableSlots.includes(slot) &&
-      requirement.client.requiredSlots.includes(slot)
-    );
   const maximumBlocks = Math.min(
-    absoluteMaximumBlocks,
-    canCompleteFinalHour ? preferredFourHourBlocks + 2 : preferredFourHourBlocks
+    globalMaximumBlocks,
+    clientMaximumBlocks
   );
 
   // Once a new staff/client session starts, fill as much of that client's
   // uninterrupted attendance segment as safely possible (up to the clinic's
-  // preferred four-hour block (with a final-hour extension where valid). Nap, Speech, staff availability, protected cells, or
+  // four-hour maximum). Nap, Speech, staff availability, protected cells, or
   // another hard constraint naturally stop the run. This makes the schedule
   // visually readable as long blocks instead of re-solving the pairing every
   // 30 minutes.
@@ -537,26 +513,6 @@ function previousClientAssignment(
   );
 }
 
-function caregiverBeforeNap(
-  requirement: ClientRequirement,
-  assignments: SchedulerAssignment[],
-  slotLengthMinutes: number
-): string | null {
-  const napTimes = new Set(requirement.client.napSlots);
-  const previous = timeToMinutes(requirement.startTime);
-  if (previous === null) return null;
-  const priorTime = minutesToTime(previous - slotLengthMinutes);
-  if (!napTimes.has(priorTime)) return null;
-  let cursor = previous - slotLengthMinutes;
-  while (cursor >= 0 && napTimes.has(minutesToTime(cursor))) cursor -= slotLengthMinutes;
-  if (cursor < 0) return null;
-  return assignments.find(a =>
-    a.clientId === requirement.client.id &&
-    a.startTime === minutesToTime(cursor) &&
-    a.assignmentType === "CLIENT_1_TO_1"
-  )?.staffId ?? null;
-}
-
 function supportPriority(client: SchedulerClient): number {
   if (client.supportLevel === "HIGH_SUPPORT") {
     return 3;
@@ -689,9 +645,9 @@ function coverageRoleTier(staffMember: SchedulerStaff): number {
       return 1;
     case "OFFICE_MANAGER":
       return 2;
-    case "BCBA":
-      return 3;
     case "OTHER":
+      return 3;
+    case "BCBA":
       return 4;
     default:
       return 5;
@@ -832,37 +788,6 @@ function sortRequirementsForClinicFlow(
   });
 }
 
-function buildFallbackContinuityPlan(
-  requirement: ClientRequirement,
-  staffMember: SchedulerStaff,
-  input: SchedulerInput,
-  assignments: SchedulerAssignment[],
-  callOutStaffIds: Set<string>
-): SchedulerAssignment[] {
-  const first = timeToMinutes(requirement.startTime);
-  if (first === null) return [];
-  const maxBlocks = Math.max(1, Math.min(
-    Math.floor(240 / input.rules.slotLengthMinutes),
-    Math.floor(input.rules.maximumClientStaffConsecutiveHours * 60 / input.rules.slotLengthMinutes),
-    requirement.client.maxConsecutiveBlocksWithSameStaff || Number.POSITIVE_INFINITY
-  ));
-  const planned: SchedulerAssignment[] = [];
-  for (let offset = 0; offset < maxBlocks; offset++) {
-    const time = minutesToTime(first + offset * input.rules.slotLengthMinutes);
-    if (!requirement.client.requiredSlots.includes(time)) break;
-    if (requirementIsAlreadyCovered({client: requirement.client, startTime: time}, [...assignments, ...planned])) break;
-    if (exactReferenceConflictsWithPair(staffMember.id, requirement.client.id, time, input.referenceAssignments)) break;
-    const eligible = canAssignStaffToClient({
-      staffMember, client: requirement.client, startTime: time,
-      assignments: [...assignments, ...planned], callOutStaffIds, rules: input.rules,
-      allowSameDayPairRepeat: true, allowCoverageLimitException: true,
-    });
-    if (!eligible.allowed) break;
-    planned.push(createAutoClientAssignment(staffMember, requirement.client, time));
-  }
-  return planned;
-}
-
 function findCoverageFirstSingleSlotStaff(
   requirement: ClientRequirement,
   input: SchedulerInput,
@@ -907,18 +832,7 @@ function findCoverageFirstSingleSlotStaff(
         score: number;
       } => candidate !== null
     )
-    .sort((left, right) => {
-      const roleDifference = coverageRoleTier(left.staffMember) -
-        coverageRoleTier(right.staffMember);
-      if (roleDifference !== 0) return roleDifference;
-      const previous = previousClientAssignment(requirement, assignments, input.rules.slotLengthMinutes);
-      if (previous) {
-        const leftContinues = left.staffMember.id === previous.staffId;
-        const rightContinues = right.staffMember.id === previous.staffId;
-        if (leftContinues !== rightContinues) return leftContinues ? -1 : 1;
-      }
-      return compareStaffCandidates(left, right);
-    });
+    .sort(compareStaffCandidates);
 
   return candidates[0]?.staffMember ?? null;
 }
@@ -981,13 +895,6 @@ function findBestStaffMember(
       } => candidate !== null
     )
     .sort((left, right) => {
-      // A normal client should go to an eligible BT/RBT before non-BT
-      // staff, even when an imported template lists an auxiliary role.
-      // Within the BT/RBT tier, exact weekday templates remain decisive.
-      const leftBT = coverageRoleTier(left.staffMember) === 0;
-      const rightBT = coverageRoleTier(right.staffMember) === 0;
-      if (leftBT !== rightBT) return leftBT ? -1 : 1;
-
       const leftTemplateStrength = exactReferenceMatchStrength(
         left.staffMember.id,
         requirement.client.id,
@@ -1038,27 +945,6 @@ function findBestStaffMember(
         return leftReservedForOtherTemplate ? 1 : -1;
       }
 
-      // Nap is a natural handoff boundary. When two eligible BTs are
-      // available, prefer a different BT after the nap instead of silently
-      // restoring the same pairing for the rest of the day.
-      const beforeNapStaffId = caregiverBeforeNap(requirement, assignments, input.rules.slotLengthMinutes);
-      if (beforeNapStaffId) {
-        const leftRotates = left.staffMember.id !== beforeNapStaffId;
-        const rightRotates = right.staffMember.id !== beforeNapStaffId;
-        if (leftRotates !== rightRotates) return leftRotates ? -1 : 1;
-      }
-
-      const previousAssignment = previousClientAssignment(
-        requirement,
-        assignments,
-        input.rules.slotLengthMinutes
-      );
-      if (previousAssignment) {
-        const leftContinues = left.staffMember.id === previousAssignment.staffId;
-        const rightContinues = right.staffMember.id === previousAssignment.staffId;
-        if (leftContinues !== rightContinues) return leftContinues ? -1 : 1;
-      }
-
       const roleDifference =
         coverageRoleTier(left.staffMember) -
         coverageRoleTier(right.staffMember);
@@ -1086,6 +972,26 @@ function findBestStaffMember(
       // displaced by a historical lower-priority relief-role assignment.
       if (leftPreviousWeekdayStrength !== rightPreviousWeekdayStrength) {
         return rightPreviousWeekdayStrength - leftPreviousWeekdayStrength;
+      }
+
+      const previousAssignment = previousClientAssignment(
+        requirement,
+        assignments,
+        input.rules.slotLengthMinutes
+      );
+      const isRotationClient =
+        requirement.client.supportLevel === "ROTATION" ||
+        requirement.client.supportLevel === "HIGH_SUPPORT";
+
+      if (previousAssignment && !isRotationClient) {
+        const leftContinues =
+          left.staffMember.id === previousAssignment.staffId;
+        const rightContinues =
+          right.staffMember.id === previousAssignment.staffId;
+
+        if (leftContinues !== rightContinues) {
+          return leftContinues ? -1 : 1;
+        }
       }
 
       if (right.score !== left.score) {
@@ -1747,15 +1653,15 @@ export function repairCoverageMinimally(
     );
 
     if (singleSlotStaff) {
-      const plan = buildFallbackContinuityPlan(requirement, singleSlotStaff, input, assignments, callOutStaffIds);
-      if (plan.length) {
-        assignments.push(...plan);
-        warnings.push({
-          code: "COVERAGE_FIRST_SINGLE_SLOT",
-          message: `${requirement.client.displayCode} at ${requirement.startTime} required a fallback; ${singleSlotStaff.name} continues for ${plan.length} feasible half-hour block(s) rather than rotating away after one slot.`,
-        });
-        continue;
-      }
+      assignments.push(
+        createAutoAssignment(singleSlotStaff, requirement)
+      );
+      warnings.push({
+        code: "COVERAGE_FIRST_SINGLE_SLOT",
+        message:
+          `${requirement.client.displayCode} at ${requirement.startTime} was covered with a single-slot fallback after normal continuity/grouping options were exhausted.`,
+      });
+      continue;
     }
 
     uncoveredRequirements.push({
@@ -1900,7 +1806,7 @@ export function generateSchedule(input: SchedulerInput): SchedulerResult {
     );
 
     if (retryStaff) {
-      const retryPlan = buildPreferredContinuousPairingPlan(
+      const retryPlan = buildMinimumPairingPlan(
         requirement,
         retryStaff,
         input,
