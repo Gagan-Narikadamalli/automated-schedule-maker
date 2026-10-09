@@ -190,6 +190,15 @@ export async function PUT(request: Request) {
 
       let clientId = change.clientId;
 
+      if (change.assignmentType === "BREAK_NAP" && !clientId) {
+        conflicts.push({
+          staffId: change.staffId,
+          startTime: change.startTime,
+          code: "NAP_CLIENT_REQUIRED",
+          message: "Break + Nap must identify the client who is napping.",
+        });
+      }
+
       if (change.assignmentType === "CLIENT_1_TO_1" && !clientId) {
         const displayCode = extractDisplayCode(change.text);
 
@@ -225,13 +234,13 @@ export async function PUT(request: Request) {
       if (clientId) {
         const client = dayClients.get(clientId);
 
-        if (!client && change.assignmentType === "CLIENT_1_TO_1") {
+        if (!client && (change.assignmentType === "CLIENT_1_TO_1" || change.assignmentType === "BREAK_NAP")) {
           conflicts.push({
             staffId: change.staffId,
             startTime: change.startTime,
             code: "CLIENT_NOT_ACTIVE",
             message:
-              "The selected client is not active for this target date.",
+              "The linked client is not active for this target date.",
           });
         }
 
@@ -258,6 +267,26 @@ export async function PUT(request: Request) {
             code: "HARD_RELATIONSHIP",
             message: "This staff/client pairing is a hard restriction.",
           });
+        }
+
+        if (change.assignmentType === "BREAK_NAP") {
+          const conflictingClientCoverage = await ScheduleAssignment.findOne({
+            locationId,
+            date,
+            startTime: change.startTime,
+            clientId,
+            assignmentType: "CLIENT_1_TO_1",
+          }).select("staffId").lean();
+          if (conflictingClientCoverage && !cellsChangedByBatch.has(
+            cellKey(String(conflictingClientCoverage.staffId), change.startTime)
+          )) {
+            conflicts.push({
+              staffId: change.staffId,
+              startTime: change.startTime,
+              code: "NAP_CLIENT_DOUBLE_BOOKED",
+              message: "This client already has a 1:1 assignment during the proposed nap. Move or clear that assignment first.",
+            });
+          }
         }
 
         if (change.assignmentType === "CLIENT_1_TO_1") {
@@ -305,7 +334,7 @@ export async function PUT(request: Request) {
     }
 
     const nonOverridableConflicts = conflicts.filter((conflict) =>
-      ["CLIENT_NOT_FOUND", "CLIENT_NOT_ACTIVE", "INVALID_ASSIGNMENT"].includes(
+      ["CLIENT_NOT_FOUND", "CLIENT_NOT_ACTIVE", "INVALID_ASSIGNMENT", "NAP_CLIENT_REQUIRED", "NAP_CLIENT_DOUBLE_BOOKED"].includes(
         conflict.code
       )
     );
