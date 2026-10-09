@@ -862,8 +862,8 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
         typeof result.message === "string" ? result.message : "The scheduling operation was rejected.";
       return [{toolName: entry.toolName, error: detail}];
     });
-    const actionIntent = /\\b(?:generate|regenerate|create|make|build|save|update|change|edit|delete|remove|archive|apply|replace|move|swap|repair|fix|add|assign|schedule|copy|import)\\b/i.test(message) &&
-      !/\\b(?:how|why|what does|explain|can you|is it possible|recommend|suggest|what if)\\b/i.test(message);
+    const actionIntent = /\b(?:generate|regenerate|create|make|build|save|update|change|edit|delete|remove|archive|apply|replace|move|swap|repair|fix|add|assign|schedule|copy|import)\b/i.test(message) &&
+      !/\b(?:how|why|what does|explain|can you|is it possible|recommend|suggest|what if)\b/i.test(message);
     const noActionExecuted = actionIntent && writeToolsEnabled && writeToolsUsed.length === 0 && !attachmentPreviewOnly;
 
     let reply = resultText.trim();
