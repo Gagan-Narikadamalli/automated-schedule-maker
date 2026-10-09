@@ -240,108 +240,48 @@ export async function POST(request: Request) {
     );
 
     const originalSchedulerInput = historicalTraining.input;
-    const schedulerInput =
-      repairMode === "COVERAGE"
-        ? {
-            ...originalSchedulerInput,
-            existingAssignments:
-              normalizeBreakAssignmentsForMinimalFix(
-                originalSchedulerInput.existingAssignments,
-                originalSchedulerInput.staff,
-                dayData.extendedRules
-              ),
-          }
-        : originalSchedulerInput;
-    const affectedSlots: RepairAffectedSlot[] =
-      repairMode === "CALL_OUT"
-        ? schedulerInput.existingAssignments
-            .filter((assignment) =>
-              assignmentOverlapsCallOut(assignment, callOuts)
-            )
-            .map((assignment) => ({
-              staffId: assignment.staffId,
-              startTime: assignment.startTime,
-            }))
-        : [];
-
-    const priorityUnplaced =
-      repairMode === "COVERAGE"
-        ? ((await UnplacedAssignment.find({
-            locationId,
-            date,
-            status: "UNPLACED",
-            clientId: { $ne: null },
-          })
-            .select("_id clientId originalStartTime createdAt")
-            .sort({ createdAt: 1 })
-            .lean()) as unknown as Array<{
-            clientId?: unknown;
-            originalStartTime?: unknown;
-            _id?: unknown;
-          }>)
-        : [];
-
+    // Repair differs from Auto Generate: keep every still-valid saved cell.
+    // Drop only appointments made invalid by staff/client attendance or
+    // call-outs, and fill uncovered client requirements in remaining cells.
+    const staffById = new Map(originalSchedulerInput.staff.map(person => [person.id, person]));
+    const clientsById = new Map(originalSchedulerInput.clients.map(client => [client.id, client]));
+    const invalidOriginals = originalSchedulerInput.existingAssignments.filter(assignment => {
+      const member = staffById.get(assignment.staffId);
+      if (!member || !member.availableSlots.includes(assignment.startTime) ||
+          assignmentOverlapsCallOut(assignment, callOuts)) return true;
+      if (assignment.assignmentType === "CLIENT_1_TO_1") {
+        const client = assignment.clientId ? clientsById.get(assignment.clientId) : null;
+        return !client || !client.requiredSlots.includes(assignment.startTime) ||
+          client.staffRelationships[assignment.staffId] === "HARD_RESTRICTION";
+      }
+      return false;
+    });
+    const invalidIds = new Set(invalidOriginals.map(item => item.id));
+    const schedulerInput = {
+      ...originalSchedulerInput,
+      existingAssignments: originalSchedulerInput.existingAssignments
+        .filter(item => !invalidIds.has(item.id)),
+    };
+    const priorityUnplaced = (await UnplacedAssignment.find({
+      locationId, date, status: "UNPLACED", clientId: { $ne: null },
+    }).select("_id clientId originalStartTime createdAt").sort({ createdAt: 1 }).lean()) as unknown as
+      Array<{ clientId?: unknown; originalStartTime?: unknown; _id?: unknown }>;
     const priorityRequirements = priorityUnplaced
-      .map((record) => ({
+      .map(record => ({
         clientId: record.clientId ? String(record.clientId) : "",
         startTime: String(record.originalStartTime ?? ""),
       }))
-      .filter(
-        (record) =>
-          Boolean(record.clientId) &&
-          /^\d{2}:\d{2}$/.test(record.startTime)
-      );
+      .filter(record => Boolean(record.clientId) && /^\\d{2}:\\d{2}$/.test(record.startTime));
 
-    const coverageResult =
-      repairMode === "COVERAGE"
-        ? repairCoverageMinimally(
-            schedulerInput,
-            priorityRequirements,
-            {
-              allowAutomaticOverrides: true,
-              allowProtectedRelocation:
-                schedulerInput.rules.minimalFixAllowProtectedRelocation,
-              allowBreakRelocation:
-                schedulerInput.rules.minimalFixAllowBreakRelocation,
-            }
-          )
-        : repairSchedule(
-            schedulerInput,
-            affectedStaffIds,
-            affectedSlots
-          );
-
-    const breakPlan =
-      repairMode === "COVERAGE"
-        ? placeStaffBreaksAfterCoverage({
-            staff: schedulerInput.staff,
-            clients: schedulerInput.clients,
-            assignments: coverageResult.assignments,
-            referenceAssignments: schedulerInput.referenceAssignments,
-            callOutStaffIds: schedulerInput.callOutStaffIds,
-            rules: {
-              ...dayData.extendedRules,
-              historicalBreakPriority:
-                schedulerInput.rules.historicalBreakPriority,
-            },
-            schedulerRules: schedulerInput.rules,
-            allowProtectedRelief:
-              schedulerInput.rules.minimalFixAllowProtectedRelocation &&
-              schedulerInput.rules.minimalFixAllowBreakRelocation,
-          })
-        : null;
-
-    const result =
-      repairMode === "COVERAGE" && breakPlan
-        ? {
-            ...coverageResult,
-            assignments: enrichBreakAssignmentsWithFixedEvents(
-              breakPlan.assignments,
-              schedulerInput.clients,
-              dayData.extendedRules.slotLengthMinutes
-            ),
-          }
-        : coverageResult;
+    const coverageResult = repairCoverageMinimally(
+      schedulerInput,
+      priorityRequirements,
+      // Never move an existing valid template/manual cell to win a last
+      // assignment. Uncovered demand belongs in the manager tray.
+      {allowAutomaticOverrides:false, allowProtectedRelocation:false, allowBreakRelocation:false}
+    );
+    const breakPlan = null;
+    const result = coverageResult;
 
     const originalAssignmentIds = new Set(
       originalSchedulerInput.existingAssignments.map(
