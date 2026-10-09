@@ -301,11 +301,19 @@ function findBestFreeBreaks(
           clients,
           rules.slotLengthMinutes
         );
+        // A single client's nap can be linked to at most one staff break
+        // per slot. Other employees may still take an ordinary break.
+        const alreadyLinked = fixedEvent?.assignmentType === "BREAK_NAP" &&
+          assignments.some((assignment) =>
+            assignment.assignmentType === "BREAK_NAP" &&
+            assignment.clientId === fixedEvent.client.id &&
+            assignment.startTime === slotTime);
+        const availableEvent = alreadyLinked ? null : fixedEvent;
         const insideNormalWindow =
           slotTime >= rules.breakWindowStart &&
           slotTime < rules.breakWindowEnd;
         const insideNapExtension =
-          fixedEvent?.assignmentType === "BREAK_NAP" &&
+          availableEvent?.assignmentType === "BREAK_NAP" &&
           slotTime >= rules.breakWindowStart &&
           slotTime < NAP_BREAK_WINDOW_END;
 
@@ -315,7 +323,7 @@ function findBestFreeBreaks(
 
         return {
           slotTime,
-          fixedEvent,
+          fixedEvent: availableEvent,
         };
       });
 
