@@ -243,7 +243,7 @@ function assignmentToGridCell(assignment: ScheduleAssignment): DemoGridCell {
     case "BREAK":
       return { ...common, clientId: null, clientCode: null, text: "Break", assignmentType: "BREAK", color: "#FFFFFF" };
     case "BREAK_NAP":
-      return { ...common, text: "Break/Nap", assignmentType: "BREAK_NAP", color: "#FFF3D6" };
+      return { ...common, text: clientCode ? `Break/Nap · ${clientCode}` : "Break/Nap", assignmentType: "BREAK_NAP", color: "#FFF3D6" };
     case "BREAK_SPEECH":
       return { ...common, text: "Break/Speech", assignmentType: "BREAK_SPEECH", color: "#E4F1FA" };
     case "NAP":
