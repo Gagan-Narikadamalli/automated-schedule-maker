@@ -616,6 +616,17 @@ function smoothShortClientRuns(
         }
       }
 
+      const staffSwitches = (items: SchedulerAssignment[], staffId: string) => {
+        const blocks = items.filter(a => a.staffId === staffId && a.assignmentType === "CLIENT_1_TO_1")
+          .sort((a,b) => a.startTime.localeCompare(b.startTime));
+        let switches = 0;
+        for (let index = 1; index < blocks.length; index++) {
+          if (blocks[index].clientId !== blocks[index-1].clientId &&
+            shiftTime(blocks[index-1].startTime, schedulerRules.slotLengthMinutes) === blocks[index].startTime) switches++;
+        }
+        return switches;
+      };
+
       const beforeRunCount = countClientStaffRuns(
         client.id,
         assignments
@@ -737,6 +748,10 @@ function smoothShortClientRuns(
           if (afterRunCount >= beforeRunCount) {
             continue;
           }
+          const affectedStaff = [run[0].staffId, targetStaff.id];
+          const beforeSwitches = affectedStaff.reduce((sum, id) => sum + staffSwitches(assignments, id), 0);
+          const afterSwitches = affectedStaff.reduce((sum, id) => sum + staffSwitches(simulated, id), 0);
+          if (afterSwitches > beforeSwitches) continue;
 
           assignments.splice(
             0,
