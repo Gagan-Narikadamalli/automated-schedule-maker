@@ -277,8 +277,11 @@ export async function PUT(request: Request) {
             clientId,
             assignmentType: "CLIENT_1_TO_1",
           }).select("staffId").lean();
-          if (conflictingClientCoverage && !cellsChangedByBatch.has(
-            cellKey(String(conflictingClientCoverage.staffId), change.startTime)
+          const activeClientCoverage = conflictingClientCoverage
+            ? (conflictingClientCoverage as unknown as PlainRecord)
+            : null;
+          if (activeClientCoverage && !cellsChangedByBatch.has(
+            cellKey(String(activeClientCoverage.staffId), change.startTime)
           )) {
             conflicts.push({
               staffId: change.staffId,
