@@ -32,7 +32,7 @@ type ExactSlotObservation = PairingObservation & {
 type BreakObservation = {
   staffName: string;
   startTime: string;
-  assignmentType: "BREAK" | "BREAK_NAP" | "BREAK_SPEECH";
+  assignmentType: "BREAK";
   occurrences: number;
 };
 
@@ -200,23 +200,23 @@ const EXACT_SLOT_OBSERVATIONS: ExactSlotObservation[] = [
 ];
 
 const BREAK_OBSERVATIONS: BreakObservation[] = [
-  { staffName: "Siobhan", startTime: "12:00", assignmentType: "BREAK_NAP", occurrences: 4 },
-  { staffName: "Keila", startTime: "13:00", assignmentType: "BREAK_NAP", occurrences: 4 },
-  { staffName: "Jalani", startTime: "13:00", assignmentType: "BREAK_NAP", occurrences: 4 },
-  { staffName: "Marisol", startTime: "12:00", assignmentType: "BREAK_NAP", occurrences: 3 },
+  { staffName: "Siobhan", startTime: "12:00", assignmentType: "BREAK", occurrences: 4 },
+  { staffName: "Keila", startTime: "13:00", assignmentType: "BREAK", occurrences: 4 },
+  { staffName: "Jalani", startTime: "13:00", assignmentType: "BREAK", occurrences: 4 },
+  { staffName: "Marisol", startTime: "12:00", assignmentType: "BREAK", occurrences: 3 },
   { staffName: "Areyana", startTime: "12:00", assignmentType: "BREAK", occurrences: 3 },
-  { staffName: "Stephanie", startTime: "13:00", assignmentType: "BREAK_NAP", occurrences: 3 },
+  { staffName: "Stephanie", startTime: "13:00", assignmentType: "BREAK", occurrences: 3 },
   { staffName: "Lamya", startTime: "11:30", assignmentType: "BREAK", occurrences: 2 },
-  { staffName: "Ariana", startTime: "12:00", assignmentType: "BREAK_NAP", occurrences: 2 },
+  { staffName: "Ariana", startTime: "12:00", assignmentType: "BREAK", occurrences: 2 },
   { staffName: "Devonyah", startTime: "12:00", assignmentType: "BREAK", occurrences: 2 },
   { staffName: "Bella (wil)", startTime: "12:00", assignmentType: "BREAK", occurrences: 2 },
   { staffName: "Juwell", startTime: "12:30", assignmentType: "BREAK", occurrences: 2 },
-  { staffName: "Lauren", startTime: "13:00", assignmentType: "BREAK_NAP", occurrences: 2 },
+  { staffName: "Lauren", startTime: "13:00", assignmentType: "BREAK", occurrences: 2 },
   { staffName: "Juwell", startTime: "11:30", assignmentType: "BREAK", occurrences: 2 },
-  { staffName: "Danna", startTime: "13:00", assignmentType: "BREAK_NAP", occurrences: 2 },
-  { staffName: "Olivia", startTime: "13:00", assignmentType: "BREAK_NAP", occurrences: 2 },
-  { staffName: "Lamya", startTime: "12:00", assignmentType: "BREAK_NAP", occurrences: 2 },
-  { staffName: "Latoya", startTime: "13:00", assignmentType: "BREAK_NAP", occurrences: 2 },
+  { staffName: "Danna", startTime: "13:00", assignmentType: "BREAK", occurrences: 2 },
+  { staffName: "Olivia", startTime: "13:00", assignmentType: "BREAK", occurrences: 2 },
+  { staffName: "Lamya", startTime: "12:00", assignmentType: "BREAK", occurrences: 2 },
+  { staffName: "Latoya", startTime: "13:00", assignmentType: "BREAK", occurrences: 2 },
   { staffName: "Danna", startTime: "12:00", assignmentType: "BREAK", occurrences: 2 },
 ];
 
