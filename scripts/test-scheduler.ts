@@ -1403,8 +1403,25 @@ function testAvailableBTWinsOverNonBTTemplateCoverage() {
     "Available BT must cover the client before auxiliary staff even when the older template paired the manager");
 }
 
+function testFourHourPreferenceWithFinalHourExtension() {
+  const slots = Array.from({ length: 10 }, (_, index) => {
+    const minutes = 12 * 60 + index * 30;
+    return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+  });
+  const regular = createStaff("regular-bt", "Regular BT", "BT", slots);
+  const client = createClient("client-a", "ClAa", slots);
+  const input = createInput([regular], [client]);
+  input.rules.maximumClientStaffConsecutiveHours = 5;
+  const result = generateSchedule(input);
+  const coverage = clientAssignments(result.assignments).filter(a => a.clientId === "client-a");
+  assert.equal(coverage.length, 10, "A final one-hour shift tail must stay with the regular BT if eligible");
+  assert.ok(coverage.every(a => a.staffId === "regular-bt"), "Do not invent a caregiver switch for the last hour");
+  assert.equal(result.uncoveredRequirements.length, 0);
+}
+
 function runSchedulerRegressionScenarios() {
   testRoleCoverageOrder();
+  testFourHourPreferenceWithFinalHourExtension();
   testAvailableBTWinsOverNonBTTemplateCoverage();
   testContiguousClientCoverageAndNoDoubleBooking();
   testHistoricalPreferenceCannotJumpRoleTier();
