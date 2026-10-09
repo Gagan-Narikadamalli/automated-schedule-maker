@@ -648,6 +648,7 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
           ...readTools,
           ...advisoryTools,
           get_scheduler_configuration: websiteTools.get_scheduler_configuration,
+          analyze_workbook_patterns: websiteTools.analyze_workbook_patterns,
         };
     const tools = adaptSchedulerToolsForPaid(schedulerTools);
 
