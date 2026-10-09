@@ -22,11 +22,16 @@ export async function persistScheduleReplacementSafely(args: {
   };
 
   const previous = (await ScheduleAssignment.find(baseFilter)
-    .select("_id staffId startTime")
+    .select("_id staffId startTime clientId assignmentType endTime locked note")
     .lean()) as unknown as Array<{
     _id: unknown;
     staffId: unknown;
     startTime: unknown;
+    clientId?: unknown;
+    assignmentType?: unknown;
+    endTime?: unknown;
+    locked?: unknown;
+    note?: unknown;
   }>;
 
   if (
@@ -41,6 +46,21 @@ export async function persistScheduleReplacementSafely(args: {
       upsertedCount: 0,
       removedStaleCount: 0,
     };
+  }
+
+  const oldByKey = new Map(previous.map(item => [assignmentKey(item.staffId, item.startTime), item]));
+  let unchangedCount = 0;
+  let changedCount = 0;
+  let addedCount = 0;
+  for (const item of args.replacements) {
+    const prior = oldByKey.get(assignmentKey(item.staffId,item.startTime));
+    if (!prior) { addedCount++; continue; }
+    const same = String(prior.clientId ?? "") === String(item.clientId ?? "") &&
+      String(prior.assignmentType ?? "") === String(item.assignmentType ?? "") &&
+      String(prior.endTime ?? "") === String(item.endTime ?? "") &&
+      Boolean(prior.locked) === Boolean(item.locked) &&
+      String(prior.note ?? "") === String(item.note ?? "");
+    if (same) unchangedCount++; else changedCount++;
   }
 
   if (args.replacements.length > 0) {
@@ -93,5 +113,8 @@ export async function persistScheduleReplacementSafely(args: {
     preservedCount: previous.length - staleIds.length,
     upsertedCount: args.replacements.length,
     removedStaleCount: staleIds.length,
+    unchangedCount,
+    changedCount,
+    addedCount,
   };
 }
