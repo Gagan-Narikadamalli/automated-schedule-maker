@@ -13,6 +13,7 @@ import { analyzeNaturalTimeRange, naturalTimeConfirmationQuestion } from "@/feat
 import { buildSchedulerAiInstructions } from "@/features/ai/schedulerPrompt";
 import { buildSchedulerReplyFallback } from "@/features/ai/schedulerReplyFallback";
 import { adaptSchedulerToolsForPaid } from "@/features/ai/schedulerPaidToolAdapter";
+import { createPaidTemplateTools } from "@/features/ai/schedulerPaidTemplateTools";
 import { ensureSchedulerConversationClosing } from "@/features/ai/schedulerConversationLifecycle";
 import { createSchedulerReadOnlyTools } from "@/features/ai/schedulerTools";
 import {
@@ -643,6 +644,7 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
           ...websiteTools,
           ...createSchedulerWriteTools(context),
           ...createSchedulerBulkTools(context),
+          ...createPaidTemplateTools(context),
         }
       : {
           ...readTools,
@@ -670,7 +672,7 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
         autonomousWrites: writeToolsEnabled,
       }) +
       attachmentImportInstructions +
-      dateContextInstructions;
+      dateContextInstructions + `\n\nPAID AI WORKBOOK-INFERRED TEMPLATES\nWhen explicitly asked to learn the clinic scheduling pattern from Excel and independently design new weekday templates, first call analyze_workbook_patterns for the selected weekday. Read the current date-specific roster, nap periods, client attendance, call-outs and call-ins. Reason over common continuous blocks, natural nap handoff points and BT-first coverage. Propose your own new segments and use create_inferred_weekday_template to save a reusable new template. This is template-only; do not claim that the live calendar changed or that the underlying model was fine-tuned. Historical workbook observations are preferences, never authority to violate staff eligibility, coverage, or safety. If workbook examples are missing, request a workbook upload rather than invent them. Do not create new templates unless the user requests creation.\n`;
 
     let resultText = "";
     let resultSteps: Array<{
@@ -795,7 +797,8 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
                   toolCall.toolName,
                   toolCall.input
                 ) ||
-                SCHEDULER_BULK_WRITE_TOOL_NAMES.has(toolCall.toolName)
+                SCHEDULER_BULK_WRITE_TOOL_NAMES.has(toolCall.toolName) ||
+                toolCall.toolName === "create_inferred_weekday_template"
             )
             .map((toolCall) => toolCall.toolName)
         )
