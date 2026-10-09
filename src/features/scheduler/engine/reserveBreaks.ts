@@ -348,11 +348,15 @@ function findSupervisedFixedEventClient(
 
       let first = breakAssignment.startTime;
       let last = breakAssignment.startTime;
-      while (fixedSlots.has(shiftTime(first, -slotLengthMinutes))) {
-        first = shiftTime(first, -slotLengthMinutes);
+      while (true) {
+        const previous = shiftTime(first, -slotLengthMinutes);
+        if (!previous || !fixedSlots.has(previous)) break;
+        first = previous;
       }
-      while (fixedSlots.has(shiftTime(last, slotLengthMinutes))) {
-        last = shiftTime(last, slotLengthMinutes);
+      while (true) {
+        const next = shiftTime(last, slotLengthMinutes);
+        if (!next || !fixedSlots.has(next)) break;
+        last = next;
       }
       const adjacentTimes = new Set([
         shiftTime(first, -slotLengthMinutes),
