@@ -180,7 +180,7 @@ export async function POST(request: Request) {
         const protectedRows=await ScheduleAssignment.find({
           locationId,date,$or:[{source:"MANUAL"},{locked:true},{manuallyOverridden:true},
             {assignmentType:{$in:["SPEECH","UNAVAILABLE"]}}]
-        }).lean() as Array<{staffId:unknown;clientId?:unknown;startTime:string;assignmentType:string}>;
+        }).lean() as unknown as Array<{staffId:unknown;clientId?:unknown;startTime:string;assignmentType:string}>;
         const desiredByKey=new Map(desired.map(item=>[key(item),item]));
         const incompatible=protectedRows.filter(item=>{
           const match=desiredByKey.get(key(item));
@@ -196,7 +196,7 @@ export async function POST(request: Request) {
           replaceableFilter:{manuallyOverridden:{$ne:true},locked:{$ne:true},
             source:{$in:["AUTO","TEMPLATE","COPIED"]}},
         });
-        const actual=await ScheduleAssignment.find({locationId,date}).lean() as
+        const actual=await ScheduleAssignment.find({locationId,date}).lean() as unknown as
           Array<{staffId:unknown;clientId?:unknown;startTime:string;endTime:string;assignmentType:string}>;
         const actualByKey=new Map(actual.map(item=>[key(item),item]));
         const matched=desired.filter(item=>{
