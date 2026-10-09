@@ -336,52 +336,37 @@ function findSupervisedFixedEventClient(
   client: SchedulerClient;
   assignmentType: "BREAK_NAP" | "BREAK_SPEECH";
 } | null {
-  const previousTime = shiftTime(
-    breakAssignment.startTime,
-    -slotLengthMinutes
-  );
-  const nextTime = shiftTime(
-    breakAssignment.startTime,
-    slotLengthMinutes
-  );
-  const adjacentAssignments = assignments.filter(
-    (assignment) =>
-      assignment.staffId === breakAssignment.staffId &&
-      assignment.assignmentType === "CLIENT_1_TO_1" &&
-      (assignment.startTime === previousTime ||
-        assignment.startTime === nextTime) &&
-      Boolean(assignment.clientId)
-  );
+  // A client may nap for several consecutive slots. The caregiver might work
+  // with the child immediately BEFORE or AFTER the full nap period, rather
+  // than immediately next to every break slot within it.
+  for (const assignmentType of ["BREAK_NAP", "BREAK_SPEECH"] as const) {
+    for (const client of clients) {
+      const fixedSlots = new Set(
+        assignmentType === "BREAK_NAP" ? client.napSlots : client.speechSlots
+      );
+      if (!fixedSlots.has(breakAssignment.startTime)) continue;
 
-  const adjacentClientIds = adjacentAssignments.map(
-    (assignment) => assignment.clientId as string
-  );
-  const orderedClientIds = [...new Set(adjacentClientIds)];
-
-  for (const clientId of orderedClientIds) {
-    const client = clients.find(
-      (candidate) => candidate.id === clientId
-    );
-
-    if (!client) {
-      continue;
-    }
-
-    if (client.napSlots.includes(breakAssignment.startTime)) {
-      return {
-        client,
-        assignmentType: "BREAK_NAP",
-      };
-    }
-
-    if (client.speechSlots.includes(breakAssignment.startTime)) {
-      return {
-        client,
-        assignmentType: "BREAK_SPEECH",
-      };
+      let first = breakAssignment.startTime;
+      let last = breakAssignment.startTime;
+      while (fixedSlots.has(shiftTime(first, -slotLengthMinutes))) {
+        first = shiftTime(first, -slotLengthMinutes);
+      }
+      while (fixedSlots.has(shiftTime(last, slotLengthMinutes))) {
+        last = shiftTime(last, slotLengthMinutes);
+      }
+      const adjacentTimes = new Set([
+        shiftTime(first, -slotLengthMinutes),
+        shiftTime(last, slotLengthMinutes),
+      ]);
+      const linked = assignments.some((assignment) =>
+        assignment.staffId === breakAssignment.staffId &&
+        assignment.assignmentType === "CLIENT_1_TO_1" &&
+        assignment.clientId === client.id &&
+        adjacentTimes.has(assignment.startTime)
+      );
+      if (linked) return { client, assignmentType };
     }
   }
-
   return null;
 }
 
