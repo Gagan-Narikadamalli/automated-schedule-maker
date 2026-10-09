@@ -654,8 +654,8 @@ function testPairingCanResumeAcrossClientNap() {
 
   assert.deepEqual(
     assigned.map((assignment) => assignment.staffId),
-    ["bt-a", "bt-b", "bt-b", "bt-b"],
-    "When another eligible BT is available, a planned Nap boundary should rotate the caregiver once and then maintain a continuous post-nap block."
+    ["bt-a", "bt-a", "bt-a", "bt-a"],
+    "A nap pause alone should not force a caregiver rotation when the current BT is still eligible; actual templates and staffing needs can still create natural handoffs."
   );
   assert.equal(
     result.metrics.uncoveredClientSlots,
