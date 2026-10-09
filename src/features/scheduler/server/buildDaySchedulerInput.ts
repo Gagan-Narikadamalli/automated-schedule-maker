@@ -878,11 +878,7 @@ function mapReferenceAssignments(
       staffId,
       clientId: assignmentType === "CLIENT_1_TO_1" ? clientId : undefined,
       startTime,
-      assignmentType:
-        assignmentType === "BREAK_NAP" ||
-        assignmentType === "BREAK_SPEECH"
-          ? "BREAK"
-          : assignmentType,
+      assignmentType,
       source,
       locked: false,
       note: label,
