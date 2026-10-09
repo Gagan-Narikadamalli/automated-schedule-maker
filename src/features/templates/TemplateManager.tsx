@@ -674,7 +674,7 @@ export function TemplateManager() {
             <div className="form-grid" key={day} style={{marginBottom:16,alignItems:"end"}}>
               <label className="form-field"><span>{displayDay(day)} — priority 1 template</span>
                 <select value={preference.firstTemplateId} onChange={event=>updateWeekdayPreference(day,{firstTemplateId:event.target.value})}>
-                  <option value="">Automatic best weekday template</option>
+                  <option value="">Automatic best saved weekday template</option>
                   {choices.map(template=><option value={template.id} key={template.id}>{template.name}</option>)}
                 </select>
               </label>
@@ -682,12 +682,6 @@ export function TemplateManager() {
                 <select value={preference.secondTemplateId} onChange={event=>updateWeekdayPreference(day,{secondTemplateId:event.target.value})}>
                   <option value="">None</option>
                   {choices.map(template=><option value={template.id} key={template.id}>{template.name}</option>)}
-                </select>
-              </label>
-              <label className="form-field"><span>First source to fill blocks</span>
-                <select value={preference.previousWeekFirst ? "PREVIOUS" : "SAVED"} onChange={event=>updateWeekdayPreference(day,{previousWeekFirst:event.target.value==="PREVIOUS"})}>
-                  <option value="PREVIOUS">Previous week's actual schedule first</option>
-                  <option value="SAVED">Saved templates first</option>
                 </select>
               </label>
               <button className="button button-primary" type="button" disabled={working||savingPreferenceDay!==""||!locationId||preference.firstTemplateId!==""&&preference.firstTemplateId===preference.secondTemplateId} onClick={()=>void saveWeekdayPreference(day)}>
