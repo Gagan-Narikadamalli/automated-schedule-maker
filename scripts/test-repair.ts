@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { repairCoverageMinimally } from "../src/features/scheduler/engine/generateSchedule";
 
 import {
   repairSchedule,
@@ -225,9 +226,60 @@ function testEmptyAffectedSlotListDoesNotClearWholeStaffDay() {
   );
 }
 
+function testTemplatePreservationInRepairAndMinimalFix() {
+  for (const day of ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"]) {
+    const staffMembers = [
+      staff("template-a", "Template A", ["08:00", "08:30"]),
+      staff("template-b", "Template B", ["08:00", "08:30"]),
+      staff("relief", "Relief", ["08:00", "08:30"]),
+    ];
+    const clients = [
+      client("client-a", "AA", ["08:00", "08:30"]),
+      client("client-b", "BB", ["08:00", "08:30"]),
+    ];
+    const saved = [
+      assignment("a-0800", "template-a", "client-a", "08:00"),
+      assignment("b-0800", "template-b", "client-b", "08:00"),
+      assignment("b-0830", "template-b", "client-b", "08:30"),
+    ];
+    const scenario = input(staffMembers, clients, saved);
+    scenario.referenceAssignments = [
+      ...["08:00", "08:30"].map((slot) => ({ ...assignment(`ref-a-${slot}`, "template-a", "client-a", slot), source: "TEMPLATE" as const })),
+      ...["08:00", "08:30"].map((slot) => ({ ...assignment(`ref-b-${slot}`, "template-b", "client-b", slot), source: "TEMPLATE" as const })),
+    ];
+    const minimal = repairCoverageMinimally(scenario, [{ clientId: "client-a", startTime: "08:30" }]);
+    for (const original of saved) {
+      assert.ok(minimal.assignments.some((entry) =>
+        entry.staffId === original.staffId && entry.clientId === original.clientId && entry.startTime === original.startTime),
+        `${day}: minimal fix must retain existing valid pairings`);
+    }
+    assert.ok(minimal.assignments.some((entry) =>
+      entry.staffId === "template-a" && entry.clientId === "client-a" && entry.startTime === "08:30"),
+      `${day}: minimal fix should fill the gap with its available template employee`);
+
+    const disrupted = input(
+      [staff("template-a", "Template A", ["08:00"]), ...staffMembers.slice(1)],
+      clients,
+      [...saved, assignment("a-0830", "template-a", "client-a", "08:30")]
+    );
+    disrupted.referenceAssignments = scenario.referenceAssignments;
+    const repaired = repairSchedule(disrupted, ["template-a"], [{ staffId: "template-a", startTime: "08:30" }]);
+    for (const original of saved) {
+      assert.ok(repaired.assignments.some((entry) =>
+        entry.staffId === original.staffId && entry.clientId === original.clientId && entry.startTime === original.startTime),
+        `${day}: call-out repair must preserve unaffected assignments`);
+    }
+    assert.ok(repaired.assignments.some((entry) =>
+      entry.staffId === "relief" && entry.clientId === "client-a" && entry.startTime === "08:30"),
+      `${day}: only affected client should move to eligible relief`);
+  }
+  console.log("Five-weekday template preservation checks passed for Minimal Fix and call-out Repair.");
+}
+
 function runRepairRegressionScenarios() {
   testOnlyAffectedSlotIsReplaced();
   testEmptyAffectedSlotListDoesNotClearWholeStaffDay();
+  testTemplatePreservationInRepairAndMinimalFix();
 
   console.log("Targeted call-out repair regression scenarios passed.");
 }
