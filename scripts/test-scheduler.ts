@@ -1415,8 +1415,24 @@ function testContiguousClientCoverageAndNoDoubleBooking() {
   }
 }
 
+function testAvailableBTWinsOverNonBTTemplateCoverage() {
+  const staff = [
+    createStaff("bt", "Available BT", "BT", ["08:00"]),
+    createStaff("manager", "Manager", "OFFICE_MANAGER", ["08:00"]),
+  ];
+  const client = createClient("client", "ClNt", ["08:00"]);
+  const reference: SchedulerAssignment = {
+    id: "old-template", staffId: "manager", clientId: "client",
+    startTime: "08:00", assignmentType: "CLIENT_1_TO_1", source: "TEMPLATE", locked: false,
+  };
+  const result = generateSchedule(createInput(staff, [client], [], [reference]));
+  assert.equal(clientAssignments(result.assignments)[0]?.staffId, "bt",
+    "Available BT must cover the client before auxiliary staff even when the older template paired the manager");
+}
+
 function runSchedulerRegressionScenarios() {
   testRoleCoverageOrder();
+  testAvailableBTWinsOverNonBTTemplateCoverage();
   testContiguousClientCoverageAndNoDoubleBooking();
   testHistoricalPreferenceCannotJumpRoleTier();
   testHistoricalSameWeekdayPatternGuidesMatching();
