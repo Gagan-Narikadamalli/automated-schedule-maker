@@ -1053,22 +1053,29 @@ export async function buildDaySchedulerInput(
         .filter(Boolean)
     ),
   ];
+  const immediatePreviousWeekdayDate =
+    previousSameWeekdayDates[0] ?? null;
+  const immediatePreviousWeekdayAssignments =
+    immediatePreviousWeekdayDate
+      ? previousWeekdayAssignments.filter(
+          (assignment) =>
+            String(assignment.date ?? "") ===
+            immediatePreviousWeekdayDate
+        )
+      : [];
   const latestPreviousReferenceDate =
     extendedRules.autoUsePreviousWeekdaySchedule &&
-    historicalReferenceDates.length > 0
-      ? historicalReferenceDates[0]
+    immediatePreviousWeekdayAssignments.length > 0
+      ? immediatePreviousWeekdayDate
       : null;
   const previousScheduleReferences =
     extendedRules.autoUsePreviousWeekdaySchedule
       ? mapReferenceAssignments(
-          previousWeekdayAssignments,
+          immediatePreviousWeekdayAssignments,
           "COPIED",
           staff,
           clients,
-          `Historical reference from the previous ${Math.min(
-            historicalReferenceDates.length,
-            8
-          )} ${dayOfWeek.toLowerCase()} schedule(s).`
+          `Primary exact reference from the immediately previous ${dayOfWeek.toLowerCase()} schedule (${immediatePreviousWeekdayDate ?? "none"}).`
         )
       : [];
 
@@ -1091,8 +1098,10 @@ export async function buildDaySchedulerInput(
             assignment.assignmentType === "BREAK_NAP" ||
             assignment.assignmentType === "BREAK_SPEECH")
       ),
-      ...templateReferences,
+      // Exact reuse order is intentional: last week's same weekday first,
+      // then this week's selected weekday template, then normal rules.
       ...previousScheduleReferences,
+      ...templateReferences,
     ],
     callOutStaffIds: fullDayCallOutStaffIds,
     rules: {
