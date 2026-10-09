@@ -133,6 +133,11 @@ export async function POST(request: Request) {
       effectiveInput.clients.map((client) => [client.id, client])
     );
     const occupiedClientSlots = new Set(protectedClientSlots);
+    const linkedNapSlots = new Set(
+      protectedTarget.filter((item) => item.assignmentType === "BREAK_NAP" && item.clientId)
+        .map((item) => `${String(item.clientId)}-${String(item.startTime)}`)
+    );
+    const occupiedStaffSlots = new Set(protectedCells);
     const warnings: string[] = [];
     const validAssignments: PlainRecord[] = [];
 
@@ -145,7 +150,7 @@ export async function POST(request: Request) {
       const cellKey = `${staffId}-${startTime}`;
       const assignmentType = String(templateAssignment.assignmentType);
 
-      if (protectedCells.has(cellKey)) {
+      if (occupiedStaffSlots.has(cellKey)) {
         warnings.push(
           `Skipped ${startTime} for staff ${staffId}; the target cell has a protected manual assignment.`
         );
@@ -160,6 +165,19 @@ export async function POST(request: Request) {
           `Skipped ${startTime} for staff ${staffId}; that staff member is unavailable on the target date.`
         );
         continue;
+      }
+
+      if (assignmentType === "BREAK_NAP") {
+        if (!clientId || !clientsById.get(clientId)?.napSlots.includes(startTime)) {
+          warnings.push(`Skipped unlinked/invalid Break + Nap for staff ${staffId} at ${startTime}: only a recorded Nap event on the target date can authorize a client nap.`);
+          continue;
+        }
+        const napKey = `${clientId}-${startTime}`;
+        if (linkedNapSlots.has(napKey)) {
+          warnings.push(`Skipped duplicate Break + Nap for ${clientId} at ${startTime}; the client is already linked to a staff break.`);
+          continue;
+        }
+        linkedNapSlots.add(napKey);
       }
 
       if (clientId && !clientsById.has(clientId)) {
@@ -190,6 +208,7 @@ export async function POST(request: Request) {
         occupiedClientSlots.add(clientSlotKey);
       }
 
+      occupiedStaffSlots.add(cellKey);
       validAssignments.push({
         locationId,
         date: targetDate,
