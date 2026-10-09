@@ -329,8 +329,59 @@ const twoClientsOut = runScenario({
 assert.equal(twoClientsOut.matchPercent, 100);
 assert.equal(twoClientsOut.coveragePercent, 100);
 
+// Date-scoped simulation matrix: three successive workweeks with the same
+// imported-style weekday template, plus realistic attendance variations.
+// These fixtures are synthetic, not a claim of access to the clinic MongoDB.
+function dateForDay(week: number, offset: number): string {
+  const start = new Date("2026-10-05T12:00:00Z");
+  start.setUTCDate(start.getUTCDate() + week * 7 + offset);
+  return start.toISOString().slice(0, 10);
+}
+const datedReports = Array.from({ length: 3 }, (_, week) =>
+  Object.entries(weekdayPairings).map(([day, pairings], offset) => {
+    const date = dateForDay(week, offset);
+    const staffRows = baseStaff.map((member) => ({
+      ...member,
+      availableSlots: [...member.availableSlots],
+    }));
+    const clientRows = baseClients.map((member) => ({
+      ...member,
+      requiredSlots: [...member.requiredSlots],
+    }));
+    if (week === 1 && offset === 2) {
+      staffRows[0].availableSlots = [];
+      staffRows.push(staff("relief-w2", "Available Relief"));
+    }
+    if (week === 2 && offset === 3) {
+      clientRows.splice(1, 1);
+    }
+    return runScenario({
+      name: `${date} (${day}) workbook-style reference`,
+      staffRows,
+      clientRows,
+      template: templateForPairings(pairings),
+    });
+  })
+).flat();
+
+for (const report of datedReports) {
+  assert.equal(report.coveragePercent, 100, `${report.name}: coverage must remain complete`);
+  assert.equal(report.matchPercent, 100, `${report.name}: feasible template pairings must be retained`);
+  const slotStaff = new Set<string>();
+  const slotClient = new Set<string>();
+  for (const assignment of report.assignments.filter(a => a.assignmentType === "CLIENT_1_TO_1")) {
+    const staffKey = `${assignment.staffId}|${assignment.startTime}`;
+    const clientKey = `${assignment.clientId}|${assignment.startTime}`;
+    assert.ok(!slotStaff.has(staffKey), `${report.name}: double-booked staff ${staffKey}`);
+    assert.ok(!slotClient.has(clientKey), `${report.name}: double-booked client ${clientKey}`);
+    slotStaff.add(staffKey);
+    slotClient.add(clientKey);
+  }
+}
+
 const allReports = [
   ...reports,
+  ...datedReports,
   oneStaffOut,
   twoStaffOut,
   oneClientOut,
@@ -349,5 +400,5 @@ console.table(
 );
 
 console.log(
-  "Template-first Auto Generate simulations passed for five weekdays, two staff call-out scenarios, and two client call-out scenarios."
+  "Template-first regression passed: five weekdays, 15 dated scenarios over 3 weeks (including staff/client absence), plus 4 additional call-out simulations."
 );
