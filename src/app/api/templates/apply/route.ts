@@ -13,6 +13,7 @@ import { writeAuditLog } from "@/lib/api/audit";
 import { connectToDatabase } from "@/lib/db";
 import { ScheduleAssignment } from "@/models/ScheduleAssignment";
 import { ScheduleTemplate } from "@/models/ScheduleTemplate";
+import { AppliedScheduleTemplate } from "@/models/AppliedScheduleTemplate";
 
 type ApplyTemplateRequest = {
   locationId?: string;
@@ -249,6 +250,14 @@ export async function POST(request: Request) {
         { ordered: false }
       );
     }
+
+    // Remember which template the manager selected even after Generate Day
+    // replaces the visible template cells with fresh AUTO assignments.
+    await AppliedScheduleTemplate.updateOne(
+      { locationId, date: targetDate },
+      { $set: { templateId } },
+      { upsert: true }
+    );
 
     await writeAuditLog({
       locationId,
