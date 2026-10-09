@@ -31,6 +31,9 @@ jobs:
       - name: Test template nap and break linking
         run: npx tsx scripts/test-template-nap-links.ts
 
+      - name: Test multiple weekday template selection
+        run: npx tsx scripts/test-multi-weekday-template-selection.ts
+
       - name: Build application
         run: npm run build
         env:
