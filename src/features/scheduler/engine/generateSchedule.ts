@@ -543,11 +543,11 @@ function exactReferenceMatchStrength(
       return score;
     }
 
-    // A saved weekday template is the strongest reusable instruction. Previous
-    // same-weekday schedules remain strong evidence, while current-day AUTO
-    // output is deliberately ignored so a bad generation cannot train itself.
-    if (assignment.source === "TEMPLATE") return score + 100;
-    if (assignment.source === "COPIED") return score + 10;
+    // The immediately previous same-weekday schedule is the strongest reusable
+    // instruction. The current weekday template is the fallback. Current-day
+    // AUTO output is deliberately ignored so a bad generation cannot train itself.
+    if (assignment.source === "COPIED") return score + 100;
+    if (assignment.source === "TEMPLATE") return score + 10;
     return score;
   }, 0);
 }
@@ -585,23 +585,24 @@ function exactReferenceConflictsWithPair(
       return strength;
     }
 
-    const weight = assignment.source === "TEMPLATE" ? 100 : 10;
+    const weight = assignment.source === "COPIED" ? 100 : 10;
     return Math.max(strength, weight);
   }, 0);
 
   return strongestConflict > proposedStrength;
 }
 
-function staffReservedForAnotherExactTemplateClient(
+function staffReservedForAnotherExactReferenceClient(
   staffId: string,
   proposedClientId: string,
   startTime: string,
   input: SchedulerInput,
-  assignments: SchedulerAssignment[]
+  assignments: SchedulerAssignment[],
+  source: "COPIED" | "TEMPLATE"
 ): boolean {
   const reservedReferences = input.referenceAssignments.filter(
     (assignment) =>
-      assignment.source === "TEMPLATE" &&
+      assignment.source === source &&
       assignment.assignmentType === "CLIENT_1_TO_1" &&
       assignment.staffId === staffId &&
       assignment.clientId &&
@@ -695,17 +696,26 @@ function sortRequirementsForClinicFlow(
       return timeComparison;
     }
 
-    // Exact weekday-template client pairings receive the first claim on their
-    // scheduled time when their caregiver is present and eligible. Otherwise a
-    // more flexible client could take that employee before the template client
-    // is processed, causing unnecessary handoffs later in the day.
-    const templateMatchAvailable = (requirement: ClientRequirement): boolean =>
+    // Reproduce the immediately previous same-weekday schedule first. If that
+    // exact pairing is not feasible, give the current weekday template the next
+    // claim. Only after both reusable references fail do normal scheduler rules
+    // decide the assignment.
+    const exactReferenceMatchAvailable = (
+      requirement: ClientRequirement,
+      source: "COPIED" | "TEMPLATE"
+    ): boolean =>
       input.referenceAssignments.some((reference) => {
-        if (reference.source !== "TEMPLATE" ||
-            reference.assignmentType !== "CLIENT_1_TO_1" ||
-            reference.clientId !== requirement.client.id ||
-            reference.startTime !== requirement.startTime) return false;
-        const member = input.staff.find((person) => person.id === reference.staffId);
+        if (
+          reference.source !== source ||
+          reference.assignmentType !== "CLIENT_1_TO_1" ||
+          reference.clientId !== requirement.client.id ||
+          reference.startTime !== requirement.startTime
+        ) {
+          return false;
+        }
+        const member = input.staff.find(
+          (person) => person.id === reference.staffId
+        );
         if (!member) return false;
         return canAssignStaffToClient({
           staffMember: member,
@@ -717,9 +727,18 @@ function sortRequirementsForClinicFlow(
           allowSameDayPairRepeat: true,
         }).allowed;
       });
-    const leftTemplate = templateMatchAvailable(left);
-    const rightTemplate = templateMatchAvailable(right);
-    if (leftTemplate !== rightTemplate) return leftTemplate ? -1 : 1;
+
+    const leftPreviousWeek = exactReferenceMatchAvailable(left, "COPIED");
+    const rightPreviousWeek = exactReferenceMatchAvailable(right, "COPIED");
+    if (leftPreviousWeek !== rightPreviousWeek) {
+      return leftPreviousWeek ? -1 : 1;
+    }
+
+    const leftTemplate = exactReferenceMatchAvailable(left, "TEMPLATE");
+    const rightTemplate = exactReferenceMatchAvailable(right, "TEMPLATE");
+    if (leftTemplate !== rightTemplate) {
+      return leftTemplate ? -1 : 1;
+    }
 
     // First preserve clients that already have a real staff pairing from the
     // immediately previous coverage segment (including across a protected Nap
@@ -895,11 +914,53 @@ function findBestStaffMember(
       } => candidate !== null
     )
     .sort((left, right) => {
-      // In normal coverage, always prioritize an available qualified BT/RBT
-      // over an auxiliary role, even if an older template lists otherwise.
-      const leftBT = coverageRoleTier(left.staffMember) === 0;
-      const rightBT = coverageRoleTier(right.staffMember) === 0;
-      if (leftBT !== rightBT) return leftBT ? -1 : 1;
+      const leftPreviousWeekStrength = exactReferenceMatchStrength(
+        left.staffMember.id,
+        requirement.client.id,
+        requirement.startTime,
+        input.referenceAssignments,
+        "COPIED"
+      );
+      const rightPreviousWeekStrength = exactReferenceMatchStrength(
+        right.staffMember.id,
+        requirement.client.id,
+        requirement.startTime,
+        input.referenceAssignments,
+        "COPIED"
+      );
+
+      // Priority 1: reproduce the immediately previous same-weekday pairing
+      // whenever it still passes all hard eligibility constraints.
+      if (leftPreviousWeekStrength !== rightPreviousWeekStrength) {
+        return rightPreviousWeekStrength - leftPreviousWeekStrength;
+      }
+
+      const leftReservedForOtherPreviousWeek =
+        staffReservedForAnotherExactReferenceClient(
+          left.staffMember.id,
+          requirement.client.id,
+          requirement.startTime,
+          input,
+          assignments,
+          "COPIED"
+        );
+      const rightReservedForOtherPreviousWeek =
+        staffReservedForAnotherExactReferenceClient(
+          right.staffMember.id,
+          requirement.client.id,
+          requirement.startTime,
+          input,
+          assignments,
+          "COPIED"
+        );
+
+      if (
+        leftReservedForOtherPreviousWeek !==
+        rightReservedForOtherPreviousWeek
+      ) {
+        return leftReservedForOtherPreviousWeek ? 1 : -1;
+      }
+
       const leftTemplateStrength = exactReferenceMatchStrength(
         left.staffMember.id,
         requirement.client.id,
@@ -915,41 +976,39 @@ function findBestStaffMember(
         "TEMPLATE"
       );
 
-      // An explicit weekday template is the first reusable preference once
-      // hard eligibility has passed.
+      // Priority 2: use the current weekday template when last week's exact
+      // assignment is unavailable.
       if (leftTemplateStrength !== rightTemplateStrength) {
         return rightTemplateStrength - leftTemplateStrength;
       }
 
       const leftReservedForOtherTemplate =
-        staffReservedForAnotherExactTemplateClient(
+        staffReservedForAnotherExactReferenceClient(
           left.staffMember.id,
           requirement.client.id,
           requirement.startTime,
           input,
-          assignments
+          assignments,
+          "TEMPLATE"
         );
       const rightReservedForOtherTemplate =
-        staffReservedForAnotherExactTemplateClient(
+        staffReservedForAnotherExactReferenceClient(
           right.staffMember.id,
           requirement.client.id,
           requirement.startTime,
           input,
-          assignments
+          assignments,
+          "TEMPLATE"
         );
 
-      // When a template staff member is still available for their own
-      // template client at this slot, keep that pairing intact before using
-      // them as fallback coverage for a client whose original template staff
-      // is absent. If no unreserved candidate exists, the reserved staff
-      // member can still be used so client coverage remains the final safety
-      // priority.
       if (
         leftReservedForOtherTemplate !== rightReservedForOtherTemplate
       ) {
         return leftReservedForOtherTemplate ? 1 : -1;
       }
 
+      // Priority 3: normal clinic rules, including role preference,
+      // continuity, workload balance, and other score-based preferences.
       const roleDifference =
         coverageRoleTier(left.staffMember) -
         coverageRoleTier(right.staffMember);
@@ -975,28 +1034,6 @@ function findBestStaffMember(
         if (leftContinues !== rightContinues) {
           return leftContinues ? -1 : 1;
         }
-      }
-
-      const leftPreviousWeekdayStrength = exactReferenceMatchStrength(
-        left.staffMember.id,
-        requirement.client.id,
-        requirement.startTime,
-        input.referenceAssignments,
-        "COPIED"
-      );
-      const rightPreviousWeekdayStrength = exactReferenceMatchStrength(
-        right.staffMember.id,
-        requirement.client.id,
-        requirement.startTime,
-        input.referenceAssignments,
-        "COPIED"
-      );
-
-      // Previous same-weekday schedules are then reused inside the normal
-      // clinic role tier. This keeps regular BT/RBT coverage from being
-      // displaced by a historical lower-priority relief-role assignment.
-      if (leftPreviousWeekdayStrength !== rightPreviousWeekdayStrength) {
-        return rightPreviousWeekdayStrength - leftPreviousWeekdayStrength;
       }
 
       if (right.score !== left.score) {
