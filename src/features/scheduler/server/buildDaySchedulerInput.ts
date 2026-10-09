@@ -1047,8 +1047,16 @@ export async function buildDaySchedulerInput(
   // Never reconstruct "last week" from the prior MongoDB schedule: old staff
   // and client ids can be stale, and that saved day may not match the workbook.
   // Each layer only claims cells unfilled by the earlier layer.
+  const priorWorkbookDate = new Date(`${date}T12:00:00Z`);
+  priorWorkbookDate.setUTCDate(priorWorkbookDate.getUTCDate() - 7);
+  const previousWeekWorkbookTemplate = templateDocuments.find((template) =>
+    template.learningOnly !== true &&
+    template.active !== false &&
+    template.sourceType === "HISTORICAL_WORKBOOK" &&
+    String(template.sourceDate ?? "") === priorWorkbookDate.toISOString().slice(0, 10)
+  ) ?? null;
   const orderedExactTemplates = hasAppliedTemplate ? [] :
-    [configuredFirst ?? primaryExactTemplate, configuredSecond]
+    [configuredFirst ?? primaryExactTemplate, configuredSecond ?? previousWeekWorkbookTemplate]
       .filter((item): item is DatabaseRecord => Boolean(item))
       .filter((item,index,array)=>array.findIndex(candidate=>String(candidate._id)===String(item._id))===index);
   const templateReferences = orderedExactTemplates.flatMap((template,index) =>
