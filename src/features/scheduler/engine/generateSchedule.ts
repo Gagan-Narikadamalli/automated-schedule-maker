@@ -812,6 +812,37 @@ function sortRequirementsForClinicFlow(
   });
 }
 
+function buildFallbackContinuityPlan(
+  requirement: ClientRequirement,
+  staffMember: SchedulerStaff,
+  input: SchedulerInput,
+  assignments: SchedulerAssignment[],
+  callOutStaffIds: Set<string>
+): SchedulerAssignment[] {
+  const first = timeToMinutes(requirement.startTime);
+  if (first === null) return [];
+  const maxBlocks = Math.max(1, Math.min(
+    Math.floor(240 / input.rules.slotLengthMinutes),
+    Math.floor(input.rules.maximumClientStaffConsecutiveHours * 60 / input.rules.slotLengthMinutes),
+    requirement.client.maxConsecutiveBlocksWithSameStaff || Number.POSITIVE_INFINITY
+  ));
+  const planned: SchedulerAssignment[] = [];
+  for (let offset = 0; offset < maxBlocks; offset++) {
+    const time = minutesToTime(first + offset * input.rules.slotLengthMinutes);
+    if (!requirement.client.requiredSlots.includes(time)) break;
+    if (requirementIsAlreadyCovered({client: requirement.client, startTime: time}, [...assignments, ...planned])) break;
+    if (exactReferenceConflictsWithPair(staffMember.id, requirement.client.id, time, input.referenceAssignments)) break;
+    const eligible = canAssignStaffToClient({
+      staffMember, client: requirement.client, startTime: time,
+      assignments: [...assignments, ...planned], callOutStaffIds, rules: input.rules,
+      allowSameDayPairRepeat: true, allowCoverageLimitException: true,
+    });
+    if (!eligible.allowed) break;
+    planned.push(createAutoClientAssignment(staffMember, requirement.client, time));
+  }
+  return planned;
+}
+
 function findCoverageFirstSingleSlotStaff(
   requirement: ClientRequirement,
   input: SchedulerInput,
@@ -1686,15 +1717,15 @@ export function repairCoverageMinimally(
     );
 
     if (singleSlotStaff) {
-      assignments.push(
-        createAutoAssignment(singleSlotStaff, requirement)
-      );
-      warnings.push({
-        code: "COVERAGE_FIRST_SINGLE_SLOT",
-        message:
-          `${requirement.client.displayCode} at ${requirement.startTime} was covered with a single-slot fallback after normal continuity/grouping options were exhausted.`,
-      });
-      continue;
+      const plan = buildFallbackContinuityPlan(requirement, singleSlotStaff, input, assignments, callOutStaffIds);
+      if (plan.length) {
+        assignments.push(...plan);
+        warnings.push({
+          code: "COVERAGE_FIRST_SINGLE_SLOT",
+          message: `${requirement.client.displayCode} at ${requirement.startTime} required a fallback; ${singleSlotStaff.name} continues for ${plan.length} feasible half-hour block(s) rather than rotating away after one slot.`,
+        });
+        continue;
+      }
     }
 
     uncoveredRequirements.push({
@@ -1839,7 +1870,7 @@ export function generateSchedule(input: SchedulerInput): SchedulerResult {
     );
 
     if (retryStaff) {
-      const retryPlan = buildMinimumPairingPlan(
+      const retryPlan = buildPreferredContinuousPairingPlan(
         requirement,
         retryStaff,
         input,
