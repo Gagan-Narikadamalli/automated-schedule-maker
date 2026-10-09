@@ -889,9 +889,7 @@ export function ClientCardManager() {
         <div className={cardStyles.formSection}>
           <h3>Client essentials</h3>
           <p>
-            Enter first and last name separately. The calendar code is generated
-            automatically using the first two letters of each name, for example
-            Ziva Bowman becomes ZiBo.
+            Enter any available name. First and last names may be entered separately, but either field may be left blank. The calendar code is generated automatically.
           </p>
           <div className="form-grid">
             <label className="form-field">
