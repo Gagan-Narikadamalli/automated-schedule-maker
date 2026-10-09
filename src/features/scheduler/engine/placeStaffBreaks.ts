@@ -321,11 +321,21 @@ function findBestFreeBreaks(
           clients,
           rules.slotLengthMinutes
         );
+        // A child's nap is a single event. Several staff may be free, but
+        // only one break may claim that child as its linked nap in a slot.
+        const duplicateLinkedNap = fixedEvent?.assignmentType === "BREAK_NAP" &&
+          assignments.some((assignment) =>
+            assignment.assignmentType === "BREAK_NAP" &&
+            assignment.clientId === fixedEvent.client.id &&
+            assignment.startTime === slotTime &&
+            assignment.staffId !== staffMember.id
+          );
+        const availableFixedEvent = duplicateLinkedNap ? null : fixedEvent;
         const insideNormalWindow =
           slotTime >= rules.breakWindowStart &&
           slotTime < rules.breakWindowEnd;
         const insideNapExtension =
-          fixedEvent?.assignmentType === "BREAK_NAP" &&
+          availableFixedEvent?.assignmentType === "BREAK_NAP" &&
           slotTime >= rules.breakWindowStart &&
           slotTime < NAP_BREAK_WINDOW_END;
 
@@ -335,7 +345,7 @@ function findBestFreeBreaks(
 
         return {
           slotTime,
-          fixedEvent,
+          fixedEvent: availableFixedEvent,
         };
       });
 
