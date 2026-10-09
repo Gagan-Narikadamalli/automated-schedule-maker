@@ -1035,8 +1035,7 @@ export async function buildDaySchedulerInput(
     template.sourceType === "HISTORICAL_WORKBOOK" &&
     String(template.sourceDate ?? "") === date
   ) ?? null;
-  const primaryExactTemplate = explicitTemplate ?? configuredFirst ??
-    exactDatedWorkbookTemplate ??
+  const primaryExactTemplate = exactDatedWorkbookTemplate ?? explicitTemplate ?? configuredFirst ??
     (extendedRules.autoUseWeekdayTemplate ? selectBestWeekdayTemplate(templateDocuments, staff, clients) : null);
 
   // Applying a template to a specific date is an explicit manager choice.
@@ -1061,7 +1060,7 @@ export async function buildDaySchedulerInput(
     String(template.sourceDate ?? "") === priorWorkbookDate.toISOString().slice(0, 10)
   ) ?? null;
   const orderedExactTemplates = hasAppliedTemplate ? [] :
-    [configuredFirst ?? primaryExactTemplate, configuredSecond ?? previousWeekWorkbookTemplate]
+    [primaryExactTemplate, previousWeekWorkbookTemplate ?? configuredSecond]
       .filter((item): item is DatabaseRecord => Boolean(item))
       .filter((item,index,array)=>array.findIndex(candidate=>String(candidate._id)===String(item._id))===index);
   const templateReferences = orderedExactTemplates.flatMap((template,index) =>
