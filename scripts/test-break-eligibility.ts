@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 
+import { placeStaffBreaksAfterCoverage } from "../src/features/scheduler/engine/placeStaffBreaks";
 import { enrichBreakAssignmentsWithFixedEvents, reserveStaffBreaks } from "../src/features/scheduler/engine/reserveBreaks";
 import type {
   SchedulerAssignment,
@@ -156,8 +157,45 @@ function testLongNapBreaksPreserveClientRelationship() {
   ), "An unrelated staff member's break must not acquire a child's nap");
 }
 
+function testNapBreakForRegularBTWinsOverEmptyGenericSlot() {
+  const slots = ["11:00", "11:30", "12:00", "12:30", "13:00"];
+  const bt = { ...createStaff("bt", "Regular BT", "BT"), availableSlots: slots };
+  const relief = { ...createStaff("relief", "Other BT", "BT"), availableSlots: slots };
+  const client = {
+    ...createClient("ZiBo", {}),
+    requiredSlots: ["11:00", "11:30", "13:00"],
+    napSlots: ["12:00", "12:30"],
+  };
+  const initial: SchedulerAssignment[] = [
+    ...["11:00", "11:30", "13:00"].map((startTime) => ({
+      id: `coverage-${startTime}`, staffId: "bt", clientId: "ZiBo",
+      startTime, assignmentType: "CLIENT_1_TO_1" as const, source: "AUTO" as const, locked: false,
+    })),
+  ];
+  const result = placeStaffBreaksAfterCoverage({
+    staff: [bt, relief],
+    clients: [client],
+    assignments: initial,
+    referenceAssignments: [],
+    callOutStaffIds: [],
+    rules: { breakWindowStart: "11:00", breakWindowEnd: "14:00", defaultBreakMinutes: 30,
+      breakEligibilityHours: 0, slotLengthMinutes: 30 },
+    schedulerRules: { ...SCHEDULER_RULES, preventSameStaffClientRepeatSameDay: false },
+  });
+  const btBreaks = result.assignments.filter(a => a.staffId === "bt" &&
+    ["BREAK", "BREAK_NAP"].includes(a.assignmentType));
+  assert.equal(btBreaks.length, 1, "BT must get exactly one break");
+  assert.equal(btBreaks[0].assignmentType, "BREAK_NAP", "Use client's own nap, not an unrelated free break");
+  assert.equal(btBreaks[0].clientId, "ZiBo");
+  assert.ok(["12:00", "12:30"].includes(btBreaks[0].startTime));
+  assert.equal(result.assignments.filter(a => a.assignmentType === "CLIENT_1_TO_1" &&
+    a.clientId === "ZiBo" && a.staffId === "bt").length, 3,
+    "Do not move client to relief when nap already provides the regular BT a break");
+}
+
 function runBreakEligibilityRegressionScenarios() {
   testBreakDoesNotRemoveOnlyEligibleTechnician();
+  testNapBreakForRegularBTWinsOverEmptyGenericSlot();
   testLongNapBreaksPreserveClientRelationship();
   console.log("Break eligibility regression scenarios passed.");
 }
