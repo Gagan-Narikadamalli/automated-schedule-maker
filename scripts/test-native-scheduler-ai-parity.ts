@@ -25,10 +25,13 @@ for (const relative of toolFiles) {
 }
 
 const nativeTools = new Set<string>(NATIVE_SCHEDULER_SUPPORTED_TOOLS);
+// Paid AI can have supplemental reasoning/read tools without coupling them to
+// the native scheduler. All core native operations must remain supported by Paid AI.
+const supplementalPaidTools = new Set(["analyze_workbook_patterns"]);
 assert.deepEqual(
   [...nativeTools].sort(),
-  [...paidTools].sort(),
-  "Native Scheduler AI tool coverage must stay in parity with the paid/Gateway toolset."
+  [...paidTools].filter(toolName => !supplementalPaidTools.has(toolName)).sort(),
+  "Core native scheduler tools must be available in Paid AI; paid-only analysis stays independent."
 );
 
 function plan(message: string, date = "2026-10-08") {
