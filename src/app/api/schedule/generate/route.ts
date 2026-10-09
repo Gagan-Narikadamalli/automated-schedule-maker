@@ -162,8 +162,23 @@ export async function POST(request: Request) {
     // Coverage is built first. Fixed nap and speech windows have already been
     // removed from required client coverage, so those events cannot be pushed
     // aside merely to create a staff break.
+    // A fresh Auto Generate must not treat its own previously saved AUTO
+    // assignments as historical preferences. Otherwise running it twice
+    // reinforces the old arrangement instead of rebuilding from the selected
+    // weekday template and the current attendance/availability.
+    const currentDayAutoIds = new Set(
+      schedulerInput.existingAssignments
+        .filter((assignment) => assignment.source === "AUTO")
+        .map((assignment) => assignment.id)
+    );
+    const freshReferences = schedulerInput.referenceAssignments.filter(
+      (reference) =>
+        !currentDayAutoIds.has(reference.id) &&
+        !(reference.source === "AUTO")
+    );
     const coverageResult = generateSchedule({
       ...schedulerInput,
+      referenceAssignments: freshReferences,
       existingAssignments: protectedAssignments,
     });
 
@@ -175,7 +190,7 @@ export async function POST(request: Request) {
       staff: schedulerInput.staff,
       clients: schedulerInput.clients,
       assignments: coverageResult.assignments,
-      referenceAssignments: schedulerInput.referenceAssignments,
+      referenceAssignments: freshReferences,
       callOutStaffIds: schedulerInput.callOutStaffIds,
       rules: {
         ...dayData.extendedRules,
