@@ -105,6 +105,9 @@ export function TemplateManager() {
   const [locations, setLocations] = useState<LocationOption[]>([]);
   const [locationId, setLocationId] = useState("");
   const [templates, setTemplates] = useState<TemplateRecord[]>([]);
+  const [filterDay, setFilterDay] = useState("ALL");
+  const [selectedTemplateIds, setSelectedTemplateIds] = useState<string[]>([]);
+  const [deleteCandidates, setDeleteCandidates] = useState<string[]>([]);
   const [name, setName] = useState("");
   const [dayOfWeek, setDayOfWeek] = useState("MONDAY");
   const [templateSourceDate, setTemplateSourceDate] = useState(getToday);
@@ -130,6 +133,11 @@ export function TemplateManager() {
     [locations, locationId]
   );
 
+  const visibleTemplates = useMemo(() =>
+    templates.filter((item) => filterDay === "ALL" || item.dayOfWeek === filterDay),
+    [templates, filterDay]
+  );
+  const visibleSelected = visibleTemplates.filter((item) => selectedTemplateIds.includes(item.id));
   const primaryExactTemplateIdByDay = useMemo(() => {
     const result = new Map<string, string>();
 
@@ -459,6 +467,28 @@ export function TemplateManager() {
     }
   }
 
+  async function deleteSelectedTemplates() {
+    if (!deleteCandidates.length || !locationId) return;
+    try {
+      setWorking(true);
+      const response = await fetch("/api/templates", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ locationId, templateIds: deleteCandidates, permanent: true }),
+      });
+      const data = (await response.json()) as OperationResponse;
+      if (!response.ok) throw new Error(data.error || "Templates could not be deleted.");
+      setSelectedTemplateIds((current) => current.filter((id) => !deleteCandidates.includes(id)));
+      setDeleteCandidates([]);
+      await loadTemplates(locationId);
+      setMessage("Selected templates permanently deleted. Live schedules remain unchanged.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Templates could not be deleted.");
+    } finally {
+      setWorking(false);
+    }
+  }
+
   function openApplyTemplate(template: TemplateRecord) {
     setApplyTemplateTarget(template);
     setApplyTargetDate(getToday());
@@ -582,7 +612,7 @@ export function TemplateManager() {
         </div>
       </section>
 
-      <section className="section-card">
+      <section className="section-card" id="create-schedule-template">
         <h2>Create Template from a Saved Day</h2>
         <p className="helper-text">
           Capture any already-saved schedule day as a template draft. After it
@@ -873,22 +903,47 @@ export function TemplateManager() {
         </button>
       </section>
 
-      <section className="section-card">
+      <section className="section-card" id="saved-schedule-templates">
         <div className="panel-heading-row">
           <div>
             <h2>Saved Templates</h2>
             <p>
-              Auto Generate automatically uses the newest exact template for
-              the matching weekday as its first reusable schedule reference.
-              Apply is only for manually copying a template onto a chosen date.
+              Save multiple alternatives for each weekday. Auto Generate compares their feasible staff and client matches and automatically uses the best fit.
+              Apply manually copies one template to a chosen date.
             </p>
           </div>
         </div>
 
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", margin: "16px 0" }}>
+          <a className="button button-primary" href="#create-schedule-template">+ Add Template from Day</a>
+          <a className="button button-secondary" href="#workbook-template-upload">+ Upload Workbook Template</a>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700 }}>
+            Weekday
+            <select value={filterDay} onChange={(event) => { setFilterDay(event.target.value); setSelectedTemplateIds([]); }}
+              style={{ padding: 10, border: "1px solid #c9dce8", borderRadius: 8 }}>
+              <option value="ALL">All weekdays</option>
+              {DAYS.map((day) => <option key={day} value={day}>{displayDay(day)}</option>)}
+            </select>
+          </label>
+          <button type="button" className="button button-secondary button-small"
+            disabled={working || visibleTemplates.length === 0}
+            onClick={() => {
+              const allSelected = visibleTemplates.every((item) => selectedTemplateIds.includes(item.id));
+              setSelectedTemplateIds(allSelected ? [] : visibleTemplates.map((item) => item.id));
+            }}>
+            {visibleTemplates.length && visibleTemplates.every((item) => selectedTemplateIds.includes(item.id)) ? "Deselect all" : "Select all shown"}
+          </button>
+          <button type="button" className="button button-warning button-small"
+            disabled={working || visibleSelected.length === 0}
+            onClick={() => setDeleteCandidates(visibleSelected.map((item) => item.id))}>
+            Delete selected ({visibleSelected.length})
+          </button>
+        </div>
         <div className="table-scroll">
           <table className="data-table">
             <thead>
               <tr>
+                <th style={{ width: 46 }}><span className="sr-only">Select</span></th>
                 <th>Name</th>
                 <th>Day</th>
                 <th>Saved blocks</th>
@@ -897,13 +952,14 @@ export function TemplateManager() {
               </tr>
             </thead>
             <tbody>
-              {templates.length === 0 ? (
+              {visibleTemplates.length === 0 ? (
                 <tr>
-                  <td colSpan={5}>No active templates have been saved yet.</td>
+                  <td colSpan={6}>No matching saved templates. Use Add Template or Upload Workbook above.</td>
                 </tr>
               ) : (
-                templates.map((template) => (
+                visibleTemplates.map((template) => (
                   <tr key={template.id}>
+                    <td><input aria-label={`Select ${template.name}`} type="checkbox" checked={selectedTemplateIds.includes(template.id)} onChange={(event) => setSelectedTemplateIds((current) => event.target.checked ? [...current, template.id] : current.filter((id) => id !== template.id))} /></td>
                     <td>
                       <div className="template-name-cell">
                         <span>{template.name}</span>
@@ -911,7 +967,7 @@ export function TemplateManager() {
                           template.dayOfWeek
                         ) === template.id ? (
                           <span className="template-primary-badge">
-                            Auto Generate primary
+                            Recently updated
                           </span>
                         ) : null}
                       </div>
@@ -1022,6 +1078,20 @@ export function TemplateManager() {
         </label>
       </ManagementModal>
 
+      <ManagementModal open={deleteCandidates.length > 0} title="Delete selected templates?"
+        eyebrow="PERMANENT DELETE" size="medium"
+        description="This deletes saved template records only. Existing live schedules and client/staff profiles are unchanged."
+        onClose={() => { if (!working) setDeleteCandidates([]); }}
+        footer={<>
+          <button type="button" className="button button-secondary" disabled={working} onClick={() => setDeleteCandidates([])}>Cancel</button>
+          <button type="button" className="button button-warning" disabled={working} onClick={() => void deleteSelectedTemplates()}>
+            {working ? "Deleting..." : `Delete ${deleteCandidates.length} template(s)`}
+          </button>
+        </>}>
+        <p>Delete these {deleteCandidates.length} saved templates permanently? This cannot be undone.</p>
+        <ul>{templates.filter((item) => deleteCandidates.includes(item.id)).map((item) =>
+          <li key={item.id}>{item.name} — {displayDay(item.dayOfWeek)}</li>)}</ul>
+      </ManagementModal>
       <TemplateEditorModal
         open={Boolean(editorTemplateId)}
         locationId={locationId}
