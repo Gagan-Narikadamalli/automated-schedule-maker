@@ -1179,6 +1179,17 @@ function findBestSwap(
       currentAssignment.assignmentType !== "CLIENT_1_TO_1" ||
       (!allowProtectedAssignments &&
         (currentAssignment.locked || currentAssignment.source !== "AUTO")) ||
+      // A pinned previous-week or weekday-template match is never a movable
+      // repair candidate. Otherwise the coverage repair pass can silently
+      // undo the exact reference blocks placed at the start of generation.
+      (currentAssignment.source === "AUTO" &&
+        input.referenceAssignments.some((reference) =>
+          reference.assignmentType === "CLIENT_1_TO_1" &&
+          reference.staffId === currentAssignment.staffId &&
+          reference.clientId === currentAssignment.clientId &&
+          reference.startTime === currentAssignment.startTime &&
+          (reference.source === "COPIED" || reference.source === "TEMPLATE")
+        )) ||
       !currentAssignment.clientId
     ) {
       return;
