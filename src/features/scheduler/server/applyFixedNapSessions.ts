@@ -61,7 +61,7 @@ export async function applyFixedNapSessions(
     for (const record of primaryTemplate.clientNapSlots as DatabaseRecord[]) {
       const clientId = String(record.clientId);
       const slot = String(record.startTime);
-      if (!/^\\d{2}:\\d{2}$/.test(slot)) continue;
+      if (!/^\d{2}:\d{2}$/.test(slot)) continue;
       const slots = templateNapSlots.get(clientId) ?? new Set<string>();
       slots.add(slot);
       templateNapSlots.set(clientId, slots);
