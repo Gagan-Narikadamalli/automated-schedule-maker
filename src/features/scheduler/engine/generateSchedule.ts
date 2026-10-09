@@ -1784,32 +1784,64 @@ export function generateSchedule(input: SchedulerInput): SchedulerResult {
     ),
   ].sort();
 
-  // Reserve feasible exact weekday-template coverage BEFORE other candidates
-  // can claim those staff/time cells. Soft scoring alone cannot protect a
-  // matching template when an earlier client's long run preclaims future slots.
-  // Only eligible BT/RBT coverage is pinned here; unavailable or conflicting
-  // references remain fallback preferences, never forced assignments.
-  for (const reference of input.referenceAssignments
-    .filter((a) => a.source === "TEMPLATE" && a.assignmentType === "CLIENT_1_TO_1" && Boolean(a.clientId))
-    .sort((a, b) => a.startTime.localeCompare(b.startTime))) {
-    const requirement = requirementsToFill.find(
-      (item) => item.client.id === reference.clientId && item.startTime === reference.startTime
-    );
-    const employee = input.staff.find((person) => person.id === reference.staffId);
-    if (!requirement || !employee || coverageRoleTier(employee) !== 0 ||
+  // Reserve feasible exact reusable coverage BEFORE long continuity runs can
+  // claim those staff/time cells. The order is deliberate:
+  //   1. immediately previous same-weekday schedule (COPIED)
+  //   2. current weekday template (TEMPLATE)
+  // If the first reference cannot be used because of attendance, availability,
+  // eligibility, or an already occupied cell, the second reference may fill it.
+  // Only BT/RBT coverage is pinned here; auxiliary-role references remain soft
+  // preferences so the normal clinic coverage-role boundary is preserved.
+  for (const source of ["COPIED", "TEMPLATE"] as const) {
+    for (const reference of input.referenceAssignments
+      .filter(
+        (assignment) =>
+          assignment.source === source &&
+          assignment.assignmentType === "CLIENT_1_TO_1" &&
+          Boolean(assignment.clientId)
+      )
+      .sort((left, right) =>
+        left.startTime.localeCompare(right.startTime)
+      )) {
+      const requirement = requirementsToFill.find(
+        (item) =>
+          item.client.id === reference.clientId &&
+          item.startTime === reference.startTime
+      );
+      const employee = input.staff.find(
+        (person) => person.id === reference.staffId
+      );
+
+      if (
+        !requirement ||
+        !employee ||
+        coverageRoleTier(employee) !== 0 ||
         requirementIsAlreadyCovered(requirement, assignments) ||
-        assignments.some((a) => a.staffId === employee.id && a.startTime === reference.startTime)) continue;
-    const eligible = canAssignStaffToClient({
-      staffMember: employee,
-      client: requirement.client,
-      startTime: reference.startTime,
-      assignments,
-      callOutStaffIds,
-      rules: input.rules,
-      allowSameDayPairRepeat: true,
-    });
-    if (!eligible.allowed) continue;
-    assignments.push(createAutoAssignment(employee, requirement));
+        assignments.some(
+          (assignment) =>
+            assignment.staffId === employee.id &&
+            assignment.startTime === reference.startTime
+        )
+      ) {
+        continue;
+      }
+
+      const eligible = canAssignStaffToClient({
+        staffMember: employee,
+        client: requirement.client,
+        startTime: reference.startTime,
+        assignments,
+        callOutStaffIds,
+        rules: input.rules,
+        allowSameDayPairRepeat: true,
+      });
+
+      if (!eligible.allowed) {
+        continue;
+      }
+
+      assignments.push(createAutoAssignment(employee, requirement));
+    }
   }
 
   // Build the day chronologically. Re-sort each half-hour only after all
