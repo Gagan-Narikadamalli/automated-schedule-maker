@@ -145,15 +145,11 @@ export async function POST(request: Request) {
     // assignments as historical preferences. Otherwise running it twice
     // reinforces the old arrangement instead of rebuilding from the selected
     // weekday template and the current attendance/availability.
-    const currentDayAutoIds = new Set(
-      schedulerInput.existingAssignments
-        .filter((assignment) => assignment.source === "AUTO")
-        .map((assignment) => assignment.id)
-    );
-    const freshReferences = schedulerInput.referenceAssignments.filter(
-      (reference) =>
-        !currentDayAutoIds.has(reference.id) &&
-        !(reference.source === "AUTO")
+    // Auto Generate must NEVER learn from the schedule already saved for the
+    // target date. Workbook references are independent of existing day cells.
+    const existingDayIds = new Set(schedulerInput.existingAssignments.map(item => item.id));
+    const freshReferences = schedulerInput.referenceAssignments.filter(reference =>
+      !existingDayIds.has(reference.id) && reference.source !== "AUTO"
     );
     const coverageResult = generateSchedule({
       ...schedulerInput,
