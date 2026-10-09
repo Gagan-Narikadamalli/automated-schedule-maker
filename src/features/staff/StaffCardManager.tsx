@@ -209,6 +209,7 @@ export function StaffCardManager() {
   const [modalOpen, setModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
   const [message, setMessage] = useState("Loading staff...");
   const { requestActionDialog, actionDialog } = useActionConfirmDialog();
 
@@ -310,6 +311,7 @@ export function StaffCardManager() {
     setWeeklyShiftSchedule(
       createWeeklySchedule("08:00", "17:00", false)
     );
+    setSaveError("");
     setModalOpen(true);
   }
 
@@ -429,7 +431,7 @@ export function StaffCardManager() {
       !form.lastName.trim() ||
       !form.startDate
     ) {
-      setMessage("First name, last name, and start date are required.");
+      setSaveError("First name, last name, and start date are required.");
       return;
     }
 
@@ -441,7 +443,7 @@ export function StaffCardManager() {
       : null;
 
     if (weeklyScheduleError) {
-      setMessage(weeklyScheduleError);
+      setSaveError(weeklyScheduleError);
       return;
     }
 
@@ -455,11 +457,12 @@ export function StaffCardManager() {
       form.targetWeeklyHours < form.minimumWeeklyHours ||
       form.maximumWeeklyHours < form.targetWeeklyHours
     ) {
-      setMessage("Weekly hours must follow minimum ≤ target ≤ maximum.");
+      setSaveError("Weekly hours must follow minimum ≤ target ≤ maximum.");
       return;
     }
 
     try {
+      setSaveError("");
       setSaving(true);
 
       const fullName = `${form.firstName.trim()} ${form.lastName.trim()}`.trim();
@@ -469,6 +472,7 @@ export function StaffCardManager() {
         {
           method: editingId ? "PATCH" : "POST",
           headers: { "Content-Type": "application/json" },
+          signal: AbortSignal.timeout(25000),
           body: JSON.stringify({
             locationId: selectedLocationId,
             fullName,
@@ -486,7 +490,8 @@ export function StaffCardManager() {
           }),
         }
       );
-      const data = (await response.json()) as StaffResponse;
+      const rawResponse = await response.text();
+      const data = (rawResponse ? JSON.parse(rawResponse) : {}) as StaffResponse;
 
       if (!response.ok) {
         throw new Error(data.error || "Staff member could not be saved.");
@@ -494,14 +499,16 @@ export function StaffCardManager() {
 
       const savedName = fullName;
       closeModal(true);
-      await loadLocationData(selectedLocationId);
+      // The profile has already been saved. A list refresh failure must not
+      // be reported as a failed save or keep the editor open.
+      void loadLocationData(selectedLocationId);
       setMessage(
         shiftPatterns.length > 0
           ? `${savedName} was saved and is available to the scheduler.`
           : `${savedName} was saved. Add working days/hours before the automatic scheduler can use this staff member.`
       );
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Staff member could not be saved.");
+      setSaveError(error instanceof Error ? error.message : "Staff member could not be saved.");
     } finally {
       setSaving(false);
     }
@@ -777,6 +784,11 @@ export function StaffCardManager() {
           </>
         }
       >
+        {saveError ? (
+          <div role="alert" style={{ position: "sticky", top: 0, zIndex: 12, marginBottom: 12, padding: "12px 16px", border: "1px solid #e49c9c", borderRadius: 10, background: "#fff0f0", color: "#842424", fontWeight: 750 }}>
+            Save was not completed: {saveError}
+          </div>
+        ) : null}
         <div className={cardStyles.formSection}>
           <h3>Staff essentials</h3>
           <p>These fields determine how this person can be used by the scheduler.</p>
