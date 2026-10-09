@@ -293,6 +293,24 @@ export async function PUT(request: Request) {
         }
 
         if (change.assignmentType === "CLIENT_1_TO_1") {
+          const existingNap = await ScheduleAssignment.findOne({
+            locationId, date, startTime: change.startTime, clientId,
+            assignmentType: { $in: ["NAP", "BREAK_NAP"] },
+          }).select("staffId").lean();
+          const existingNapRow = existingNap ? existingNap as unknown as PlainRecord : null;
+          if (existingNapRow && !cellsChangedByBatch.has(
+            cellKey(String(existingNapRow.staffId), change.startTime)
+          )) {
+            conflicts.push({
+              staffId: change.staffId,
+              startTime: change.startTime,
+              code: "CLIENT_NAPPING",
+              message: "The client is already marked for a nap at this time. Clear or reschedule the nap first.",
+            });
+          }
+        }
+
+        if (change.assignmentType === "CLIENT_1_TO_1") {
           const otherAssignmentResult = await ScheduleAssignment.findOne({
             locationId,
             date,
@@ -376,7 +394,7 @@ export async function PUT(request: Request) {
     }
 
     const nonOverridableConflicts = conflicts.filter((conflict) =>
-      ["CLIENT_NOT_FOUND", "CLIENT_NOT_ACTIVE", "INVALID_ASSIGNMENT", "NAP_CLIENT_REQUIRED", "NAP_CLIENT_DOUBLE_BOOKED", "DUPLICATE_BATCH_STAFF_SLOT", "BATCH_CLIENT_CONFLICT"].includes(
+      ["CLIENT_NOT_FOUND", "CLIENT_NOT_ACTIVE", "INVALID_ASSIGNMENT", "NAP_CLIENT_REQUIRED", "NAP_CLIENT_DOUBLE_BOOKED", "DUPLICATE_BATCH_STAFF_SLOT", "BATCH_CLIENT_CONFLICT", "CLIENT_NAPPING"].includes(
         conflict.code
       )
     );
