@@ -1746,6 +1746,34 @@ export function generateSchedule(input: SchedulerInput): SchedulerResult {
     ),
   ].sort();
 
+  // Reserve feasible exact weekday-template coverage BEFORE other candidates
+  // can claim those staff/time cells. Soft scoring alone cannot protect a
+  // matching template when an earlier client's long run preclaims future slots.
+  // Only eligible BT/RBT coverage is pinned here; unavailable or conflicting
+  // references remain fallback preferences, never forced assignments.
+  for (const reference of input.referenceAssignments
+    .filter((a) => a.source === "TEMPLATE" && a.assignmentType === "CLIENT_1_TO_1" && Boolean(a.clientId))
+    .sort((a, b) => a.startTime.localeCompare(b.startTime))) {
+    const requirement = requirementsToFill.find(
+      (item) => item.client.id === reference.clientId && item.startTime === reference.startTime
+    );
+    const employee = input.staff.find((person) => person.id === reference.staffId);
+    if (!requirement || !employee || coverageRoleTier(employee) !== 0 ||
+        requirementIsAlreadyCovered(requirement, assignments) ||
+        assignments.some((a) => a.staffId === employee.id && a.startTime === reference.startTime)) continue;
+    const eligible = canAssignStaffToClient({
+      staffMember: employee,
+      client: requirement.client,
+      startTime: reference.startTime,
+      assignments,
+      callOutStaffIds,
+      rules: input.rules,
+      allowSameDayPairRepeat: true,
+    });
+    if (!eligible.allowed) continue;
+    assignments.push(createAutoAssignment(employee, requirement));
+  }
+
   // Build the day chronologically. Re-sort each half-hour only after all
   // earlier blocks are known, so the scheduler can genuinely preserve the
   // client/staff relationship it created in the previous block instead of
