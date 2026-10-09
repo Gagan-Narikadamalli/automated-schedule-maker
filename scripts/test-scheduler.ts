@@ -1389,8 +1389,35 @@ function testCoverageFirstCanExceedDailyClientTechCap() {
   );
 }
 
+function testContiguousClientCoverageAndNoDoubleBooking() {
+  const times = ["08:00", "08:30", "09:00", "09:30"];
+  const staff = [
+    createStaff("primary", "Primary", "BT", times),
+    createStaff("alternate", "Alternate", "BT", times),
+    createStaff("relief", "Relief", "BT", times),
+  ];
+  const clients = [
+    createClient("lura", "LuRa", times),
+    createClient("ismo", "IsMo", times),
+  ];
+  const references: SchedulerAssignment[] = times.map((startTime) => ({
+    id: `template-lura-${startTime}`, staffId: "primary", clientId: "lura",
+    startTime, assignmentType: "CLIENT_1_TO_1", source: "TEMPLATE", locked: false,
+  }));
+  const result = generateSchedule(createInput(staff, clients, [], references));
+  for (const time of times) {
+    const atTime = clientAssignments(result.assignments).filter((assignment) => assignment.startTime === time);
+    assert.equal(atTime.filter(a => a.clientId === "lura").length, 1, `LuRa must have exactly one staff assignment at ${time}`);
+    assert.equal(new Set(atTime.map(a => a.clientId)).size, atTime.length, `No client can be double booked at ${time}`);
+    assert.equal(new Set(atTime.map(a => a.staffId)).size, atTime.length, `No employee can be double booked at ${time}`);
+    assert.equal(atTime.find(a => a.clientId === "lura")?.staffId, "primary",
+      `The valid template caregiver must not be taken away for IsMo at ${time}`);
+  }
+}
+
 function runSchedulerRegressionScenarios() {
   testRoleCoverageOrder();
+  testContiguousClientCoverageAndNoDoubleBooking();
   testHistoricalPreferenceCannotJumpRoleTier();
   testHistoricalSameWeekdayPatternGuidesMatching();
   testImportedHistoricalPatternGuidesMatching();
