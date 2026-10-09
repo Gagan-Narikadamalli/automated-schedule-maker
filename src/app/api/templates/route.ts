@@ -44,6 +44,8 @@ type TemplateRequest = {
 type DeleteTemplateRequest = {
   locationId?: string;
   templateId?: string;
+  templateIds?: string[];
+  permanent?: boolean;
 };
 
 type PlainRecord = Record<string, any>;
@@ -540,15 +542,39 @@ export async function DELETE(request: Request) {
     const locationId = body.locationId?.trim();
     const templateId = body.templateId?.trim();
 
-    if (!locationId || !templateId) {
+    if (!locationId || (!templateId && !body.templateIds?.length)) {
       return NextResponse.json(
-        { error: "Location and template are required." },
+        { error: "Location and template selection are required." },
         { status: 400 }
       );
     }
 
     if (!sessionCanAccessLocation(auth.session, locationId)) {
       return forbiddenResponse("You do not have access to this location.");
+    }
+
+    if (body.permanent === true) {
+      const ids = [...new Set((body.templateIds ?? (templateId ? [templateId] : []))
+        .map((id) => String(id).trim()).filter(Boolean))];
+      if (!ids.length || ids.length > 100 || ids.some((id) => !/^[a-fA-F0-9]{24}$/.test(id))) {
+        return NextResponse.json({ error: "Choose between 1 and 100 valid templates to delete." }, { status: 400 });
+      }
+      await connectToDatabase();
+      const selected = await ScheduleTemplate.find({ _id: { $in: ids }, locationId, active: true })
+        .select("_id name").lean();
+      if (selected.length !== ids.length) {
+        return NextResponse.json({ error: "Some selected templates are unavailable at this clinic. Refresh and retry." }, { status: 409 });
+      }
+      await ScheduleTemplate.deleteMany({ _id: { $in: ids }, locationId, active: true });
+      await writeAuditLog({
+        locationId,
+        userId: auth.session.userId,
+        action: "DELETE_TEMPLATE",
+        entityType: "SCHEDULE_TEMPLATE",
+        entityId: ids[0],
+        summary: `Permanently deleted ${ids.length} selected template(s): ${selected.map((item) => String(item.name)).join(", ")}. Live schedules were not changed.`,
+      });
+      return NextResponse.json({ success: true, deletedCount: ids.length });
     }
 
     await connectToDatabase();
