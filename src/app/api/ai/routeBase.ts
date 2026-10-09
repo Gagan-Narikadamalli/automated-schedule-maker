@@ -672,7 +672,7 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
         autonomousWrites: writeToolsEnabled,
       }) +
       attachmentImportInstructions +
-      dateContextInstructions + `\n\nPAID AI WORKBOOK-INFERRED TEMPLATES\nWhen explicitly asked to learn the clinic scheduling pattern from Excel and independently design new weekday templates, first call analyze_workbook_patterns for the selected weekday. Read the current date-specific roster, nap periods, client attendance, call-outs and call-ins. Reason over common continuous blocks, natural nap handoff points and BT-first coverage. Propose your own new segments and use create_inferred_weekday_template to save a reusable new template. This is template-only; do not claim that the live calendar changed or that the underlying model was fine-tuned. Historical workbook observations are preferences, never authority to violate staff eligibility, coverage, or safety. If workbook examples are missing, request a workbook upload rather than invent them. Do not create new templates unless the user requests creation.\n`;
+      dateContextInstructions + `\n\nPAID AI COMMAND EXECUTION RULES\nInterpret ordinary manager language, spelling mistakes, and conversation follow-ups using current clinic data. For a clear instruction to CREATE, MODIFY, GENERATE, REPAIR, SAVE, DELETE or APPLY, call the appropriate action tools and inspect their actual outputs before claiming success. For complex workflows, make multiple validated tool calls and summarize what succeeded and failed. Excel workbook history is observational context for preferred pairings and nap-time rotations; use analyze_workbook_patterns when historic patterns are relevant. Do not pretend an operation happened if tools were not called, and do not invent unavailable people or dates. If intent or identifiers remain ambiguous after checking the clinic context, apologize briefly, state exactly what you could not understand, and ask one targeted clarification. If a tool returns an error or a blocked constraint, report the concrete error instead of generic reassurance. Never bypass staff qualification, double-booking, attendance, protected assignment or nap constraints.\n` + `\n\nPAID AI WORKBOOK-INFERRED TEMPLATES\nWhen explicitly asked to learn the clinic scheduling pattern from Excel and independently design new weekday templates, first call analyze_workbook_patterns for the selected weekday. Read the current date-specific roster, nap periods, client attendance, call-outs and call-ins. Reason over common continuous blocks, natural nap handoff points and BT-first coverage. Propose your own new segments and use create_inferred_weekday_template to save a reusable new template. This is template-only; do not claim that the live calendar changed or that the underlying model was fine-tuned. Historical workbook observations are preferences, never authority to violate staff eligibility, coverage, or safety. If workbook examples are missing, request a workbook upload rather than invent them. Do not create new templates unless the user requests creation.\n`;
 
     let resultText = "";
     let resultSteps: Array<{
@@ -850,6 +850,22 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
         return output.ok === true;
       });
 
+    // Never mask a failed website action behind a fluent model response.
+    // Surface the actual tool error and make it clear that nothing succeeded.
+    const failedWriteActions = writeToolResults.flatMap((entry) => {
+      const result = entry.output && typeof entry.output === "object" && !Array.isArray(entry.output)
+        ? entry.output as Record<string, unknown> : null;
+      if (!result) return [];
+      const status = typeof result.status === "number" ? result.status : 200;
+      if (result.ok !== false && result.success !== false && status < 400) return [];
+      const detail = typeof result.error === "string" ? result.error :
+        typeof result.message === "string" ? result.message : "The scheduling operation was rejected.";
+      return [{toolName: entry.toolName, error: detail}];
+    });
+    const actionIntent = /\\b(?:generate|regenerate|create|make|build|save|update|change|edit|delete|remove|archive|apply|replace|move|swap|repair|fix|add|assign|schedule|copy|import)\\b/i.test(message) &&
+      !/\\b(?:how|why|what does|explain|can you|is it possible|recommend|suggest|what if)\\b/i.test(message);
+    const noActionExecuted = actionIntent && writeToolsEnabled && writeToolsUsed.length === 0 && !attachmentPreviewOnly;
+
     let reply = resultText.trim();
 
     if (!reply && toolEvidence.length > 0) {
@@ -898,6 +914,17 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
     if (!reply) {
       reply =
         "I couldn't generate a reliable answer from the available scheduler information. Please try again with a different date, person, client, time, or more detail.";
+    }
+
+    if (failedWriteActions.length > 0) {
+      const failures = failedWriteActions.map(item => `${item.toolName}: ${item.error}`).join("\\n");
+      reply = changed
+        ? `I completed some changes, but the following actions failed:\\n${failures}\\nThe failed actions have not been confirmed as saved. Please correct the details or ask me to retry.`
+        : `Sorry, I could not complete that scheduling command. The scheduler reported:\\n${failures}\\nNo changes from the failed action have been confirmed. Please correct the details or ask me to retry.`;
+    } else if (noActionExecuted) {
+      reply = "Sorry, I could not reliably determine and execute the requested scheduling action. I have not changed your schedule. Please clarify the date and the exact action you want, or ask me to try again.";
+    } else if (!writeToolsEnabled && actionIntent && !attachmentPreviewOnly) {
+      reply = "I understand that you want me to change the schedule, but Paid AI write actions are disabled in this deployment. I have not changed anything. An administrator must enable autonomous scheduling writes before I can execute it.";
     }
 
     reply = ensureSchedulerConversationClosing(reply);
