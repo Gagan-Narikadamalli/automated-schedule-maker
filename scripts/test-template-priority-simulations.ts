@@ -466,7 +466,7 @@ function runReferenceFallbackScenario(
     rules: { ...RULES },
   });
 
-  assert.equal(result.coveragePercent ?? result.metrics.coveragePercent, 100);
+  assert.equal(result.metrics.coveragePercent, 100);
   return result.assignments.filter(
     (assignment) => assignment.assignmentType === "CLIENT_1_TO_1"
   );
