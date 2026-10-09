@@ -116,10 +116,10 @@ function buildBreakReferences(
       id: `imported-break-${index}-${staffId}-${startTime}`,
       staffId,
       startTime,
-      assignmentType,
+      assignmentType: "BREAK",
       source: "COPIED",
       locked: false,
-      note: "Imported historical break pattern.",
+      note: "Imported historical staff break pattern.",
     });
   });
 
