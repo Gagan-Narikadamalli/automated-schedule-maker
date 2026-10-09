@@ -164,8 +164,13 @@ function calendarCodePart(value: string): string {
   );
 }
 
+function singleNameCalendarCode(name: string): string {
+  const letters = name.trim().replace(/[^A-Za-z]/g, "");
+  return letters.charAt(0).toUpperCase() + letters.slice(1, 4).toLowerCase();
+}
+
 function clientDisplayCode(firstName: string, lastName: string): string {
-  return `${calendarCodePart(firstName)}${calendarCodePart(lastName)}`;
+  return firstName.trim() && lastName.trim() ? `${calendarCodePart(firstName)}${calendarCodePart(lastName)}` : singleNameCalendarCode(firstName || lastName);
 }
 
 function initials(value: string): string {
@@ -513,11 +518,10 @@ export function ClientCardManager() {
   async function saveClient() {
     if (
       !selectedLocationId ||
-      !form.firstName.trim() ||
-      !form.lastName.trim() ||
+      !(form.firstName.trim() || form.lastName.trim()) ||
       !form.startDate
     ) {
-      setSaveError("Client first name, last name, and start date are required.");
+      setSaveError("A client name and start date are required.");
       return;
     }
 
@@ -546,9 +550,9 @@ export function ClientCardManager() {
       form.lastName
     );
 
-    if (displayCode.length < 4) {
+    if (!displayCode) {
       setSaveError(
-        "First name and last name must each contain at least two letters so the calendar code can be generated."
+        "Enter a name containing at least one letter to generate a calendar code."
       );
       return;
     }
