@@ -354,6 +354,7 @@ export function StaffCardManager() {
     }
 
     setModalOpen(false);
+    setSaveError("");
     setEditingId(null);
     setForm(emptyForm());
     setShiftDraft(emptyShift());
