@@ -177,24 +177,12 @@ export async function POST(request: Request) {
           }
         }
         if(duplicates.length)return NextResponse.json({error:"Workbook has conflicting exact cells; no changes made.",conflicts:duplicates},{status:409});
-        const protectedRows=await ScheduleAssignment.find({
-          locationId,date,$or:[{source:"MANUAL"},{manuallyOverridden:true},
-            {assignmentType:{$in:["SPEECH","UNAVAILABLE"]}}]
-        }).lean() as unknown as Array<{staffId:unknown;clientId?:unknown;startTime:string;assignmentType:string}>;
-        const desiredByKey=new Map(desired.map(item=>[key(item),item]));
-        const incompatible=protectedRows.filter(item=>{
-          const match=desiredByKey.get(key(item));
-          return !match || match.assignmentType!==item.assignmentType ||
-            String(match.clientId??"")!==String(item.clientId??"");
-        });
-        if(incompatible.length)return NextResponse.json({
-          error:"Protected or manual blocks differ from the workbook. Nothing changed; remove or resolve these blocks before exact-copy generation.",
-          conflicts:incompatible.map(item=>({staffId:String(item.staffId),startTime:item.startTime,assignmentType:item.assignmentType}))
-        },{status:409});
+        // Explicit Auto Generate is a fresh exact workbook rebuild. Manual,
+        // locked, nap-linked, and previously AUTO-created blocks for this date
+        // are all replaceable. Validate the template BEFORE touching the day.
         const persisted=await persistScheduleReplacementSafely({
           locationId,date,replacements:desired,
-          replaceableFilter:{manuallyOverridden:{$ne:true},
-            source:{$in:["AUTO","TEMPLATE","COPIED"]}},
+          replaceableFilter:{},
         });
         const actual=await ScheduleAssignment.find({locationId,date}).lean() as unknown as
           Array<{staffId:unknown;clientId?:unknown;startTime:string;endTime:string;assignmentType:string}>;
