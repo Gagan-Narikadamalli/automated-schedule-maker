@@ -961,6 +961,17 @@ function findBestStaffMember(
         return leftReservedForOtherPreviousWeek ? 1 : -1;
       }
 
+      // Coverage-role eligibility remains a clinic safety boundary:
+      // an available BT/RBT should not be displaced by an auxiliary manager,
+      // BCBA, or other role solely because a template contains that older
+      // pairing. Within the same coverage tier, the current template is next.
+      const roleDifference =
+        coverageRoleTier(left.staffMember) -
+        coverageRoleTier(right.staffMember);
+      if (roleDifference !== 0) {
+        return roleDifference;
+      }
+
       const leftTemplateStrength = exactReferenceMatchStrength(
         left.staffMember.id,
         requirement.client.id,
@@ -977,7 +988,7 @@ function findBestStaffMember(
       );
 
       // Priority 2: use the current weekday template when last week's exact
-      // assignment is unavailable.
+      // assignment is unavailable, after preserving the clinic role boundary.
       if (leftTemplateStrength !== rightTemplateStrength) {
         return rightTemplateStrength - leftTemplateStrength;
       }
@@ -1005,15 +1016,6 @@ function findBestStaffMember(
         leftReservedForOtherTemplate !== rightReservedForOtherTemplate
       ) {
         return leftReservedForOtherTemplate ? 1 : -1;
-      }
-
-      // Priority 3: normal clinic rules, including role preference,
-      // continuity, workload balance, and other score-based preferences.
-      const roleDifference =
-        coverageRoleTier(left.staffMember) -
-        coverageRoleTier(right.staffMember);
-      if (roleDifference !== 0) {
-        return roleDifference;
       }
 
       const previousAssignment = previousClientAssignment(
