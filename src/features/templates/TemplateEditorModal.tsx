@@ -151,6 +151,8 @@ export function TemplateEditorModal({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const [linkRequest, setLinkRequest] = useState<{ clientId: string; staffId: string; slots: string[] } | null>(null);
+  const [linkError, setLinkError] = useState("");
 
   useEffect(() => {
     if (!open || !templateId || !locationId) return;
@@ -252,60 +254,60 @@ export function TemplateEditorModal({
       !(item.assignmentType === "BREAK_NAP" && item.clientId === clientId && !range.includes(item.startTime))));
   }
 
-  function updateCell(
-    staffId: string,
-    startTime: string,
-    value: string
-  ) {
+  function openLink(clientId: string, staffId: string, slotTimes: string[]) {
+    setLinkError("");
+    setLinkRequest({ clientId, staffId, slots: slotTimes });
+  }
+
+  function saveLinkedBreak() {
+    if (!linkRequest?.clientId || !linkRequest.staffId || !linkRequest.slots.length) {
+      setLinkError("Choose a client, staff member, and nap time."); return;
+    }
+    const { clientId, staffId, slots: times } = linkRequest;
+    const conflicting = assignments.filter((a) => a.staffId === staffId &&
+      times.includes(a.startTime) && !(a.assignmentType === "BREAK_NAP" && a.clientId === clientId));
+    if (conflicting.length) {
+      setLinkError(`That staff member already has ${conflicting.length} assignment(s) during the selected nap time. Clear or move those cells first; they will not be overwritten.`);
+      return;
+    }
+    const otherCoverage = assignments.find((a) => a.clientId === clientId &&
+      a.assignmentType === "CLIENT_1_TO_1" && times.includes(a.startTime));
+    if (otherCoverage) {
+      setLinkError("This client still has 1:1 coverage during the nap. Adjust the coverage before linking the break.");
+      return;
+    }
+    setClientNapSlots((current) => [
+      ...current.filter((n) => n.clientId !== clientId || !times.includes(n.startTime)),
+      ...times.map((startTime) => ({ clientId, startTime })),
+    ]);
+    setAssignments((current) => [
+      ...current.filter((a) => a.staffId !== staffId || !times.includes(a.startTime)),
+      ...times.map((startTime) => ({
+        startTime, endTime: addMinutes(startTime, 30), staffId, clientId,
+        assignmentType: "BREAK_NAP", locked: false,
+      })),
+    ]);
+    setLinkRequest(null);
+    setLinkError("");
+    setMessage("Linked client nap and staff break in this template. Save Template Changes to keep the changes.");
+  }
+
+  function updateCell(staffId: string, startTime: string, value: string) {
     if (value.startsWith("NAP_CLIENT:")) {
-      const clientId = value.slice("NAP_CLIENT:".length);
-      setClientNapSlots((current) => [...current.filter((item) => !(item.clientId === clientId && item.startTime === startTime)), { clientId, startTime }]);
+      openLink(value.slice("NAP_CLIENT:".length), staffId, [startTime]);
+      return;
     }
     setAssignments((current) => {
-      const next = current.filter(
-        (assignment) =>
-          !(
-            assignment.staffId === staffId &&
-            assignment.startTime === startTime
-          )
-      );
-
+      const next = current.filter((a) => !(a.staffId === staffId && a.startTime === startTime));
       if (!value) return next;
-
       if (value.startsWith("CLIENT:")) {
-        const clientId = value.slice("CLIENT:".length);
-        return [
-          ...next,
-          {
-            startTime,
-            endTime: addMinutes(startTime, 30),
-            staffId,
-            clientId,
-            assignmentType: "CLIENT_1_TO_1",
-            locked: false,
-          },
-        ];
+        return [...next, { startTime, endTime: addMinutes(startTime, 30), staffId,
+          clientId: value.slice("CLIENT:".length), assignmentType: "CLIENT_1_TO_1", locked: false }];
       }
-
-      if (value.startsWith("NAP_CLIENT:")) {
-        const clientId = value.slice("NAP_CLIENT:".length);
-        return [...next, { startTime, endTime: addMinutes(startTime, 30), staffId, clientId, assignmentType: "BREAK_NAP", locked: false }];
-      }
-
       if (value.startsWith("TYPE:")) {
-        return [
-          ...next,
-          {
-            startTime,
-            endTime: addMinutes(startTime, 30),
-            staffId,
-            clientId: null,
-            assignmentType: value.slice("TYPE:".length),
-            locked: false,
-          },
-        ];
+        return [...next, { startTime, endTime: addMinutes(startTime, 30), staffId,
+          clientId: null, assignmentType: value.slice("TYPE:".length), locked: false }];
       }
-
       return next;
     });
   }
@@ -448,7 +450,7 @@ export function TemplateEditorModal({
             <button type="button" role="tab" aria-selected={view === "client"} className={view === "client" ? styles.activeTab : ""} onClick={() => setView("client")}>Client View · Naps ({clientNapSlots.length})</button>
           </div>
           <div className={styles.notice}>
-            Client naps are stored in this template. Staff View previews a Break + Nap for the employee paired with that client near the nap time. Explicit staff cells are never silently overwritten.
+            Client naps and staff breaks are separate until you explicitly link them. Use Client View → Link staff break or choose a linked break from Staff View. Existing assignments are never overwritten silently.
           </div>
           {view === "client" && <div className={styles.napRangePanel}>
             {clients.map((client) => {
@@ -464,6 +466,10 @@ export function TemplateEditorModal({
                   {slots.filter((slot) => slot >= addMinutes(from, 30) && slot < "17:00").map((slot) => <option key={slot} value={slot}>{formatTime(slot)}</option>)}
                   <option value="17:00">5:00 PM</option>
                 </select></label>
+                <button type="button" className="button button-secondary" disabled={!times.length}
+                  onClick={() => openLink(client.id, assignedStaffForNap(client.id, times[0] ?? from) ?? "", times)}>
+                  Link staff break
+                </button>
                 <button type="button" className="button button-secondary" onClick={() => {
                   setClientNapSlots((current) => current.filter((nap) => nap.clientId !== client.id));
                   setAssignments((current) => current.filter((assignment) => !(assignment.assignmentType === "BREAK_NAP" && assignment.clientId === client.id)));
@@ -471,6 +477,32 @@ export function TemplateEditorModal({
                 {!times.length && <span>Choose a range to add nap</span>}
               </div>;
             })}
+          </div>}
+          {linkRequest && <div className={styles.linkPanel} role="dialog" aria-label="Link a staff break to a client's nap">
+            <div>
+              <strong>Connect client nap and staff break</strong>
+              <p>Both will be saved in this template. Existing assignments are protected; this does not create a new 1:1 pairing.</p>
+            </div>
+            <label>Client
+              <select value={linkRequest.clientId}
+                onChange={(event) => setLinkRequest((current) => current ? { ...current, clientId: event.target.value } : null)}>
+                <option value="">Choose client</option>
+                {clients.map((client) => <option key={client.id} value={client.id}>{client.code}</option>)}
+              </select>
+            </label>
+            <label>Staff taking break
+              <select value={linkRequest.staffId}
+                onChange={(event) => setLinkRequest((current) => current ? { ...current, staffId: event.target.value } : null)}>
+                <option value="">Choose staff</option>
+                {staff.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
+              </select>
+            </label>
+            <p>Time: {linkRequest.slots.map(formatTime).join(", ")}</p>
+            {linkError && <p role="alert" className={styles.linkError}>{linkError}</p>}
+            <div className={styles.linkActions}>
+              <button type="button" className="button button-secondary" onClick={() => { setLinkRequest(null); setLinkError(""); }}>Cancel</button>
+              <button type="button" className="button button-primary" onClick={saveLinkedBreak}>Connect Break + Nap</button>
+            </div>
           </div>}
           <div className={styles.gridWrap}>
             {view === "client" ? <table className={styles.grid}>
@@ -509,15 +541,14 @@ export function TemplateEditorModal({
                       const assignment = assignmentByCell.get(
                         `${member.id}|${slot}`
                       );
-                      const pairedNap = clientNapSlots.find((nap) => nap.startTime === slot && assignedStaffForNap(nap.clientId, slot) === member.id);
-                      const napPreview = pairedNap && !assignment ? { assignmentType: "BREAK_NAP", clientId: pairedNap.clientId } : null;
+
                       return (
                         <td key={member.id}>
                           <select
-                            value={napPreview ? `NAP_CLIENT:${pairedNap?.clientId}` : (assignment?.assignmentType === "BREAK_NAP" && assignment.clientId ? `NAP_CLIENT:${assignment.clientId}` : assignmentValue(assignment))}
+                            value={assignment?.assignmentType === "BREAK_NAP" && assignment.clientId ? `NAP_CLIENT:${assignment.clientId}` : assignmentValue(assignment)}
                             style={{
                               background: cellBackground(
-                                assignment ?? (napPreview ? { startTime: slot, endTime: addMinutes(slot, 30), staffId: member.id, clientId: pairedNap?.clientId ?? null, assignmentType: "BREAK_NAP", locked: false } : undefined),
+                                assignment,
                                 clientsById
                               ),
                             }}
@@ -542,9 +573,12 @@ export function TemplateEditorModal({
                             </optgroup>
                             <optgroup label="Events / breaks">
                               <option value="TYPE:BREAK">Break</option>
-                              <optgroup label="Break + Client Nap">
+                            </optgroup>
+                            <optgroup label="Linked break + client nap">
                                 {clients.map((client) => <option key={client.id} value={`NAP_CLIENT:${client.id}`}>Break + {client.code} Nap</option>)}
                               </optgroup>
+                            </optgroup>
+                            <optgroup label="Other events">
                               <option value="TYPE:BREAK_NAP">Break + Nap (unlinked)</option>
                               <option value="TYPE:BREAK_SPEECH">
                                 Break + Speech
