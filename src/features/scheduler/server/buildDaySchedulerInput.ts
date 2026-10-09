@@ -1031,7 +1031,16 @@ export async function buildDaySchedulerInput(
         _id: explicitChoice.templateId, locationId, active: true, learningOnly: { $ne: true },
       }).lean() as unknown as DatabaseRecord | null
     : null;
-  const primaryExactTemplate = explicitTemplate ??
+  // A saved sheet for the requested exact date outranks other workbook
+  // sheets of the same weekday. This works for every weekday, not Thursday only.
+  const exactDatedWorkbookTemplate = templateDocuments.find((template) =>
+    template.active !== false &&
+    template.learningOnly !== true &&
+    template.sourceType === "HISTORICAL_WORKBOOK" &&
+    String(template.sourceDate ?? "") === date
+  ) ?? null;
+  const primaryExactTemplate = explicitTemplate ?? configuredFirst ??
+    exactDatedWorkbookTemplate ??
     (extendedRules.autoUseWeekdayTemplate ? selectBestWeekdayTemplate(templateDocuments, staff, clients) : null);
 
   // Applying a template to a specific date is an explicit manager choice.
