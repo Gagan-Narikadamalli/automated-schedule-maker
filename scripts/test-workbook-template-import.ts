@@ -98,7 +98,11 @@ const breakNap = parsed.assignments.find(
     assignment.staffId === "s-bella" &&
     assignment.startTime === "12:00"
 );
-assert.equal(breakNap?.assignmentType, "BREAK_NAP");
+assert.equal(
+  breakNap?.assignmentType,
+  "BREAK",
+  "Workbook BRK/NAP cells should import as a plain staff break; client naps are manual."
+);
 
 const afternoon = parsed.assignments.find(
   (assignment) =>
