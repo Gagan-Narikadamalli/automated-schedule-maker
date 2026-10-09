@@ -18,6 +18,7 @@ import type {
   SchedulerResult,
   SchedulerStaff,
 } from "@/features/scheduler/engine/types";
+import { applyFixedNapSessions } from "@/features/scheduler/server/applyFixedNapSessions";
 import { applyHistoricalTraining } from "@/features/scheduler/server/applyHistoricalTraining";
 import { applyLivingstonWorkbookTrial } from "@/features/scheduler/server/applyLivingstonWorkbookTrial";
 import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySchedulerInput";
@@ -107,16 +108,11 @@ export async function POST(request: Request) {
     }
 
     const dayData = await buildDaySchedulerInput(locationId, date);
-    // Auto Generate is template-first. Nap sessions are manager-managed and
-    // must not suppress workbook client coverage or invent nap-derived breaks.
-    // Repair can still take date-specific nap changes into account separately.
-    const fixedNapApplication = {
-      input: dayData.input,
-      applied: false,
-      sessionCount: 0,
-      clientCount: 0,
-      attendanceChangeCount: 0,
-    };
+    // Manager nap events do not override workbook coverage during generation.
+    // Date-specific attendance call-outs/call-ins still apply.
+    const fixedNapApplication = await applyFixedNapSessions(
+      locationId, date, dayData.input, { ignoreNapSessions: true }
+    );
 
     const workbookTraining = await applyLivingstonWorkbookTrial(
       locationId,
