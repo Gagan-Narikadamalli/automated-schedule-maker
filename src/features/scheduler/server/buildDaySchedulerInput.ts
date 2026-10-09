@@ -1015,7 +1015,16 @@ export async function buildDaySchedulerInput(
     ? selectBestWeekdayTemplate(templateDocuments, staff, clients)
     : null;
 
-  const templateReferences = primaryExactTemplate
+  // Applying a template to a specific date is an explicit manager choice.
+  // Its saved reference cells outrank automatic weekday-template selection
+  // on the next Generate Day run. Otherwise generation may silently choose a
+  // different Thursday template and discard what the manager just applied.
+  const appliedTemplateAssignments = existingAssignments.filter(
+    (assignment) => assignment.source === "TEMPLATE"
+  );
+  const hasAppliedTemplate = appliedTemplateAssignments.length > 0;
+
+  const templateReferences = !hasAppliedTemplate && primaryExactTemplate
     ? mapReferenceAssignments(
         primaryExactTemplate.assignments,
         "TEMPLATE",
@@ -1068,10 +1077,12 @@ export async function buildDaySchedulerInput(
     referenceAssignments: [
       ...existingAssignments.filter(
         (assignment) =>
-          assignment.assignmentType === "CLIENT_1_TO_1" ||
-          assignment.assignmentType === "BREAK" ||
-          assignment.assignmentType === "BREAK_NAP" ||
-          assignment.assignmentType === "BREAK_SPEECH"
+          (assignment.source === "TEMPLATE" ||
+            assignment.locked || assignment.source === "MANUAL") &&
+          (assignment.assignmentType === "CLIENT_1_TO_1" ||
+            assignment.assignmentType === "BREAK" ||
+            assignment.assignmentType === "BREAK_NAP" ||
+            assignment.assignmentType === "BREAK_SPEECH")
       ),
       ...templateReferences,
       ...previousScheduleReferences,
