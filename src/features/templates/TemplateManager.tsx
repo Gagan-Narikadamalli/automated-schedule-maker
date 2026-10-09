@@ -344,6 +344,29 @@ export function TemplateManager() {
     }
   }
 
+  async function importRecentTwoWeeks() {
+    if (!workbookFile || !locationId) {
+      notify("error","Select the updated Livingston workbook before importing.");
+      return;
+    }
+    try {
+      setWorking(true);
+      const form = new FormData();
+      form.set("mode","BULK_RECENT_TWO_WEEKS");
+      form.set("locationId",locationId);
+      form.set("file",workbookFile);
+      const response = await fetch("/api/templates/workbook",{method:"POST",body:form});
+      const data = await response.json() as {success?:boolean; importedCount?:number; error?:string; missingDates?:string[]};
+      if(!response.ok)throw new Error((data.error ?? "Bulk import failed.")+(data.missingDates?.length ? " Missing dates: "+data.missingDates.join(", "):""));
+      await loadTemplates();
+      notify("success",`Imported ${data.importedCount ?? 0} dated workbook templates for the two recent workweeks. Auto Generate now uses exact-date, then prior-week saved workbook templates.`);
+    } catch(error) {
+      notify("error",error instanceof Error?error.message:"Bulk import failed.");
+    } finally {
+      setWorking(false);
+    }
+  }
+
   function applyWorkbookSheetSelection(
     sheetName: string,
     sheets = workbookSheets
@@ -756,6 +779,11 @@ export function TemplateManager() {
 
       <section className="section-card" id="workbook-template-upload">
         <h2>Upload Excel Workbook and Create an Exact Sheet Template</h2>
+        <p className="helper-text">Bulk import exactly Sep 28–Oct 2 and Oct 5–9, 2026 from the workbook. Existing unrelated templates and live schedules remain unchanged.</p>
+        <button type="button" className="button button-primary" disabled={!workbookFile||!locationId||working||inspectingWorkbook} onClick={()=>void importRecentTwoWeeks()}>
+          {working?"Importing...":"Import all 10 recent dated templates from selected workbook"}
+        </button>
+
         <p className="helper-text">
           Upload the real Excel workbook. The website reads its sheet names,
           lets you select one sheet, matches the staff names in the columns and
