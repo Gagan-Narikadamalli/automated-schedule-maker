@@ -4,16 +4,7 @@ import { NextResponse } from "next/server";
 import { auditFinalCoverage } from "@/features/scheduler/engine/auditFinalCoverage";
 import { getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
 import { repairCoverageMinimally } from "@/features/scheduler/engine/generateSchedule";
-import { placeStaffBreaksAfterCoverage } from "@/features/scheduler/engine/placeStaffBreaks";
-import { enrichBreakAssignmentsWithFixedEvents } from "@/features/scheduler/engine/reserveBreaks";
-import {
-  repairSchedule,
-  type RepairAffectedSlot,
-} from "@/features/scheduler/engine/repairSchedule";
-import type {
-  SchedulerAssignment,
-  SchedulerStaff,
-} from "@/features/scheduler/engine/types";
+import type { SchedulerAssignment } from "@/features/scheduler/engine/types";
 import { applyFixedNapSessions } from "@/features/scheduler/server/applyFixedNapSessions";
 import { applyHistoricalTraining } from "@/features/scheduler/server/applyHistoricalTraining";
 import { applyLivingstonWorkbookTrial } from "@/features/scheduler/server/applyLivingstonWorkbookTrial";
@@ -53,99 +44,6 @@ function isBreakAssignment(
     assignment.assignmentType === "BREAK_NAP" ||
     assignment.assignmentType === "BREAK_SPEECH"
   );
-}
-
-function timeMinutes(time: string): number {
-  const [hourText, minuteText] = time.split(":");
-  return Number(hourText) * 60 + Number(minuteText);
-}
-
-function normalizeBreakAssignmentsForMinimalFix(
-  assignments: SchedulerAssignment[],
-  staff: SchedulerStaff[],
-  rules: {
-    breakWindowStart: string;
-    breakWindowEnd: string;
-    breakEligibilityHours: number;
-    slotLengthMinutes: number;
-  }
-): SchedulerAssignment[] {
-  const nonBreaks = assignments.filter(
-    (assignment) => !isBreakAssignment(assignment)
-  );
-  const breaksByStaff = new Map<string, SchedulerAssignment[]>();
-
-  for (const assignment of assignments.filter(isBreakAssignment)) {
-    const current = breaksByStaff.get(assignment.staffId) ?? [];
-    current.push(assignment);
-    breaksByStaff.set(assignment.staffId, current);
-  }
-
-  const normalizedBreaks: SchedulerAssignment[] = [];
-
-  for (const staffMember of staff) {
-    const availableHours =
-      (staffMember.availableSlots.length * rules.slotLengthMinutes) / 60;
-
-    if (availableHours < rules.breakEligibilityHours) {
-      continue;
-    }
-
-    const candidates = (breaksByStaff.get(staffMember.id) ?? [])
-      .filter((assignment) => {
-        const normalWindow =
-          assignment.startTime >= rules.breakWindowStart &&
-          assignment.startTime < rules.breakWindowEnd;
-        const napExtension =
-          assignment.assignmentType === "BREAK_NAP" &&
-          assignment.startTime >= rules.breakWindowStart &&
-          assignment.startTime < "14:00";
-
-        return normalWindow || napExtension;
-      })
-      .sort((left, right) => {
-        const leftManual =
-          left.source === "MANUAL" || left.locked ? 0 : 1;
-        const rightManual =
-          right.source === "MANUAL" || right.locked ? 0 : 1;
-
-        if (leftManual !== rightManual) {
-          return leftManual - rightManual;
-        }
-
-        const leftEvent =
-          left.assignmentType === "BREAK_NAP"
-            ? 0
-            : left.assignmentType === "BREAK_SPEECH"
-              ? 1
-              : 2;
-        const rightEvent =
-          right.assignmentType === "BREAK_NAP"
-            ? 0
-            : right.assignmentType === "BREAK_SPEECH"
-              ? 1
-              : 2;
-
-        if (leftEvent !== rightEvent) {
-          return leftEvent - rightEvent;
-        }
-
-        const leftDistance = Math.abs(timeMinutes(left.startTime) - 12 * 60);
-        const rightDistance = Math.abs(timeMinutes(right.startTime) - 12 * 60);
-
-        if (leftDistance !== rightDistance) {
-          return leftDistance - rightDistance;
-        }
-
-        return left.startTime.localeCompare(right.startTime);
-      });
-
-    if (candidates[0]) {
-      normalizedBreaks.push(candidates[0]);
-    }
-  }
-
-  return [...nonBreaks, ...normalizedBreaks];
 }
 
 function assignmentOverlapsCallOut(
@@ -280,8 +178,8 @@ export async function POST(request: Request) {
       // assignment. Uncovered demand belongs in the manager tray.
       {allowAutomaticOverrides:false, allowProtectedRelocation:false, allowBreakRelocation:false}
     );
-    const breakPlan = null;
     const result = coverageResult;
+    const affectedSlots = invalidOriginals.map(item => ({staffId:item.staffId,startTime:item.startTime}));
 
     const originalAssignmentIds = new Set(
       originalSchedulerInput.existingAssignments.map(
@@ -464,9 +362,9 @@ export async function POST(request: Request) {
         addedAssignmentCount: newAssignments.length,
         managerGapCount,
         automaticOverrideMode: repairMode === "COVERAGE",
-        reservedBreakCount: breakPlan?.reservedBreaks.length ?? 0,
-        breakReliefSwapCount: breakPlan?.reliefSwapCount ?? 0,
-        unplacedBreakStaffIds: breakPlan?.unplacedBreakStaffIds ?? [],
+        reservedBreakCount: 0,
+        breakReliefSwapCount: 0,
+        unplacedBreakStaffIds: [],
         totalBreakCount,
         metrics: finalMetrics,
         uncoveredRequirements: finalCoverage.uncoveredRequirements,
