@@ -46,9 +46,9 @@ const SchedulingRulesSchema = new Schema(
     },
     maximumClientStaffConsecutiveHours: {
       type: Number,
-      default: 4,
+      default: 5,
       min: 3,
-      max: 4,
+      max: 5,
     },
     preventSameStaffClientRepeatSameDay: {
       type: Boolean,
