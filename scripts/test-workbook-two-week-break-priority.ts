@@ -23,7 +23,7 @@ const input={
     ref(2,"other","12:30","CLIENT_1_TO_1","new"),
     ref(2,"other","13:00","BREAK"),
   ],
-} as SchedulerInput;
+} as unknown as SchedulerInput;
 const outcome=pinWorkbookTemplates(input);
 assert.equal(outcome.primaryCount,4);
 assert.equal(outcome.secondaryCount,1);
