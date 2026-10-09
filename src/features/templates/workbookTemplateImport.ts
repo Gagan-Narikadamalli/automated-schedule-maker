@@ -387,7 +387,7 @@ function parseAssignmentCell(
     )
   ) {
     return {
-      assignmentType: "BREAK_NAP",
+      assignmentType: "BREAK",
       client: null,
       unmatchedClientCode: null,
     };
@@ -399,7 +399,7 @@ function parseAssignmentCell(
     )
   ) {
     return {
-      assignmentType: "BREAK_SPEECH",
+      assignmentType: "BREAK",
       client: null,
       unmatchedClientCode: null,
     };
@@ -414,8 +414,10 @@ function parseAssignmentCell(
   }
 
   if (/^nap$/i.test(normalized)) {
+    // Workbook nap labels are imported as staff breaks only. Client naps are
+    // created separately in Manual mode rather than inferred from a template.
     return {
-      assignmentType: "NAP",
+      assignmentType: "BREAK",
       client: null,
       unmatchedClientCode: null,
     };
