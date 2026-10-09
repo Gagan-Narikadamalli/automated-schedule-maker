@@ -1036,7 +1036,7 @@ export function ScheduleGridEnhanced({
   async function saveEditedCell(row: number, column: number, text: string) {
     const currentCell = grid[row][column];
     let updatedCell = createScheduleCellFromText(text, currentCell);
-    if (manualMode && updatedCell.assignmentType === "BREAK_NAP" && !updatedCell.clientId) {
+    if (manualMode && updatedCell.assignmentType === "BREAK_NAP") {
       setEditingCell(null);
       setSelection({ anchor: { row, column }, focus: { row, column } });
       requestNapSelectionForPositions([{ row, column }]);
@@ -1752,7 +1752,9 @@ export function ScheduleGridEnhanced({
           style={{ position: "fixed", inset: 0, background: "rgba(5,24,42,.55)", display: "grid", placeItems: "center", zIndex: 1000, padding: 20 }}>
           <div style={{ width: "min(100%, 480px)", padding: 24, background: "#fff", borderRadius: 16, boxShadow: "0 16px 54px #081d3260" }}>
             <h3 style={{ marginTop: 0 }}>Break + Client Nap</h3>
-            <p>Choose the child who is napping while the selected staff member takes a break. Clients already paired with this staff member are listed first.</p>
+            <p><strong>Staff on break:</strong> {[...new Set(napPicker.rows.map((position) => columns[position.column]?.name).filter(Boolean))].join(", ")}</p>
+            <p><strong>Break time:</strong> {[...new Set(napPicker.rows.map((position) => DAILY_TIME_SLOTS[position.row]?.startTime).filter(Boolean))].join(", ")}</p>
+            <p>Choose the child who is napping while the listed staff member takes a break. Clients already paired with that staff member appear first.</p>
             <label style={{ display: "grid", gap: 8, fontWeight: 700 }}>
               Client
               <select value={napClientId} onChange={(event) => setNapClientId(event.target.value)}
