@@ -105,6 +105,7 @@ type GenerateMetrics = {
 
 type GenerateResponse = {
   success?: boolean;
+  regenerationSummary?: { changed: number; unchanged: number; added: number; removed: number; protected: number };
   metrics?: GenerateMetrics;
   warnings?: unknown[];
   uncoveredRequirements?: unknown[];
@@ -915,7 +916,9 @@ export function ScheduleWorkspaceV3() {
       });
       setSchedulerWarnings(warningTexts);
       setShowSchedulerWarnings(warningTexts.length > 0);
-      setStatusMessage(`Auto Generate finished. ${formatMetrics(data.metrics)}${warningTexts.length ? ` ${warningTexts.length} scheduler warning(s) listed below.` : ""}`);
+      const summary = data.regenerationSummary;
+      const changeDetails = summary ? ` Replaced ${summary.changed}, added ${summary.added}, removed ${summary.removed}, unchanged ${summary.unchanged}, protected ${summary.protected} block(s).` : "";
+      setStatusMessage(`Auto Generate finished. ${formatMetrics(data.metrics)}${changeDetails}${warningTexts.length ? ` ${warningTexts.length} scheduler warning(s) listed below.` : ""}`);
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "The schedule could not be generated.");
     } finally {
