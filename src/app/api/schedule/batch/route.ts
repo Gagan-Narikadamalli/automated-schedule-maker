@@ -336,8 +336,47 @@ export async function PUT(request: Request) {
       resolvedClientByChange.set(index, clientId);
     }
 
+    // Validate the final batch itself, not only the pre-existing database.
+    // Multi-cell paste and drag operations can otherwise double-book a client
+    // (or put a client into nap and 1:1 coverage simultaneously).
+    const assignedStaffSlots = new Set<string>();
+    const assignedClientSlots = new Map<string, { type: string; staffId: string }>();
+    for (let index = 0; index < normalizedChanges.length; index += 1) {
+      const change = normalizedChanges[index];
+      const staffSlot = cellKey(change.staffId, change.startTime);
+      if (assignedStaffSlots.has(staffSlot)) {
+        conflicts.push({
+          staffId: change.staffId,
+          startTime: change.startTime,
+          code: "DUPLICATE_BATCH_STAFF_SLOT",
+          message: "The same staff time block appears more than once in this edit.",
+        });
+      }
+      assignedStaffSlots.add(staffSlot);
+      const clientId = resolvedClientByChange.get(index);
+      if (!clientId || !["CLIENT_1_TO_1", "BREAK_NAP", "NAP"].includes(change.assignmentType)) continue;
+      const clientSlot = cellKey(clientId, change.startTime);
+      const previous = assignedClientSlots.get(clientSlot);
+      if (previous) {
+        const duplicatesCoverage = previous.type === "CLIENT_1_TO_1" && change.assignmentType === "CLIENT_1_TO_1";
+        const mixedNapAndCoverage =
+          (previous.type === "CLIENT_1_TO_1" && change.assignmentType !== "CLIENT_1_TO_1") ||
+          (previous.type !== "CLIENT_1_TO_1" && change.assignmentType === "CLIENT_1_TO_1");
+        if (duplicatesCoverage || mixedNapAndCoverage) {
+          conflicts.push({
+            staffId: change.staffId,
+            startTime: change.startTime,
+            code: "BATCH_CLIENT_CONFLICT",
+            message: "This batch assigns a client to conflicting activities or staff members at the same time.",
+          });
+        }
+      } else {
+        assignedClientSlots.set(clientSlot, { type: change.assignmentType, staffId: change.staffId });
+      }
+    }
+
     const nonOverridableConflicts = conflicts.filter((conflict) =>
-      ["CLIENT_NOT_FOUND", "CLIENT_NOT_ACTIVE", "INVALID_ASSIGNMENT", "NAP_CLIENT_REQUIRED", "NAP_CLIENT_DOUBLE_BOOKED"].includes(
+      ["CLIENT_NOT_FOUND", "CLIENT_NOT_ACTIVE", "INVALID_ASSIGNMENT", "NAP_CLIENT_REQUIRED", "NAP_CLIENT_DOUBLE_BOOKED", "DUPLICATE_BATCH_STAFF_SLOT", "BATCH_CLIENT_CONFLICT"].includes(
         conflict.code
       )
     );
