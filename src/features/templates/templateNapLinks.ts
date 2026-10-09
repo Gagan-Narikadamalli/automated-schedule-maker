@@ -22,37 +22,34 @@ export function pairedStaff(assignments: TemplateSlot[], clientId: string, time:
 }
 
 export function synchronizeTemplateNaps(assignments: TemplateSlot[], naps: ClientNapSlot[]) {
+  // The explicit staff cell is authoritative. Merely recording a client's nap
+  // must never force an employee to stop an existing 1:1 appointment.
   const unique = [...new Map(naps.map(n => [`${n.clientId}|${n.startTime}`, n])).values()];
-  const napKeys = new Set(unique.map(n => `${n.clientId}|${n.startTime}`));
-  const linked = assignments.filter(a => a.assignmentType === "BREAK_NAP" && a.clientId);
-  for (const a of linked) {
-    if (!napKeys.has(`${a.clientId}|${a.startTime}`)) {
-      unique.push({ clientId: a.clientId as string, startTime: a.startTime });
-      napKeys.add(`${a.clientId}|${a.startTime}`);
-    }
-  }
-  const normalized = assignments.filter(a =>
-    !(a.assignmentType === "BREAK_NAP" && a.clientId && !napKeys.has(`${a.clientId}|${a.startTime}`))
-  );
+  const keys = new Set(unique.map(n => `${n.clientId}|${n.startTime}`));
   const warnings: string[] = [];
-  for (const nap of unique) {
-    const staffId = linked.find(a => a.clientId === nap.clientId && a.startTime === nap.startTime)?.staffId ??
-      pairedStaff(assignments, nap.clientId, nap.startTime, unique);
-    if (!staffId) {
-      warnings.push(`No adjacent staff/client pairing for client ${nap.clientId} at ${nap.startTime}; the nap is saved but no staff break can be inferred.`);
-      continue;
+  const seenStaff = new Set<string>();
+  const seenCoverage = new Set<string>();
+  for (const item of assignments) {
+    const staffKey = `${item.staffId}|${item.startTime}`;
+    if (seenStaff.has(staffKey)) warnings.push(`More than one block assigned to staff ${item.staffId} at ${item.startTime}.`);
+    seenStaff.add(staffKey);
+    if (item.assignmentType === "CLIENT_1_TO_1" && item.clientId) {
+      const clientKey = `${item.clientId}|${item.startTime}`;
+      if (seenCoverage.has(clientKey)) warnings.push(`Client ${item.clientId} has duplicate 1:1 coverage at ${item.startTime}.`);
+      seenCoverage.add(clientKey);
     }
-    const occupant = normalized.find(a => a.staffId === staffId && a.startTime === nap.startTime);
-    if (occupant) {
-      if (occupant.assignmentType !== "BREAK_NAP" || occupant.clientId !== nap.clientId) {
-        warnings.push(`Staff ${staffId} at ${nap.startTime} is occupied by ${occupant.assignmentType}; their break was not overwritten for client ${nap.clientId}.`);
+    if (item.assignmentType === "BREAK_NAP" && item.clientId) {
+      const key = `${item.clientId}|${item.startTime}`;
+      if (!keys.has(key)) {
+        unique.push({ clientId: item.clientId, startTime: item.startTime });
+        keys.add(key);
       }
-      continue;
     }
-    normalized.push({ staffId, clientId: nap.clientId, startTime: nap.startTime, endTime: shiftSlot(nap.startTime, 30), assignmentType: "BREAK_NAP", locked: false });
   }
-  for (const a of normalized.filter(a => a.assignmentType === "CLIENT_1_TO_1" && a.clientId)) {
-    if (napKeys.has(`${a.clientId}|${a.startTime}`)) warnings.push(`Client ${a.clientId} has both 1:1 coverage and nap at ${a.startTime}.`);
+  for (const nap of unique) {
+    if (seenCoverage.has(`${nap.clientId}|${nap.startTime}`)) {
+      warnings.push(`Client ${nap.clientId} has 1:1 coverage and a nap at ${nap.startTime}. Adjust the client's nap time or coverage first.`);
+    }
   }
-  return { assignments: normalized, naps: unique, warnings };
+  return { assignments: assignments.map(a => ({...a})), naps: unique, warnings };
 }
