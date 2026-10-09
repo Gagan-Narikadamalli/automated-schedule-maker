@@ -695,6 +695,32 @@ function sortRequirementsForClinicFlow(
       return timeComparison;
     }
 
+    // Exact weekday-template client pairings receive the first claim on their
+    // scheduled time when their caregiver is present and eligible. Otherwise a
+    // more flexible client could take that employee before the template client
+    // is processed, causing unnecessary handoffs later in the day.
+    const templateMatchAvailable = (requirement: ClientRequirement): boolean =>
+      input.referenceAssignments.some((reference) => {
+        if (reference.source !== "TEMPLATE" ||
+            reference.assignmentType !== "CLIENT_1_TO_1" ||
+            reference.clientId !== requirement.client.id ||
+            reference.startTime !== requirement.startTime) return false;
+        const member = input.staff.find((person) => person.id === reference.staffId);
+        if (!member) return false;
+        return canAssignStaffToClient({
+          staffMember: member,
+          client: requirement.client,
+          startTime: requirement.startTime,
+          assignments,
+          callOutStaffIds,
+          rules: input.rules,
+          allowSameDayPairRepeat: true,
+        }).allowed;
+      });
+    const leftTemplate = templateMatchAvailable(left);
+    const rightTemplate = templateMatchAvailable(right);
+    if (leftTemplate !== rightTemplate) return leftTemplate ? -1 : 1;
+
     // First preserve clients that already have a real staff pairing from the
     // immediately previous coverage segment (including across a protected Nap
     // or Speech gap). This is evaluated with assignments already built for
