@@ -576,7 +576,6 @@ export function TemplateEditorModal({
                             </optgroup>
                             <optgroup label="Linked break + client nap">
                                 {clients.map((client) => <option key={client.id} value={`NAP_CLIENT:${client.id}`}>Break + {client.code} Nap</option>)}
-                              </optgroup>
                             </optgroup>
                             <optgroup label="Other events">
                               <option value="TYPE:BREAK_NAP">Break + Nap (unlinked)</option>
