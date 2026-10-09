@@ -80,11 +80,14 @@ function calendarCodePart(value: string): string {
   return letters.charAt(0).toUpperCase() + letters.charAt(1).toLowerCase();
 }
 
+function singleNameCalendarCode(name: string): string {
+  const letters = name.trim().replace(/[^A-Za-z]/g, "");
+  return letters.charAt(0).toUpperCase() + letters.slice(1, 4).toLowerCase();
+}
+
 function displayCodeFromFullName(fullName: string): string {
   const parts = fullName.trim().split(/\s+/).filter(Boolean);
-  return `${calendarCodePart(parts[0] ?? "")}${calendarCodePart(
-    parts.slice(1).join(" ")
-  )}`;
+  return parts.length > 1 ? `${calendarCodePart(parts[0])}${calendarCodePart(parts.slice(1).join(" "))}` : singleNameCalendarCode(parts[0] ?? "");
 }
 
 export async function PATCH(request: Request, context: RouteContext) {
@@ -129,30 +132,15 @@ export async function PATCH(request: Request, context: RouteContext) {
       const firstName = body.firstName?.trim() ?? "";
       const lastName = body.lastName?.trim() ?? "";
       const fullName =
-        firstName && lastName
-          ? `${firstName} ${lastName}`
-          : body.fullName?.trim() ?? "";
+        [firstName, lastName].filter(Boolean).join(" ") || body.fullName?.trim() || "";
 
-      if (
-        (body.firstName !== undefined || body.lastName !== undefined) &&
-        (!firstName || !lastName)
-      ) {
-        return NextResponse.json(
-          { error: "Enter both the client's first name and last name." },
-          { status: 400 }
-        );
-      }
+      const displayCode = displayCodeFromFullName(fullName);
 
-      const displayCode =
-        firstName && lastName
-          ? `${calendarCodePart(firstName)}${calendarCodePart(lastName)}`
-          : displayCodeFromFullName(fullName);
-
-      if (displayCode.length < 4) {
+      if (!displayCode) {
         return NextResponse.json(
           {
             error:
-              "Client first and last names must each contain at least two letters so the calendar code can be generated.",
+              "Client name must contain at least one letter to generate a calendar code.",
           },
           { status: 400 }
         );
