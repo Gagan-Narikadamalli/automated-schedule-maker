@@ -111,6 +111,23 @@ function templateReference(
   };
 }
 
+function copiedReference(
+  id: string,
+  staffId: string,
+  clientId: string,
+  startTime: string
+): SchedulerAssignment {
+  return {
+    id,
+    staffId,
+    clientId,
+    startTime,
+    assignmentType: "CLIENT_1_TO_1",
+    source: "COPIED",
+    locked: false,
+  };
+}
+
 function templateForPairings(
   pairings: Array<[string, string]>
 ): SchedulerAssignment[] {
@@ -411,6 +428,85 @@ for (const report of workbookObservedReports) {
   assert.equal(report.matchPercent,100,`${report.name}: 25 workbook-observed template slots should match`);
   assert.equal(report.coveragePercent,100,`${report.name}: workbook subset coverage`);
 }
+
+// Explicit fallback-order regression:
+ // 1) immediately previous same-weekday schedule,
+ // 2) current weekday template,
+ // 3) normal rules when neither reference is feasible.
+function runReferenceFallbackScenario(
+  staffRows: SchedulerStaff[]
+): SchedulerAssignment[] {
+  const priorityClient = client("priority-client", "PRIO");
+  const references = [
+    ...SLOTS.map((slot) =>
+      copiedReference(
+        `previous-${slot}`,
+        "previous-staff",
+        priorityClient.id,
+        slot
+      )
+    ),
+    ...SLOTS.map((slot) =>
+      templateReference(
+        `template-${slot}`,
+        "template-staff",
+        priorityClient.id,
+        slot
+      )
+    ),
+  ];
+  const result = generateSchedule({
+    staff: staffRows,
+    clients: [priorityClient],
+    existingAssignments: [],
+    referenceAssignments: references,
+    callOutStaffIds: staffRows
+      .filter((member) => member.availableSlots.length === 0)
+      .map((member) => member.id),
+    rules: { ...RULES },
+  });
+
+  assert.equal(result.coveragePercent ?? result.metrics.coveragePercent, 100);
+  return result.assignments.filter(
+    (assignment) => assignment.assignmentType === "CLIENT_1_TO_1"
+  );
+}
+
+const previousWeekWins = runReferenceFallbackScenario([
+  staff("previous-staff", "Last Week Staff"),
+  staff("template-staff", "This Week Template Staff"),
+  staff("rule-staff", "Rule Fallback Staff"),
+]);
+assert.ok(
+  previousWeekWins.every(
+    (assignment) => assignment.staffId === "previous-staff"
+  ),
+  "The immediately previous same-weekday assignment must outrank the current weekday template."
+);
+
+const templateWinsWhenPreviousUnavailable = runReferenceFallbackScenario([
+  staff("previous-staff", "Last Week Staff", []),
+  staff("template-staff", "This Week Template Staff"),
+  staff("rule-staff", "Rule Fallback Staff"),
+]);
+assert.ok(
+  templateWinsWhenPreviousUnavailable.every(
+    (assignment) => assignment.staffId === "template-staff"
+  ),
+  "The current weekday template must be used when last week's exact assignment is unavailable."
+);
+
+const rulesWinWhenReferencesUnavailable = runReferenceFallbackScenario([
+  staff("previous-staff", "Last Week Staff", []),
+  staff("template-staff", "This Week Template Staff", []),
+  staff("rule-staff", "Rule Fallback Staff"),
+]);
+assert.ok(
+  rulesWinWhenReferencesUnavailable.every(
+    (assignment) => assignment.staffId === "rule-staff"
+  ),
+  "Normal scheduler rules must cover the client when neither reusable reference is feasible."
+);
 
 const allReports = [
   ...reports,
