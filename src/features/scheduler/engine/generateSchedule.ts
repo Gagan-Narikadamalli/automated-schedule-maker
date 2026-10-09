@@ -669,9 +669,9 @@ function coverageRoleTier(staffMember: SchedulerStaff): number {
       return 1;
     case "OFFICE_MANAGER":
       return 2;
-    case "OTHER":
-      return 3;
     case "BCBA":
+      return 3;
+    case "OTHER":
       return 4;
     default:
       return 5;
@@ -856,7 +856,18 @@ function findCoverageFirstSingleSlotStaff(
         score: number;
       } => candidate !== null
     )
-    .sort(compareStaffCandidates);
+    .sort((left, right) => {
+      const roleDifference = coverageRoleTier(left.staffMember) -
+        coverageRoleTier(right.staffMember);
+      if (roleDifference !== 0) return roleDifference;
+      const previous = previousClientAssignment(requirement, assignments, input.rules.slotLengthMinutes);
+      if (previous) {
+        const leftContinues = left.staffMember.id === previous.staffId;
+        const rightContinues = right.staffMember.id === previous.staffId;
+        if (leftContinues !== rightContinues) return leftContinues ? -1 : 1;
+      }
+      return compareStaffCandidates(left, right);
+    });
 
   return candidates[0]?.staffMember ?? null;
 }
