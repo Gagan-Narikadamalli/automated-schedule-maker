@@ -20,6 +20,7 @@ export function pinWorkbookTemplates(input: SchedulerInput): {
   const rejected: TemplatePinRejection[] = [];
   const staffSlots = new Set<string>();
   const clientSlots = new Set<string>();
+  const staffWithBreak = new Set<string>();
   let primaryCount = 0;
   let secondaryCount = 0;
   const primaryClientIds = new Set(input.referenceAssignments
@@ -40,11 +41,17 @@ export function pinWorkbookTemplates(input: SchedulerInput): {
   for (const reference of references) {
     const member = staff.get(reference.staffId);
     const client = reference.clientId ? clients.get(reference.clientId) : null;
+    const isBreak = ["BREAK", "BREAK_NAP", "BREAK_SPEECH"].includes(reference.assignmentType);
+    const secondary = reference.note?.startsWith("Priority 2") ?? false;
     const staffKey = reference.staffId + "|" + reference.startTime;
     const clientKey = reference.clientId + "|" + reference.startTime;
     let reason = "";
     if (!member || !member.availableSlots.includes(reference.startTime) || calledOut.has(reference.staffId)) {
       reason = "Staff is unavailable for this workbook block";
+    } else if (isBreak && staffWithBreak.has(reference.staffId)) {
+      reason = "Staff already has a higher-priority workbook break";
+    } else if (secondary && isBreak) {
+      reason = "Secondary workbook breaks cannot displace or duplicate primary-week coverage";
     } else if (staffSlots.has(staffKey)) {
       reason = "A higher-priority workbook block already occupies this staff/time cell";
     } else if (reference.assignmentType === "CLIENT_1_TO_1") {
@@ -78,6 +85,7 @@ export function pinWorkbookTemplates(input: SchedulerInput): {
       source: "TEMPLATE",
     });
     staffSlots.add(staffKey);
+    if (isBreak) staffWithBreak.add(reference.staffId);
     if (reference.assignmentType === "CLIENT_1_TO_1") clientSlots.add(clientKey);
     if (reference.note?.startsWith("Priority 1")) primaryCount++;
     else secondaryCount++;
