@@ -379,9 +379,43 @@ for (const report of datedReports) {
   }
 }
 
+// These five reference pairings per day were transcribed from the user's
+// "2026 Livingston Scheduling" workbook (Oct 5-9, 2026) at 9:00-11:30.
+// The identities and assignments are real workbook observations, but roles,
+// live attendance, Events naps and call-outs are NOT MongoDB-verified.
+const workbookObservedPairings: Record<string, Array<[string,string]>> = {
+  "2026-10-05": [["Areyana","JOBR"],["Ariana","EYNA"],["Anias","LURA"],["Danna","CAGR"],["keila","MISM"]],
+  "2026-10-06": [["Areyana","CAGR"],["Anias","CAME"],["keila","JIMA"],["Danna","ELNG"],["Devonyah","ZIBO"]],
+  "2026-10-07": [["Areyana","MAHA"],["Anias","JEMA"],["Danna","CAGR"],["Devonyah","ZIBO"],["Dezz","EYNA"]],
+  "2026-10-08": [["Areyana","CAGR"],["Anias","CACR"],["Danna","AMAB"],["Devonyah","REMA"],["dezz","EYNA"]],
+  "2026-10-09": [["Ariana","LISH"],["Anias","CAGR"],["Danna","AMAB"],["Devonyah","LURA"],["Izzy","CACR"]],
+};
+const workbookObservedSlots = ["09:00","09:30","10:00","10:30","11:00"];
+const workbookObservedReports = Object.entries(workbookObservedPairings).map(([date,pairings]) => {
+  const observedStaff = pairings.map(([name]) => staff(`workbook-staff-${name.toLowerCase()}`,name,workbookObservedSlots));
+  const observedClients = pairings.map(([,code]) => client(`workbook-client-${code}`,code,workbookObservedSlots));
+  const references = pairings.flatMap(([name,code]) =>
+    workbookObservedSlots.map(slot => templateReference(
+      `workbook-${date}-${name}-${slot}`,
+      `workbook-staff-${name.toLowerCase()}`,
+      `workbook-client-${code}`,slot))
+  );
+  return runScenario({
+    name: `WORKBOOK ${date} actual historical 9:00-11:30 pairings`,
+    staffRows: observedStaff,
+    clientRows: observedClients,
+    template: references,
+  });
+});
+for (const report of workbookObservedReports) {
+  assert.equal(report.matchPercent,100,`${report.name}: 25 workbook-observed template slots should match`);
+  assert.equal(report.coveragePercent,100,`${report.name}: workbook subset coverage`);
+}
+
 const allReports = [
   ...reports,
   ...datedReports,
+  ...workbookObservedReports,
   oneStaffOut,
   twoStaffOut,
   oneClientOut,
