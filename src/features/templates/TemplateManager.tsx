@@ -134,6 +134,12 @@ export function TemplateManager() {
     setMessage(text);
   }
 
+  useEffect(() => {
+    if (!notification) return;
+    const timeout = window.setTimeout(() => setNotification(null), 5000);
+    return () => window.clearTimeout(timeout);
+  }, [notification]);
+
   const selectedLocation = useMemo(
     () => locations.find((location) => location.id === locationId),
     [locations, locationId]
