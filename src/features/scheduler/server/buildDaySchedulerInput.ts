@@ -171,7 +171,7 @@ function getDefaultRules(): ExtendedSchedulerRules {
     maximumClientsPerTechPerDay: 3,
     maximumTechsPerClientPerDay: 3,
     minimumClientStaffAssignmentMinutes: 30,
-    maximumClientStaffConsecutiveHours: 4,
+    maximumClientStaffConsecutiveHours: 5,
     preventSameStaffClientRepeatSameDay: false,
     allowSameStaffClientRepeatForCoverageException: true,
     preferSameTeam: true,
