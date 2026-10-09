@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 
-import { reserveStaffBreaks } from "../src/features/scheduler/engine/reserveBreaks";
+import { enrichBreakAssignmentsWithFixedEvents, reserveStaffBreaks } from "../src/features/scheduler/engine/reserveBreaks";
 import type {
+  SchedulerAssignment,
   SchedulerClient,
   SchedulerRules,
   SchedulerStaff,
@@ -122,8 +123,42 @@ function testBreakDoesNotRemoveOnlyEligibleTechnician() {
   );
 }
 
+function testLongNapBreaksPreserveClientRelationship() {
+  const linkedClient = {
+    ...createClient("ClientA", {}),
+    napSlots: ["12:00", "12:30", "13:00"],
+    requiredSlots: ["11:30", "13:30"],
+  };
+  const createAssignment = (
+    id: string, staffId: string, clientId: string | undefined,
+    startTime: string, assignmentType: SchedulerAssignment["assignmentType"]
+  ): SchedulerAssignment => ({
+    id, staffId, clientId, startTime, assignmentType, source: "AUTO", locked: false,
+  });
+  const assignments: SchedulerAssignment[] = [
+    createAssignment("early", "staff-a", "ClientA", "11:30", "CLIENT_1_TO_1"),
+    createAssignment("late", "staff-a", "ClientA", "13:30", "CLIENT_1_TO_1"),
+    ...["12:00", "12:30", "13:00"].map((slot) =>
+      createAssignment(`nap-break-${slot}`, "staff-a", undefined, slot, "BREAK")
+    ),
+    createAssignment("other-staff", "staff-b", undefined, "12:30", "BREAK"),
+  ];
+  const enriched = enrichBreakAssignmentsWithFixedEvents(assignments, [linkedClient], 30);
+  for (const slot of ["12:00", "12:30", "13:00"]) {
+    assert.ok(enriched.some((item) =>
+      item.staffId === "staff-a" && item.clientId === "ClientA" &&
+      item.startTime === slot && item.assignmentType === "BREAK_NAP"
+    ), `The entire nap period must retain the correct staff-client relationship at ${slot}`);
+  }
+  assert.ok(enriched.some((item) =>
+    item.staffId === "staff-b" && item.startTime === "12:30" &&
+    item.assignmentType === "BREAK" && !item.clientId
+  ), "An unrelated staff member's break must not acquire a child's nap");
+}
+
 function runBreakEligibilityRegressionScenarios() {
   testBreakDoesNotRemoveOnlyEligibleTechnician();
+  testLongNapBreaksPreserveClientRelationship();
   console.log("Break eligibility regression scenarios passed.");
 }
 
