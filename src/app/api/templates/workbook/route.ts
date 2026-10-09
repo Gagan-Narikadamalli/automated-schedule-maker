@@ -170,6 +170,49 @@ export async function POST(request: Request) {
       });
     }
 
+    if (mode === "BULK_RECENT_TWO_WEEKS") {
+      // Only the ten specific dates requested. No other worksheets are written.
+      const dates = [
+        "2026-09-28","2026-09-29","2026-09-30","2026-10-01","2026-10-02",
+        "2026-10-05","2026-10-06","2026-10-07","2026-10-08","2026-10-09",
+      ];
+      const inspections = inspectWorkbookTemplate(bytes, staff, clients);
+      const selections = dates.map(date => ({
+        date,
+        sheet: inspections.find(sheet => sheet.detectedDate === date),
+      }));
+      const missing = selections.filter(item => !item.sheet || item.sheet.matchedStaffCount === 0 || item.sheet.mappedClientAssignmentCount === 0);
+      if (missing.length) {
+        return NextResponse.json({ error: "The workbook is missing usable mapped client assignments for required dates. No templates were changed.",
+          missingDates:missing.map(item=>item.date),
+          inspections:missing.map(item=>item.sheet ? serializeInspection(item.sheet) : {detectedDate:item.date}),
+        }, {status:422});
+      }
+      const imported = [];
+      for (const item of selections) {
+        const inspection = item.sheet!;
+        const name = `Livingston Excel ${item.date}`;
+        const template = await ScheduleTemplate.findOneAndUpdate(
+          {locationId, dayOfWeek:inspection.detectedDayOfWeek, name},
+          {$set:{locationId,name,dayOfWeek:inspection.detectedDayOfWeek,
+            sourceType:"HISTORICAL_WORKBOOK",sourceName:cleanFileName(fileValue.name),
+            sourceDate:item.date,styleNotes:[`Exact workbook sheet: ${inspection.sheetName}.`,
+              "First priority when generating this date; second priority when generating the same weekday seven days later."],
+            learningOnly:false,assignments:inspection.assignments,active:true}},
+          {new:true,upsert:true,runValidators:true}
+        );
+        imported.push({id:String(template._id),date:item.date,dayOfWeek:inspection.detectedDayOfWeek,
+          sheetName:inspection.sheetName,assignmentCount:inspection.assignmentCount,
+          mappedClientAssignmentCount:inspection.mappedClientAssignmentCount,
+          unmatchedStaffHeaders:inspection.unmatchedStaffHeaders,unmatchedClientCodes:inspection.unmatchedClientCodes});
+      }
+      await writeAuditLog({locationId,userId:auth.session.userId,action:"SAVE_TEMPLATE",
+        entityType:"SCHEDULE_TEMPLATE",entityId:imported[0].id,
+        summary:"Imported exactly ten Livingston workbook templates for two workweeks.",
+        after:{sourceName:cleanFileName(fileValue.name),imported}});
+      return NextResponse.json({success:true,imported,importedCount:imported.length});
+    }
+
     if (mode !== "CREATE") {
       return NextResponse.json(
         { error: "Workbook mode must be INSPECT or CREATE." },
