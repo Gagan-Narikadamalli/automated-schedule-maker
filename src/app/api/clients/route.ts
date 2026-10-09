@@ -51,11 +51,16 @@ function calendarCodePart(value: string): string {
   return letters.charAt(0).toUpperCase() + letters.charAt(1).toLowerCase();
 }
 
+function singleNameCalendarCode(name: string): string {
+  const letters = name.trim().replace(/[^A-Za-z]/g, "");
+  return letters.charAt(0).toUpperCase() + letters.slice(1, 4).toLowerCase();
+}
+
 function displayCodeFromFullName(fullName: string): string {
   const parts = fullName.trim().split(/\s+/).filter(Boolean);
   const firstName = parts[0] ?? "";
   const lastName = parts.slice(1).join(" ");
-  return `${calendarCodePart(firstName)}${calendarCodePart(lastName)}`;
+  return firstName && lastName ? `${calendarCodePart(firstName)}${calendarCodePart(lastName)}` : singleNameCalendarCode(firstName);
 }
 
 function serializeClient(client: Record<string, unknown>) {
@@ -153,41 +158,25 @@ export async function POST(request: Request) {
     const firstName = body.firstName?.trim() ?? "";
     const lastName = body.lastName?.trim() ?? "";
     const fullName =
-      firstName && lastName
-        ? `${firstName} ${lastName}`
-        : body.fullName?.trim() ?? "";
+      [firstName, lastName].filter(Boolean).join(" ") || body.fullName?.trim() || "";
     const displayCode =
-      firstName && lastName
-        ? `${calendarCodePart(firstName)}${calendarCodePart(lastName)}`
-        : displayCodeFromFullName(fullName);
+      displayCodeFromFullName(fullName);
 
     if (!locationId || !fullName || !body.startDate) {
       return NextResponse.json(
         {
           error:
-            "Location, client first name, client last name, and start date are required.",
+            "Location, a client name, and start date are required.",
         },
         { status: 400 }
       );
     }
 
-    if (
-      (body.firstName !== undefined || body.lastName !== undefined) &&
-      (!firstName || !lastName)
-    ) {
-      return NextResponse.json(
-        {
-          error: "Enter both the client's first name and last name.",
-        },
-        { status: 400 }
-      );
-    }
-
-    if (displayCode.length < 4) {
+    if (!displayCode) {
       return NextResponse.json(
         {
           error:
-            "Client first and last names must each contain at least two letters so the calendar code can be generated.",
+            "Client name must contain at least one letter to generate a calendar code.",
         },
         { status: 400 }
       );
