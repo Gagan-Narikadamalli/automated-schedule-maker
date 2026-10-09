@@ -674,7 +674,7 @@ export function TemplateManager() {
         </div>
       </section>
 
-      <section className="section-card">
+      <section className="section-card" id="workbook-template-upload">
         <h2>Upload Excel Workbook and Create an Exact Sheet Template</h2>
         <p className="helper-text">
           Upload the real Excel workbook. The website reads its sheet names,
