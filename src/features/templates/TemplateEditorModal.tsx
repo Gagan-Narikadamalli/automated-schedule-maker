@@ -26,6 +26,7 @@ type TemplateDetail = {
   sourceDate: string;
   learningOnly: boolean;
   assignments: TemplateAssignment[];
+  clientNapSlots?: Array<{ clientId: string; startTime: string }>;
   assignmentCount: number;
 };
 
@@ -144,6 +145,8 @@ export function TemplateEditorModal({
   const [name, setName] = useState("");
   const [dayOfWeek, setDayOfWeek] = useState("MONDAY");
   const [assignments, setAssignments] = useState<TemplateAssignment[]>([]);
+  const [view, setView] = useState<"staff" | "client">("staff");
+  const [clientNapSlots, setClientNapSlots] = useState<Array<{ clientId: string; startTime: string }>>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -175,6 +178,8 @@ export function TemplateEditorModal({
         setName(data.template.name);
         setDayOfWeek(data.template.dayOfWeek);
         setAssignments(data.template.assignments ?? []);
+      setClientNapSlots(data.template.clientNapSlots ?? []);
+        setClientNapSlots(data.template.clientNapSlots ?? []);
         setMessage(
           "Template-only editor. Changes here do not touch any live schedule until you explicitly apply the template."
         );
@@ -212,11 +217,11 @@ export function TemplateEditorModal({
       );
     }
     return result;
-  }, [assignments]);
+  }, [assignments, clientNapSlots]);
 
   const slots = useMemo(() => {
     const fromAssignments = [
-      ...new Set(assignments.map((assignment) => assignment.startTime)),
+      ...new Set([...assignments.map((assignment) => assignment.startTime), ...clientNapSlots.map((nap) => nap.startTime)]),
     ].sort();
 
     if (fromAssignments.length > 0) {
@@ -240,6 +245,25 @@ export function TemplateEditorModal({
     }
     return defaults;
   }, [assignments]);
+
+  const napKeys = useMemo(() => new Set(clientNapSlots.map((nap) => `${nap.clientId}|${nap.startTime}`)), [clientNapSlots]);
+
+  function assignedStaffForNap(clientId: string, slot: string): string | null {
+    // Prefer the employee working with the client immediately before or after nap.
+    const adjacent = [addMinutes(slot, -30), addMinutes(slot, 30)];
+    for (const time of adjacent) {
+      const paired = assignments.find((item) => item.clientId === clientId &&
+        item.assignmentType === "CLIENT_1_TO_1" && item.startTime === time);
+      if (paired) return paired.staffId;
+    }
+    return null;
+  }
+
+  function setClientNap(clientId: string, startTime: string, enabled: boolean) {
+    setClientNapSlots((current) => enabled
+      ? [...current.filter((item) => item.clientId !== clientId || item.startTime !== startTime), { clientId, startTime }]
+      : current.filter((item) => item.clientId !== clientId || item.startTime !== startTime));
+  }
 
   function updateCell(
     staffId: string,
@@ -307,6 +331,7 @@ export function TemplateEditorModal({
             name: name.trim(),
             dayOfWeek,
             assignments,
+            clientNapSlots,
           }),
         }
       );
@@ -419,8 +444,26 @@ export function TemplateEditorModal({
             </div>
           </div>
 
+          <div className={styles.viewTabs} role="tablist" aria-label="Template views">
+            <button type="button" role="tab" aria-selected={view === "staff"} className={view === "staff" ? styles.activeTab : ""} onClick={() => setView("staff")}>Staff View</button>
+            <button type="button" role="tab" aria-selected={view === "client"} className={view === "client" ? styles.activeTab : ""} onClick={() => setView("client")}>Client View · Naps ({clientNapSlots.length})</button>
+          </div>
+          <div className={styles.notice}>
+            Client naps are stored in this template. Staff View previews a Break + Nap for the employee paired with that client near the nap time. Explicit staff cells are never silently overwritten.
+          </div>
           <div className={styles.gridWrap}>
-            <table className={styles.grid}>
+            {view === "client" ? <table className={styles.grid}>
+              <thead><tr><th className={styles.timeHeader}>Time</th>{clients.map((client) => <th key={client.id}><span className={styles.staffHeader}><i style={{ backgroundColor: client.color }} />{client.code}</span></th>)}</tr></thead>
+              <tbody>{slots.map((slot) => <tr key={slot}><th className={styles.timeCell}>{slotRange(slot)}</th>{clients.map((client) => {
+                const nap = napKeys.has(`${client.id}|${slot}`);
+                const pairedStaffId = nap ? assignedStaffForNap(client.id, slot) : null;
+                const pairedStaff = staff.find((member) => member.id === pairedStaffId);
+                return <td key={client.id}><label className={styles.napCell} style={{ backgroundColor: nap ? "#dff3ef" : client.color }}>
+                  <input type="checkbox" checked={nap} onChange={(event) => setClientNap(client.id, slot, event.target.checked)} />
+                  <span>{nap ? `Nap${pairedStaff ? ` · ${pairedStaff.name.split(" ")[0]} break` : ""}` : "Nap?"}</span>
+                </label></td>;
+              })}</tr>)}</tbody>
+            </table> : <table className={styles.grid}>
               <thead>
                 <tr>
                   <th className={styles.timeHeader}>Time</th>
@@ -445,13 +488,15 @@ export function TemplateEditorModal({
                       const assignment = assignmentByCell.get(
                         `${member.id}|${slot}`
                       );
+                      const pairedNap = clientNapSlots.find((nap) => nap.startTime === slot && assignedStaffForNap(nap.clientId, slot) === member.id);
+                      const napPreview = pairedNap && !assignment ? { assignmentType: "BREAK_NAP", clientId: pairedNap.clientId } : null;
                       return (
                         <td key={member.id}>
                           <select
-                            value={assignmentValue(assignment)}
+                            value={napPreview ? "TYPE:BREAK_NAP" : assignmentValue(assignment)}
                             style={{
                               background: cellBackground(
-                                assignment,
+                                assignment ?? (napPreview ? { startTime: slot, endTime: addMinutes(slot, 30), staffId: member.id, clientId: pairedNap?.clientId ?? null, assignmentType: "BREAK_NAP", locked: false } : undefined),
                                 clientsById
                               ),
                             }}
@@ -492,7 +537,7 @@ export function TemplateEditorModal({
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table>}
           </div>
 
           <div className={styles.message}>{message}</div>
