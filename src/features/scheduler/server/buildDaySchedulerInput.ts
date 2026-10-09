@@ -1042,10 +1042,6 @@ export async function buildDaySchedulerInput(
   // Its saved reference cells outrank automatic weekday-template selection
   // on the next Generate Day run. Otherwise generation may silently choose a
   // different Thursday template and discard what the manager just applied.
-  const appliedTemplateAssignments = existingAssignments.filter(
-    (assignment) => assignment.source === "TEMPLATE"
-  );
-  const hasAppliedTemplate = appliedTemplateAssignments.length > 0;
 
   // Saved workbook templates are the ONLY automatic exact references.
   // Never reconstruct "last week" from the prior MongoDB schedule: old staff
@@ -1059,7 +1055,7 @@ export async function buildDaySchedulerInput(
     template.sourceType === "HISTORICAL_WORKBOOK" &&
     String(template.sourceDate ?? "") === priorWorkbookDate.toISOString().slice(0, 10)
   ) ?? null;
-  const orderedExactTemplates = hasAppliedTemplate ? [] :
+  const orderedExactTemplates =
     [primaryExactTemplate, previousWeekWorkbookTemplate ?? configuredSecond]
       .filter((item): item is DatabaseRecord => Boolean(item))
       .filter((item,index,array)=>array.findIndex(candidate=>String(candidate._id)===String(item._id))===index);
