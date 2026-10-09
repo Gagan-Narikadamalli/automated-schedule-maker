@@ -24,6 +24,7 @@ import { Client } from "@/models/Client";
 import { ScheduleAssignment } from "@/models/ScheduleAssignment";
 import { ScheduleTemplate } from "@/models/ScheduleTemplate";
 import { AppliedScheduleTemplate } from "@/models/AppliedScheduleTemplate";
+import { WeekdayTemplatePreference } from "@/models/WeekdayTemplatePreference";
 import { SchedulingRules } from "@/models/SchedulingRules";
 import { SpeechSession } from "@/models/SpeechSession";
 import { Staff } from "@/models/Staff";
@@ -1016,6 +1017,14 @@ export async function buildDaySchedulerInput(
     assignmentDocuments
   );
 
+  const weekdayPreference = await WeekdayTemplatePreference.findOne({ locationId, dayOfWeek }).lean() as
+    { firstTemplateId?: unknown; secondTemplateId?: unknown; previousWeekFirst?: boolean } | null;
+  const chooseConfiguredTemplate = (id: unknown): DatabaseRecord | null =>
+    id ? templateDocuments.find((item) => String(item._id) === String(id) && item.active !== false && item.learningOnly !== true) ?? null : null;
+  const configuredFirst = chooseConfiguredTemplate(weekdayPreference?.firstTemplateId);
+  const configuredSecond = chooseConfiguredTemplate(weekdayPreference?.secondTemplateId);
+  const usePreviousFirst = weekdayPreference?.previousWeekFirst !== false;
+
   const explicitChoice = await AppliedScheduleTemplate.findOne({ locationId, date }).select("templateId").lean() as
     { templateId?: unknown } | null;
   const explicitTemplate = explicitChoice?.templateId
@@ -1035,20 +1044,16 @@ export async function buildDaySchedulerInput(
   );
   const hasAppliedTemplate = appliedTemplateAssignments.length > 0;
 
-  const templateReferences = !hasAppliedTemplate && primaryExactTemplate
-    ? mapReferenceAssignments(
-        primaryExactTemplate.assignments,
-        "TEMPLATE",
-        staff,
-        clients,
-        `Primary exact reference from weekday template ${String(
-          primaryExactTemplate.name ?? ""
-        )}.`
-      ).map((reference) => ({
-        ...reference,
-        id: `template-primary-${reference.id}`,
-      }))
-    : [];
+  // Two ordered template layers claim still-empty blocks, never overwriting previous layers.
+  const orderedExactTemplates = hasAppliedTemplate ? [] :
+    [configuredFirst ?? primaryExactTemplate, configuredSecond]
+      .filter((item): item is DatabaseRecord => Boolean(item))
+      .filter((item,index,array)=>array.findIndex(candidate=>String(candidate._id)===String(item._id))===index);
+  const templateReferences = orderedExactTemplates.flatMap((template,index) =>
+    mapReferenceAssignments(template.assignments, usePreviousFirst ? "TEMPLATE" : "COPIED", staff, clients,
+      `Priority ${index + 1} weekday template: ${String(template.name ?? "")}.`
+    ).map(reference => ({...reference,id:`configured-${index}-${reference.id}`}))
+  );
 
   const historicalReferenceDates = [
     ...new Set(
@@ -1076,7 +1081,7 @@ export async function buildDaySchedulerInput(
     extendedRules.autoUsePreviousWeekdaySchedule
       ? mapReferenceAssignments(
           immediatePreviousWeekdayAssignments,
-          "COPIED",
+          usePreviousFirst ? "COPIED" : "TEMPLATE",
           staff,
           clients,
           `Primary exact reference from the immediately previous ${dayOfWeek.toLowerCase()} schedule (${immediatePreviousWeekdayDate ?? "none"}).`
@@ -1104,8 +1109,8 @@ export async function buildDaySchedulerInput(
       ),
       // Exact reuse order is intentional: last week's same weekday first,
       // then this week's selected weekday template, then normal rules.
-      ...previousScheduleReferences,
-      ...templateReferences,
+      ...(usePreviousFirst ? previousScheduleReferences : templateReferences),
+      ...(usePreviousFirst ? templateReferences : previousScheduleReferences),
     ],
     callOutStaffIds: fullDayCallOutStaffIds,
     rules: {
