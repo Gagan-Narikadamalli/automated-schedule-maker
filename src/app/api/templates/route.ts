@@ -393,12 +393,22 @@ export async function POST(request: Request) {
             return result;
           }
 
+          const normalizedAssignmentType =
+            assignmentType === "BREAK_NAP" ||
+            assignmentType === "BREAK_SPEECH" ||
+            assignmentType === "NAP"
+              ? "BREAK"
+              : assignmentType;
+
           result.push({
             startTime: String(assignment.startTime),
             endTime: String(assignment.endTime),
             staffId,
-            clientId,
-            assignmentType,
+            clientId:
+              normalizedAssignmentType === "CLIENT_1_TO_1"
+                ? clientId
+                : null,
+            assignmentType: normalizedAssignmentType,
             locked: false,
           });
           return result;
