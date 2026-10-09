@@ -269,14 +269,38 @@ function buildPreferredContinuousPairingPlan(
     requirement.client.maxConsecutiveBlocksWithSameStaff > 0
       ? requirement.client.maxConsecutiveBlocksWithSameStaff
       : Number.POSITIVE_INFINITY;
+  const absoluteMaximumBlocks = Math.min(globalMaximumBlocks, clientMaximumBlocks);
+  const preferredFourHourBlocks = Math.max(
+    Math.floor(240 / input.rules.slotLengthMinutes), 1
+  );
+  const firstPairMinutes = startMinutes - priorBlocks * input.rules.slotLengthMinutes;
+  const afterFourHours = minutesToTime(firstPairMinutes + 240);
+  const lastStaffSlot = [...staffMember.availableSlots].sort().at(-1);
+  // Extend an otherwise uninterrupted four-hour pairing only if exactly
+  // one more hour of this staff member's shift remains, both final slots
+  // are required by the same client, and the configured limit permits it.
+  const finalHourSlots = [
+    afterFourHours,
+    minutesToTime(firstPairMinutes + 240 + input.rules.slotLengthMinutes),
+  ];
+  const closesAtEndOfFifthHour = lastStaffSlot ===
+    minutesToTime(firstPairMinutes + 300 - input.rules.slotLengthMinutes);
+  const canCompleteFinalHour =
+    input.rules.slotLengthMinutes === 30 &&
+    absoluteMaximumBlocks >= preferredFourHourBlocks + 2 &&
+    closesAtEndOfFifthHour &&
+    finalHourSlots.every((slot) =>
+      staffMember.availableSlots.includes(slot) &&
+      requirement.client.requiredSlots.includes(slot)
+    );
   const maximumBlocks = Math.min(
-    globalMaximumBlocks,
-    clientMaximumBlocks
+    absoluteMaximumBlocks,
+    canCompleteFinalHour ? preferredFourHourBlocks + 2 : preferredFourHourBlocks
   );
 
   // Once a new staff/client session starts, fill as much of that client's
   // uninterrupted attendance segment as safely possible (up to the clinic's
-  // four-hour maximum). Nap, Speech, staff availability, protected cells, or
+  // preferred four-hour block (with a final-hour extension where valid). Nap, Speech, staff availability, protected cells, or
   // another hard constraint naturally stop the run. This makes the schedule
   // visually readable as long blocks instead of re-solving the pairing every
   // 30 minutes.
