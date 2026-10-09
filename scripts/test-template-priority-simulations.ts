@@ -508,6 +508,35 @@ assert.ok(
   "Normal scheduler rules must cover the client when neither reusable reference is feasible."
 );
 
+
+// Two saved templates of equal source priority are processed in their declared
+// order; the second must never overwrite the first at an already claimed slot.
+const firstLayer = [templateReference("layer-first", "previous-staff", "priority-client", SLOTS[0])];
+const secondLayer = [
+  templateReference("layer-second-conflict", "template-staff", "priority-client", SLOTS[0]),
+  templateReference("layer-second-open", "template-staff", "priority-client", SLOTS[1]),
+];
+const twoLayerResult = generateSchedule({
+  staff: [
+    staff("previous-staff", "First layer", [SLOTS[0]]),
+    staff("template-staff", "Second layer", [SLOTS[0], SLOTS[1]]),
+    staff("rule-staff", "Fallback staff", SLOTS),
+  ],
+  clients: [client("priority-client", "PRIO", [SLOTS[0], SLOTS[1]])],
+  existingAssignments: [],
+  referenceAssignments: [...firstLayer, ...secondLayer],
+  callOutStaffIds: [],
+  rules: {...RULES},
+});
+const twoLayerAssignments = twoLayerResult.assignments.filter(a=>a.assignmentType==="CLIENT_1_TO_1");
+assert.equal(twoLayerAssignments.find(a=>a.startTime===SLOTS[0])?.staffId,"previous-staff",
+  "Second layer must not displace a successfully placed first-layer block.");
+assert.equal(twoLayerAssignments.find(a=>a.startTime===SLOTS[1])?.staffId,"template-staff",
+  "Second layer must fill available client/staff cells.");
+assert.equal(twoLayerResult.metrics.coveragePercent,100);
+assert.equal(new Set(twoLayerAssignments.map(a=>a.clientId+"|"+a.startTime)).size,twoLayerAssignments.length,
+  "Layered templates may not double-book clients.");
+
 const allReports = [
   ...reports,
   ...datedReports,
