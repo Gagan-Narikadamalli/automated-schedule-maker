@@ -206,24 +206,11 @@ function countReferenceBreaks(
 function createBreakAssignment(
   staffMember: SchedulerStaff,
   startTime: string,
-  fixedEvent: FixedEventCandidate | null
+  _fixedEvent: FixedEventCandidate | null
 ): SchedulerAssignment {
-  if (fixedEvent) {
-    return {
-      id: `break-${staffMember.id}-${startTime}`,
-      staffId: staffMember.id,
-      clientId: fixedEvent.client.id,
-      startTime,
-      assignmentType: fixedEvent.assignmentType,
-      source: "AUTO",
-      locked: true,
-      note:
-        fixedEvent.assignmentType === "BREAK_NAP"
-          ? `Break combined with ${fixedEvent.client.displayCode} nap supervision.`
-          : `Break combined with ${fixedEvent.client.displayCode} speech supervision.`,
-    };
-  }
-
+  // Automatic generation only creates a plain staff BREAK. Nap and other
+  // client events are managed separately in Manual mode and must not be
+  // encoded into the staff break record.
   return {
     id: `break-${staffMember.id}-${startTime}`,
     staffId: staffMember.id,
@@ -231,7 +218,7 @@ function createBreakAssignment(
     assignmentType: "BREAK",
     source: "AUTO",
     locked: true,
-    note: "Automatically reserved staff break after client and nap coverage was placed.",
+    note: "Automatically reserved staff break.",
   };
 }
 
