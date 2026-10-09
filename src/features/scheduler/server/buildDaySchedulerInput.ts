@@ -23,6 +23,7 @@ import { applyAttendanceWindow, type AttendanceWindow } from "@/features/schedul
 import { Client } from "@/models/Client";
 import { ScheduleAssignment } from "@/models/ScheduleAssignment";
 import { ScheduleTemplate } from "@/models/ScheduleTemplate";
+import { AppliedScheduleTemplate } from "@/models/AppliedScheduleTemplate";
 import { SchedulingRules } from "@/models/SchedulingRules";
 import { SpeechSession } from "@/models/SpeechSession";
 import { Staff } from "@/models/Staff";
@@ -1011,9 +1012,13 @@ export async function buildDaySchedulerInput(
     assignmentDocuments
   );
 
-  const primaryExactTemplate = extendedRules.autoUseWeekdayTemplate
-    ? selectBestWeekdayTemplate(templateDocuments, staff, clients)
+  const explicitChoice = await AppliedScheduleTemplate.findOne({ locationId, date }).select("templateId").lean() as
+    { templateId?: unknown } | null;
+  const explicitTemplate = explicitChoice
+    ? templateDocuments.find((template) => String(template._id) === String(explicitChoice.templateId))
     : null;
+  const primaryExactTemplate = explicitTemplate ??
+    (extendedRules.autoUseWeekdayTemplate ? selectBestWeekdayTemplate(templateDocuments, staff, clients) : null);
 
   // Applying a template to a specific date is an explicit manager choice.
   // Its saved reference cells outrank automatic weekday-template selection
