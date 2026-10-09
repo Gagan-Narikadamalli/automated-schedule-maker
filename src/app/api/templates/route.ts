@@ -446,16 +446,29 @@ export async function POST(request: Request) {
       }
 
       assignments = (sourceAssignments as unknown as PlainRecord[]).map(
-        (assignment) => ({
-          startTime: String(assignment.startTime),
-          endTime: String(assignment.endTime),
-          staffId: assignment.staffId,
-          clientId: assignment.clientId ?? null,
-          assignmentType: String(assignment.assignmentType),
-          locked:
-            Boolean(assignment.locked) ||
-            Boolean(assignment.manuallyOverridden),
-        })
+        (assignment) => {
+          const originalType = String(assignment.assignmentType);
+          const normalizedAssignmentType =
+            originalType === "BREAK_NAP" ||
+            originalType === "BREAK_SPEECH" ||
+            originalType === "NAP"
+              ? "BREAK"
+              : originalType;
+
+          return {
+            startTime: String(assignment.startTime),
+            endTime: String(assignment.endTime),
+            staffId: assignment.staffId,
+            clientId:
+              normalizedAssignmentType === "CLIENT_1_TO_1"
+                ? assignment.clientId ?? null
+                : null,
+            assignmentType: normalizedAssignmentType,
+            locked:
+              Boolean(assignment.locked) ||
+              Boolean(assignment.manuallyOverridden),
+          };
+        }
       );
     }
 
