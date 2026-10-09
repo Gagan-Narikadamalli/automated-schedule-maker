@@ -323,6 +323,13 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
+      regenerationSummary: {
+        changed: persistence.changedCount,
+        unchanged: persistence.unchangedCount,
+        added: persistence.addedCount,
+        removed: persistence.removedStaleCount,
+        protected: protectedAssignments.length,
+      },
       date,
       locationId,
       completeCoverage,
