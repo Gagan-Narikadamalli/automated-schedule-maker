@@ -24,6 +24,7 @@ import { ClientAttendanceException } from "@/models/ClientAttendanceException";
 import { NapSession } from "@/models/NapSession";
 import { SpeechSession } from "@/models/SpeechSession";
 import { Staff } from "@/models/Staff";
+import { ScheduleTemplate } from "@/models/ScheduleTemplate";
 import { Team } from "@/models/Team";
 
 import { matchEntityReference } from "./entityReference";
@@ -983,6 +984,64 @@ export function createSchedulerWebsiteTools(context: SchedulerAiContext) {
         "Update clinic-wide automatic scheduler rules and priorities such as break window/eligibility, weekly hour ranges, client/staff minimum and maximum continuous pairing duration, same-day pair reuse, handoff reduction, staff schedule compactness, Minimal Fix protection behavior, rotation/continuity priorities, schedule hours, role coverage priorities, historical/template preferences, and supervision target. Only send fields the user actually wants changed.",
       inputSchema: rulesSchema,
       execute: async (changes) => invokeJson(updateSchedulingRules, "PUT", { locationId, ...changes }),
+    }),
+
+    analyze_workbook_patterns: tool({
+      description: "Analyze mapped historical Excel workbook schedules saved as reusable templates. Returns recurring client-staff pairings, nap-linked break frequencies, and long contiguous coverage patterns per weekday. Use this BEFORE proposing a new AI-inferred weekday template. This is independent of the Native AI optimization rules and does not edit live schedules. If no imported workbook template exists, tell the user to upload a workbook.",
+      inputSchema: jsonSchema<{ dayOfWeek?: string }>({
+        type: "object",
+        properties: { dayOfWeek: { type: "string", enum: ["MONDAY","TUESDAY","WEDNESDAY","THURSDAY","FRIDAY","SATURDAY","SUNDAY"] } },
+        additionalProperties: false,
+      }),
+      execute: async ({ dayOfWeek }) => {
+        await connectToDatabase();
+        const documents = await ScheduleTemplate.find({
+          locationId, active: true,
+          sourceType: "HISTORICAL_WORKBOOK",
+          ...(dayOfWeek ? { dayOfWeek } : {}),
+        }).sort({ updatedAt: -1 }).limit(60).lean() as unknown as JsonRecord[];
+        if (!documents.length) return {
+          ok: true, workbookTemplates: 0, patterns: [],
+          message: "No mapped Excel workbook schedule is saved for this clinic/weekday. Upload the workbook through Schedule Templates first.",
+          changed: false,
+        };
+        const [staffRows, clientRows] = await Promise.all([
+          Staff.find({ locationId }).select("_id fullName role active").lean() as Promise<JsonRecord[]>,
+          Client.find({ locationId }).select("_id displayCode active").lean() as Promise<JsonRecord[]>,
+        ]);
+        const staffById = new Map(staffRows.map(row => [String(row._id), row]));
+        const clientById = new Map(clientRows.map(row => [String(row._id), row]));
+        const matches = new Map<string, { dayOfWeek: string; staffId: string; staffName: string; staffRole: string; clientId: string; clientCode: string; starts: string[]; examples: number }>();
+        const breakCounts = new Map<string, number>();
+        const templates = documents.map(doc => {
+          const datePairs = new Set<string>();
+          for (const entry of (doc.assignments ?? []) as JsonRecord[]) {
+            const staffId = String(entry.staffId ?? "");
+            const clientId = String(entry.clientId ?? "");
+            const staffMember = staffById.get(staffId);
+            const client = clientById.get(clientId);
+            const day = String(doc.dayOfWeek);
+            if (entry.assignmentType === "CLIENT_1_TO_1" && staffMember?.active && client?.active) {
+              const key = [day,staffId,clientId].join("|");
+              const record = matches.get(key) ?? {dayOfWeek:day,staffId,staffName:String(staffMember.fullName),staffRole:String(staffMember.role),clientId,clientCode:String(client.displayCode),starts:[],examples:0};
+              record.starts.push(String(entry.startTime));
+              matches.set(key,record);
+              datePairs.add(key);
+            }
+            if (["BREAK","BREAK_NAP"].includes(String(entry.assignmentType))) {
+              const key=[day,staffId,String(entry.assignmentType),String(entry.startTime)].join("|");
+              breakCounts.set(key,(breakCounts.get(key)??0)+1);
+            }
+          }
+          for (const key of datePairs) { const pair=matches.get(key); if(pair) pair.examples++; }
+          return {name:String(doc.name),dayOfWeek:String(doc.dayOfWeek),sourceName:String(doc.sourceName??""),assignmentCount:(doc.assignments??[]).length};
+        });
+        const patterns=[...matches.values()].sort((a,b)=>b.examples-a.examples||b.starts.length-a.starts.length).slice(0,80)
+          .map(p=>({...p, slotsObserved:p.starts.length, frequentSlots:[...new Set(p.starts)].sort(), starts:undefined}));
+        return {ok:true, changed:false, workbookTemplates:templates.length, templates, patterns,
+          breakPatterns:[...breakCounts.entries()].sort((a,b)=>b[1]-a[1]).slice(0,50).map(([key,count])=>({key,count})),
+          guidance:"These are observed preferences, not a safe or complete schedule. Infer new draft block arrangements, account for the target day's call-outs and attendance, and use validated write tools before claiming the live schedule changed."};
+      },
     }),
 
     manage_schedule_template: tool({
