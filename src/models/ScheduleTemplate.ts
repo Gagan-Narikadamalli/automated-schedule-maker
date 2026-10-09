@@ -145,6 +145,13 @@ const ScheduleTemplateSchema = new Schema(
       ],
       required: true,
     },
+    clientNapSlots: {
+      type: [{
+        clientId: { type: Schema.Types.ObjectId, ref: "Client", required: true },
+        startTime: { type: String, required: true },
+      }],
+      default: [],
+    },
     assignments: {
       type: [TemplateAssignmentSchema],
       default: [],
