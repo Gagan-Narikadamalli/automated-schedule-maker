@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ManagementModal } from "@/components/ManagementModal";
 
 import styles from "./TemplateEditorModal.module.css";
-import { synchronizeTemplateNaps } from "./templateNapLinks";
+import { synchronizeTemplateNaps, pairedStaff } from "./templateNapLinks";
 
 type TemplateAssignment = {
   id?: string;
@@ -220,43 +220,15 @@ export function TemplateEditorModal({
   }, [assignments, clientNapSlots]);
 
   const slots = useMemo(() => {
-    const fromAssignments = [
-      ...new Set([...assignments.map((assignment) => assignment.startTime), ...clientNapSlots.map((nap) => nap.startTime)]),
-    ].sort();
-
-    if (fromAssignments.length > 0) {
-      const first = fromAssignments[0];
-      const last = fromAssignments[fromAssignments.length - 1];
-      const values: string[] = [];
-      let current = first;
-
-      while (current <= last && values.length < 40) {
-        values.push(current);
-        current = addMinutes(current, 30);
-      }
-      return values;
-    }
-
-    const defaults: string[] = [];
-    let current = "08:00";
-    while (current < "18:00") {
-      defaults.push(current);
-      current = addMinutes(current, 30);
-    }
-    return defaults;
-  }, [assignments, clientNapSlots]);
+    const values: string[] = [];
+    for (let time = "08:00"; time < "17:00"; time = addMinutes(time, 30)) values.push(time);
+    return values;
+  }, []);
 
   const napKeys = useMemo(() => new Set(clientNapSlots.map((nap) => `${nap.clientId}|${nap.startTime}`)), [clientNapSlots]);
 
   function assignedStaffForNap(clientId: string, slot: string): string | null {
-    // Prefer the employee working with the client immediately before or after nap.
-    const adjacent = [addMinutes(slot, -30), addMinutes(slot, 30)];
-    for (const time of adjacent) {
-      const paired = assignments.find((item) => item.clientId === clientId &&
-        item.assignmentType === "CLIENT_1_TO_1" && item.startTime === time);
-      if (paired) return paired.staffId;
-    }
-    return null;
+    return pairedStaff(assignments, clientId, slot, clientNapSlots);
   }
 
   function setClientNap(clientId: string, startTime: string, enabled: boolean) {
@@ -285,6 +257,10 @@ export function TemplateEditorModal({
     startTime: string,
     value: string
   ) {
+    if (value.startsWith("NAP_CLIENT:")) {
+      const clientId = value.slice("NAP_CLIENT:".length);
+      setClientNapSlots((current) => [...current.filter((item) => !(item.clientId === clientId && item.startTime === startTime)), { clientId, startTime }]);
+    }
     setAssignments((current) => {
       const next = current.filter(
         (assignment) =>
@@ -313,7 +289,6 @@ export function TemplateEditorModal({
 
       if (value.startsWith("NAP_CLIENT:")) {
         const clientId = value.slice("NAP_CLIENT:".length);
-        setClientNapSlots((current) => [...current.filter((item) => !(item.clientId === clientId && item.startTime === startTime)), { clientId, startTime }]);
         return [...next, { startTime, endTime: addMinutes(startTime, 30), staffId, clientId, assignmentType: "BREAK_NAP", locked: false }];
       }
 
