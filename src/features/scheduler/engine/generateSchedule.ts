@@ -945,6 +945,17 @@ function findBestStaffMember(
         return leftReservedForOtherTemplate ? 1 : -1;
       }
 
+      const previousAssignment = previousClientAssignment(
+        requirement,
+        assignments,
+        input.rules.slotLengthMinutes
+      );
+      if (previousAssignment) {
+        const leftContinues = left.staffMember.id === previousAssignment.staffId;
+        const rightContinues = right.staffMember.id === previousAssignment.staffId;
+        if (leftContinues !== rightContinues) return leftContinues ? -1 : 1;
+      }
+
       const roleDifference =
         coverageRoleTier(left.staffMember) -
         coverageRoleTier(right.staffMember);
@@ -972,26 +983,6 @@ function findBestStaffMember(
       // displaced by a historical lower-priority relief-role assignment.
       if (leftPreviousWeekdayStrength !== rightPreviousWeekdayStrength) {
         return rightPreviousWeekdayStrength - leftPreviousWeekdayStrength;
-      }
-
-      const previousAssignment = previousClientAssignment(
-        requirement,
-        assignments,
-        input.rules.slotLengthMinutes
-      );
-      const isRotationClient =
-        requirement.client.supportLevel === "ROTATION" ||
-        requirement.client.supportLevel === "HIGH_SUPPORT";
-
-      if (previousAssignment && !isRotationClient) {
-        const leftContinues =
-          left.staffMember.id === previousAssignment.staffId;
-        const rightContinues =
-          right.staffMember.id === previousAssignment.staffId;
-
-        if (leftContinues !== rightContinues) {
-          return leftContinues ? -1 : 1;
-        }
       }
 
       if (right.score !== left.score) {
