@@ -279,7 +279,7 @@ export function TemplateManager() {
       const savedTemplateId = data.template?.id ?? null;
       setName("");
       await loadTemplates();
-      setMessage(
+      notify("success",
         `Exact ${displayDay(
           getDayOfWeekFromDate(templateSourceDate)
         )} template captured from ${templateSourceDate}. Edit the template in the isolated template workspace; the live schedule will not be changed.`
@@ -426,7 +426,7 @@ export function TemplateManager() {
           ? ` ${skippedStaff} unmatched staff header(s) and ${skippedClients} unmatched client code(s) were skipped; review the mapping shown above.`
           : "";
 
-      setMessage(
+      notify("success",
         `Exact template saved from "${selectedWorkbookSheet}" with ${inspection?.assignmentCount ?? data.template?.assignmentCount ?? 0} mapped blocks.${warning}`
       );
     } catch (error) {
@@ -489,7 +489,7 @@ export function TemplateManager() {
       await loadTemplates(locationId);
       notify("success", "Selected templates deleted successfully. Existing schedules were not changed.");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Templates could not be deleted.");
+      notify("error", error instanceof Error ? error.message : "Templates could not be deleted.");
     } finally {
       setWorking(false);
     }
@@ -533,7 +533,7 @@ export function TemplateManager() {
         ? ` ${data.warnings.length} item(s) were skipped during revalidation.`
         : "";
 
-      setMessage(
+      notify("success",
         `${data.appliedCount ?? 0} template blocks applied to ${applyTargetDate}.${warningText}`
       );
       setApplyTemplateTarget(null);
@@ -577,7 +577,7 @@ export function TemplateManager() {
         ? ` ${data.warnings.length} block(s) were skipped because the target date has different constraints.`
         : "";
 
-      setMessage(
+      notify("success",
         `${data.copiedCount ?? 0} schedule blocks copied to ${copyTargetDate}.${warningText}`
       );
     } catch (error) {
