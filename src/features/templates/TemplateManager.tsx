@@ -74,6 +74,11 @@ type WorkbookInspectResponse = {
   error?: string;
 };
 
+type WeekdayPreference = { dayOfWeek: string; firstTemplateId: string; secondTemplateId: string; previousWeekFirst: boolean };
+const DEFAULT_WEEKDAY_PREFERENCE = (dayOfWeek: string): WeekdayPreference => ({
+  dayOfWeek, firstTemplateId: "", secondTemplateId: "", previousWeekFirst: true,
+});
+
 const DAYS = [
   "MONDAY",
   "TUESDAY",
@@ -106,6 +111,8 @@ export function TemplateManager() {
   const [locationId, setLocationId] = useState("");
   const [templates, setTemplates] = useState<TemplateRecord[]>([]);
   const [filterDay, setFilterDay] = useState("ALL");
+  const [weekdayPreferences, setWeekdayPreferences] = useState<Record<string, WeekdayPreference>>({});
+  const [savingPreferenceDay, setSavingPreferenceDay] = useState("");
   const [selectedTemplateIds, setSelectedTemplateIds] = useState<string[]>([]);
   const [deleteCandidates, setDeleteCandidates] = useState<string[]>([]);
   const [name, setName] = useState("");
@@ -181,6 +188,7 @@ export function TemplateManager() {
   useEffect(() => {
     if (locationId) {
       void loadTemplates(locationId);
+      void loadWeekdayPreferences(locationId);
     }
   }, [locationId]);
 
@@ -195,6 +203,40 @@ export function TemplateManager() {
     setWorkbookName("");
     setWorkbookSourceDate("");
   }, [locationId]);
+
+  async function loadWeekdayPreferences(requestedLocationId: string) {
+    try {
+      const response = await fetch(`/api/templates/preferences?locationId=${encodeURIComponent(requestedLocationId)}`, {cache:"no-store"});
+      const data = await response.json() as {preferences?: WeekdayPreference[];error?:string};
+      if(!response.ok)throw new Error(data.error || "Could not load weekday preferences.");
+      setWeekdayPreferences(Object.fromEntries((data.preferences ?? []).map(item=>[item.dayOfWeek,item])));
+    } catch(error) {
+      notify("error",error instanceof Error ? error.message : "Could not load weekday preferences.");
+    }
+  }
+  function updateWeekdayPreference(day: string, updates: Partial<WeekdayPreference>) {
+    setWeekdayPreferences(current => ({
+      ...current,
+      [day]: {...DEFAULT_WEEKDAY_PREFERENCE(day), ...current[day], ...updates},
+    }));
+  }
+  async function saveWeekdayPreference(day: string) {
+    try {
+      setSavingPreferenceDay(day);
+      const preference = weekdayPreferences[day] ?? DEFAULT_WEEKDAY_PREFERENCE(day);
+      const response = await fetch("/api/templates/preferences", {
+        method:"PUT",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({locationId,...preference,dayOfWeek:day}),
+      });
+      const data=await response.json() as {success?:boolean;error?:string};
+      if(!response.ok)throw new Error(data.error || "Could not save priority.");
+      notify("success",`${displayDay(day)} first/second template order saved. The next Auto Generate Day uses this priority.`);
+    } catch(error) {
+      notify("error",error instanceof Error ? error.message : "Could not save priority.");
+    } finally {
+      setSavingPreferenceDay("");
+    }
+  }
 
   async function loadLocations() {
     try {
@@ -620,6 +662,40 @@ export function TemplateManager() {
             </select>
           </label>
         </div>
+      </section>
+
+      <section className="section-card" id="weekday-template-priority">
+        <h2>Auto Generate Day — Weekday Template Priority</h2>
+        <p className="helper-text">Choose two saved templates for each weekday and their exact placement order. The first fills eligible empty blocks, then the second fills only the remaining empty blocks. By default, the actual previous week's same-weekday schedule takes priority over both. Change the selector to put the saved templates first. Staff/client call-outs, attendance, and hard constraints remain mandatory.</p>
+        {DAYS.slice(0,5).map(day => {
+          const preference = weekdayPreferences[day] ?? DEFAULT_WEEKDAY_PREFERENCE(day);
+          const choices = templates.filter(template => template.dayOfWeek === day && !template.learningOnly && template.assignmentCount > 0);
+          return (
+            <div className="form-grid" key={day} style={{marginBottom:16,alignItems:"end"}}>
+              <label className="form-field"><span>{displayDay(day)} — priority 1 template</span>
+                <select value={preference.firstTemplateId} onChange={event=>updateWeekdayPreference(day,{firstTemplateId:event.target.value})}>
+                  <option value="">Automatic best weekday template</option>
+                  {choices.map(template=><option value={template.id} key={template.id}>{template.name}</option>)}
+                </select>
+              </label>
+              <label className="form-field"><span>Priority 2 template (fill empty slots)</span>
+                <select value={preference.secondTemplateId} onChange={event=>updateWeekdayPreference(day,{secondTemplateId:event.target.value})}>
+                  <option value="">None</option>
+                  {choices.map(template=><option value={template.id} key={template.id}>{template.name}</option>)}
+                </select>
+              </label>
+              <label className="form-field"><span>First source to fill blocks</span>
+                <select value={preference.previousWeekFirst ? "PREVIOUS" : "SAVED"} onChange={event=>updateWeekdayPreference(day,{previousWeekFirst:event.target.value==="PREVIOUS"})}>
+                  <option value="PREVIOUS">Previous week's actual schedule first</option>
+                  <option value="SAVED">Saved templates first</option>
+                </select>
+              </label>
+              <button className="button button-primary" type="button" disabled={working||savingPreferenceDay!==""||!locationId||preference.firstTemplateId!==""&&preference.firstTemplateId===preference.secondTemplateId} onClick={()=>void saveWeekdayPreference(day)}>
+                {savingPreferenceDay===day?"Saving...":"Save priority"}
+              </button>
+            </div>
+          );
+        })}
       </section>
 
       <section className="section-card" id="create-schedule-template">
