@@ -536,7 +536,7 @@ export function TemplateManager() {
       }
 
       const warningText = data.warnings?.length
-        ? ` ${data.warnings.length} item(s) were skipped during revalidation.`
+        ? ` ${data.warnings.length} block(s) skipped: ${data.warnings.slice(0, 3).join(" | ")}${data.warnings.length > 3 ? " (additional conflicts omitted)" : ""}`
         : "";
 
       notify("success",
@@ -544,9 +544,7 @@ export function TemplateManager() {
       );
       setApplyTemplateTarget(null);
     } catch (error) {
-      setMessage(
-        error instanceof Error ? error.message : "Template could not be applied."
-      );
+      notify("error", error instanceof Error ? error.message : "Template could not be applied.");
     } finally {
       setWorking(false);
     }
