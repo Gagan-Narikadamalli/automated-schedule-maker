@@ -1017,7 +1017,7 @@ export async function buildDaySchedulerInput(
   const explicitTemplate = explicitChoice?.templateId
     ? await ScheduleTemplate.findOne({
         _id: explicitChoice.templateId, locationId, active: true, learningOnly: { $ne: true },
-      }).lean()
+      }).lean() as unknown as DatabaseRecord | null
     : null;
   const primaryExactTemplate = explicitTemplate ??
     (extendedRules.autoUseWeekdayTemplate ? selectBestWeekdayTemplate(templateDocuments, staff, clients) : null);
