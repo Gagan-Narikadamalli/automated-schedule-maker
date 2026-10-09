@@ -1023,7 +1023,6 @@ export async function buildDaySchedulerInput(
     id ? templateDocuments.find((item) => String(item._id) === String(id) && item.active !== false && item.learningOnly !== true) ?? null : null;
   const configuredFirst = chooseConfiguredTemplate(weekdayPreference?.firstTemplateId);
   const configuredSecond = chooseConfiguredTemplate(weekdayPreference?.secondTemplateId);
-  const usePreviousFirst = weekdayPreference?.previousWeekFirst !== false;
 
   const explicitChoice = await AppliedScheduleTemplate.findOne({ locationId, date }).select("templateId").lean() as
     { templateId?: unknown } | null;
@@ -1044,14 +1043,17 @@ export async function buildDaySchedulerInput(
   );
   const hasAppliedTemplate = appliedTemplateAssignments.length > 0;
 
-  // Two ordered template layers claim still-empty blocks, never overwriting previous layers.
+  // Saved workbook templates are the ONLY automatic exact references.
+  // Never reconstruct "last week" from the prior MongoDB schedule: old staff
+  // and client ids can be stale, and that saved day may not match the workbook.
+  // Each layer only claims cells unfilled by the earlier layer.
   const orderedExactTemplates = hasAppliedTemplate ? [] :
     [configuredFirst ?? primaryExactTemplate, configuredSecond]
       .filter((item): item is DatabaseRecord => Boolean(item))
       .filter((item,index,array)=>array.findIndex(candidate=>String(candidate._id)===String(item._id))===index);
   const templateReferences = orderedExactTemplates.flatMap((template,index) =>
-    mapReferenceAssignments(template.assignments, usePreviousFirst ? "TEMPLATE" : "COPIED", staff, clients,
-      `Priority ${index + 1} weekday template: ${String(template.name ?? "")}.`
+    mapReferenceAssignments(template.assignments, "TEMPLATE", staff, clients,
+      `Priority ${index + 1} saved workbook template: ${String(template.name ?? "")}.`
     ).map(reference => ({...reference,id:`configured-${index}-${reference.id}`}))
   );
 
@@ -1062,31 +1064,9 @@ export async function buildDaySchedulerInput(
         .filter(Boolean)
     ),
   ];
-  const immediatePreviousWeekdayDate =
-    previousSameWeekdayDates[0] ?? null;
-  const immediatePreviousWeekdayAssignments =
-    immediatePreviousWeekdayDate
-      ? previousWeekdayAssignments.filter(
-          (assignment) =>
-            String(assignment.date ?? "") ===
-            immediatePreviousWeekdayDate
-        )
-      : [];
-  const latestPreviousReferenceDate =
-    extendedRules.autoUsePreviousWeekdaySchedule &&
-    immediatePreviousWeekdayAssignments.length > 0
-      ? immediatePreviousWeekdayDate
-      : null;
-  const previousScheduleReferences =
-    extendedRules.autoUsePreviousWeekdaySchedule
-      ? mapReferenceAssignments(
-          immediatePreviousWeekdayAssignments,
-          usePreviousFirst ? "COPIED" : "TEMPLATE",
-          staff,
-          clients,
-          `Primary exact reference from the immediately previous ${dayOfWeek.toLowerCase()} schedule (${immediatePreviousWeekdayDate ?? "none"}).`
-        )
-      : [];
+  // Historical dates remain visible for diagnostics, but are not scheduled
+  // as previous-week references. All matching comes from saved templates.
+  const latestPreviousReferenceDate: string | null = null;
 
   const fullDayCallOutStaffIds = [
     ...partialCallOuts.filter((record) => record.startTime <= "08:00" && record.endTime >= "17:00").map((record) => record.staffId),
@@ -1109,8 +1089,7 @@ export async function buildDaySchedulerInput(
       ),
       // Exact reuse order is intentional: last week's same weekday first,
       // then this week's selected weekday template, then normal rules.
-      ...(usePreviousFirst ? previousScheduleReferences : templateReferences),
-      ...(usePreviousFirst ? templateReferences : previousScheduleReferences),
+      ...templateReferences,
     ],
     callOutStaffIds: fullDayCallOutStaffIds,
     rules: {
