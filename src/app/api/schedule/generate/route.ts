@@ -15,6 +15,7 @@ import { placeStaffBreaksAfterCoverage } from "@/features/scheduler/engine/place
 import { calculateSchedulerReadiness } from "@/features/scheduler/engine/preflight";
 import { enrichBreakAssignmentsWithFixedEvents } from "@/features/scheduler/engine/reserveBreaks";
 import type {
+  SchedulerAssignment,
   SchedulerResult,
   SchedulerStaff,
 } from "@/features/scheduler/engine/types";
