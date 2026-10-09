@@ -49,7 +49,7 @@ export async function applyFixedNapSessions(
   // Do not infer a client's nap from an unlinked generic staff break.
   const manualNapSlots = new Map<string, Set<string>>();
   for (const assignment of input.existingAssignments) {
-    if (assignment.assignmentType !== "BREAK_NAP" || !assignment.clientId) continue;
+    if (!["BREAK_NAP", "NAP"].includes(assignment.assignmentType) || !assignment.clientId) continue;
     const slots = manualNapSlots.get(assignment.clientId) ?? new Set<string>();
     slots.add(assignment.startTime);
     manualNapSlots.set(assignment.clientId, slots);
@@ -57,11 +57,20 @@ export async function applyFixedNapSessions(
 
   const primaryTemplate = (rawTemplates as unknown as DatabaseRecord[]).find((template) => Array.isArray(template.assignments) && template.assignments.length > 0);
   const templateNapSlots = new Map<string, Set<string>>();
-  if (input.rules.autoUseWeekdayTemplate && primaryTemplate && Array.isArray(primaryTemplate.clientNapSlots)) {
-    for (const record of primaryTemplate.clientNapSlots as DatabaseRecord[]) {
-      const clientId = String(record.clientId);
-      const slot = String(record.startTime);
-      if (!/^\d{2}:\d{2}$/.test(slot)) continue;
+  if (input.rules.autoUseWeekdayTemplate && primaryTemplate) {
+    // New client-view nap cells and older imported NAP/BREAK_NAP assignment
+    // records describe the same client-specific event.
+    const templateNapRecords = [
+      ...(Array.isArray(primaryTemplate.clientNapSlots) ? primaryTemplate.clientNapSlots : []),
+      ...(Array.isArray(primaryTemplate.assignments)
+        ? (primaryTemplate.assignments as DatabaseRecord[]).filter((row) =>
+          (row.assignmentType === "NAP" || row.assignmentType === "BREAK_NAP") && Boolean(row.clientId))
+        : []),
+    ] as DatabaseRecord[];
+    for (const record of templateNapRecords) {
+      const clientId = String(record.clientId ?? "");
+      const slot = String(record.startTime ?? "");
+      if (!clientId || !/^\d{2}:\d{2}$/.test(slot)) continue;
       const slots = templateNapSlots.get(clientId) ?? new Set<string>();
       slots.add(slot);
       templateNapSlots.set(clientId, slots);
