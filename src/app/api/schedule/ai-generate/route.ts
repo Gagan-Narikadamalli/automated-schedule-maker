@@ -203,13 +203,17 @@ export async function POST(request: Request) {
         preferStaffContinuity:roster.rules.preferStaffContinuity,
         maximumClientStaffConsecutiveHours:roster.rules.maximumClientStaffConsecutiveHours,
       },
-      templates,
-      currentAssignments:deidentifiedAssignments(roster.existingAssignments),
-      referenceAssignments:deidentifiedAssignments(roster.referenceAssignments.slice(0,160)),
+      // Large literal workbook grids can overwhelm a cloud-model request.
+      // Include the applied template first and representative assignment cells.
+      templates:[...templates].sort((a,b)=>Number(b.isApplied)-Number(a.isApplied))
+        .slice(0,4).map(t=>({...t,assignments:t.assignments.slice(0,120)})),
+      currentAssignments:deidentifiedAssignments(roster.existingAssignments).slice(0,80),
+      referenceAssignments:deidentifiedAssignments(roster.referenceAssignments.slice(0,48)),
       calledOutStaff:roster.callOutStaffIds.map(id=>staffAlias.get(id)).filter(Boolean),
     };
     let aiPreferences:AiChoices={};
     let ollamaUsed=false;
+    let ollamaDiagnostic="Not requested";
     try {
       const controller=new AbortController();
       const timeout=setTimeout(()=>controller.abort(),35000);
@@ -257,12 +261,14 @@ export async function POST(request: Request) {
       }
       aiPreferences={ranking,naps,explanation:typeof proposal.explanation==="string"?proposal.explanation.slice(0,1000):undefined};
       ollamaUsed=true;
+      ollamaDiagnostic="Ollama generated accepted scheduling preferences";
     } catch(error) {
       const timedOut = error instanceof Error && (error.name === "AbortError" || error.message.includes("aborted"));
       console.warn("Website Ollama scheduling request failed",error instanceof Error?error.message:"unknown");
       // The scheduling engine can still produce a valid, auditable partial schedule
       // if Ollama is slow. Never label the fallback as an Ollama-generated plan.
       ollamaUsed=false;
+      ollamaDiagnostic=timedOut ? "Ollama request timed out after 35 seconds" : (error instanceof Error ? `Ollama request failed: ${error.message.slice(0,120)}` : "Ollama returned an invalid planning response");
       aiPreferences={explanation: timedOut
         ? "Ollama planning timed out; the website scheduling engine generated the placements."
         : "Ollama planning was unavailable; the website scheduling engine generated the placements."};
@@ -338,6 +344,7 @@ export async function POST(request: Request) {
       saved,
       regenerationSummary,
       ollamaUsed,
+      ollamaDiagnostic,
       aiPlan: aiPreferences,
       date, locationId,
       assignments: audit.problems.length === 0 ? data.assignments : [],
