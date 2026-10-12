@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { constructAiSchedule } from "../src/features/scheduler/engine/constructAiSchedule";
+import { scoreCandidate } from "../src/features/scheduler/engine/scoring";
 import { enrichBreakAssignmentsWithFixedEvents } from "../src/features/scheduler/engine/reserveBreaks";
 import { auditLinkedNapBreakRules } from "../src/features/scheduler/engine/auditLinkedNapBreakRules";
 import { pinWorkbookTemplates } from "../src/features/scheduler/engine/pinWorkbookTemplates";
@@ -174,4 +175,25 @@ check("insufficient staffing",Array.from({length:8},(_,i)=>s(i,slots())),
   assert.ok(handOffs<=40,`Too many fragmented handoffs: ${handOffs}`);
   assert.ok(shortRuns<=20,`Too many short client runs: ${shortRuns}`);
   console.log(`PASS AI contiguous client runs: handoffs=${handOffs}, short-run edges=${shortRuns}`);
+}
+
+{
+  const times=slots(8,12);
+  const staff=[{...s(1,times),teamId:"red"},{...s(2,times),teamId:"blue"}];
+  const clients=[{...c(1,times),teamId:"blue",staffRelationships:{s1:"ALLOWED" as const,s2:"PREFERRED" as const}}];
+  const rules={slotLengthMinutes:30,preferSameTeam:true,sameTeamPriority:80,preferredStaffPriority:90} as SchedulerInput["rules"];
+  const input={staff,clients,callOutStaffIds:[],rules,existingAssignments:[],referenceAssignments:[]} as SchedulerInput;
+  const ai=constructAiSchedule(input);
+  const first=ai.assignments.find(a=>a.clientId==="c1"&&a.startTime==="08:00");
+  assert.equal(first?.staffId,"s2","AI Generate must prefer the same-team preferred staff");
+  const preferred=scoreCandidate({staffMember:staff[1],client:clients[0],startTime:"08:00",
+    assignments:[],referenceAssignments:[],rules});
+  const unmatched=scoreCandidate({staffMember:staff[0],client:clients[0],startTime:"08:00",
+    assignments:[],referenceAssignments:[],rules});
+  assert.ok(preferred>unmatched,"Auto Generate Day/Week scoring must favor preferred same-team staff");
+  const restricted={...clients[0],staffRelationships:{s2:"HARD_RESTRICTION" as const}};
+  const blocked=constructAiSchedule({...input,clients:[restricted]});
+  assert.ok(!blocked.assignments.some(a=>a.clientId==="c1"&&a.staffId==="s2"),
+    "AI hard restrictions must remain enforced");
+  console.log("PASS AI and Auto Day/Week same-team preference with hard restriction");
 }
