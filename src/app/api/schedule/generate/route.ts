@@ -180,7 +180,7 @@ export async function POST(request: Request) {
       const pinned = templatePinning.pinned.find(item =>
         item.staffId === assignment.staffId && item.startTime === assignment.startTime
       );
-      return pinned ? {...assignment, assignmentType:pinned.assignmentType} : assignment;
+      return pinned ? {...assignment, assignmentType:pinned.assignmentType, clientId:pinned.clientId} : assignment;
     });
     const eventEnrichedAssignments = enrichBreakAssignmentsWithFixedEvents(
       enrichedAssignments,
