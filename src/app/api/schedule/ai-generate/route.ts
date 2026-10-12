@@ -111,7 +111,7 @@ export async function POST(request: Request) {
     }
     if (!sessionCanAccessLocation(auth.session, locationId)) return forbiddenResponse();
     const ollamaKey = process.env.OLLAMA_API_KEY?.trim();
-    const ollamaModel = (process.env.OLLAMA_SCHEDULER_MODEL || process.env.SCHEDULER_AI_MODEL)?.trim();
+    const ollamaModel = process.env.OLLAMA_SCHEDULER_MODEL?.trim() || "gpt-oss:20b";
     if (!ollamaKey || !ollamaModel) return invalid("AI Generate needs OLLAMA_API_KEY and SCHEDULER_AI_MODEL on the server.",503);
     const dayData = await buildDaySchedulerInput(locationId, date);
     // A specialized Ollama scheduling prompt operates only on pseudonymous IDs.
