@@ -105,6 +105,67 @@ export async function POST(request: Request) {
       return invalid("AI scheduler service must use HTTPS (except localhost).", 503);
     }
     const dayData = await buildDaySchedulerInput(locationId, date);
+    // Only pseudonymous schedule structure reaches Ollama; no names or database credentials.
+    // Ollama advises scheduling strategy. The independent CP-SAT solver remains responsible
+    // for assignments, and the local validator is the final authority.
+    let ollamaPlan: { priorities?: string[]; rationale?: string } | undefined;
+    let ollamaUsed = false;
+    const ollamaKey = process.env.OLLAMA_API_KEY?.trim();
+    const ollamaModel = process.env.OLLAMA_SCHEDULER_MODEL?.trim();
+    if (ollamaKey && ollamaModel) {
+      const roster = dayData.input;
+      const sanitized = {
+        date,
+        staff: roster.staff.map((staff, i) => ({
+          ref: `S${i}`, availableSlots: staff.availableSlots,
+          serviceSetting: staff.serviceSetting, role: staff.role,
+          maximumDailyHours: staff.maximumDailyHours,
+        })),
+        clients: roster.clients.map((client, i) => ({
+          ref: `C${i}`, requiredSlots: client.requiredSlots,
+          napSlots: client.napSlots, speechSlots: client.speechSlots,
+          supportLevel: client.supportLevel, serviceSetting: client.serviceSetting,
+        })),
+        absentStaffCount: roster.callOutStaffIds.length,
+      };
+      try {
+        const promptController = new AbortController();
+        const promptTimeout = setTimeout(() => promptController.abort(), 12000);
+        let aiResponse: Response;
+        try {
+          aiResponse = await fetch("https://ollama.com/api/chat", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${ollamaKey}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              model: ollamaModel, stream: false, format: "json",
+              messages: [
+                { role: "system", content: "You are a specialized staff-client scheduling planner. Review the given anonymized day. Return only JSON with keys priorities (array of at most 5 concise scheduling priorities) and rationale (short string). Prioritize complete eligible client supervision, one 30-minute staff break in the 11:00-14:00 window, 30-minute naps in provided windows, fixed speech sessions, no double booking. Do not propose unsafe or imaginary assignments. Do not output names, credentials, or code." },
+                { role: "user", content: JSON.stringify(sanitized) },
+              ],
+              options: { temperature: 0 },
+            }),
+            signal: promptController.signal, cache: "no-store",
+          });
+        } finally {
+          clearTimeout(promptTimeout);
+        }
+        if (aiResponse.ok) {
+          const output = await aiResponse.json() as { message?: { content?: string } };
+          const parsedPlan = JSON.parse(output.message?.content || "{}") as { priorities?: unknown; rationale?: unknown };
+          if (Array.isArray(parsedPlan.priorities) && typeof parsedPlan.rationale === "string") {
+            ollamaPlan = {
+              priorities: parsedPlan.priorities.filter((x): x is string => typeof x === "string").slice(0, 5).map(x => x.slice(0, 200)),
+              rationale: parsedPlan.rationale.slice(0, 1000),
+            };
+            ollamaUsed = true;
+          }
+        } else {
+          console.warn("AI Generate Ollama planning request failed", aiResponse.status);
+        }
+      } catch {
+        console.warn("AI Generate Ollama planning unavailable; continuing with deterministic optimizer");
+      }
+    }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 60000);
     let result: Response;
@@ -112,7 +173,7 @@ export async function POST(request: Request) {
       result = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-        body: JSON.stringify({ date, locationId, input: dayData.input, rules: dayData.extendedRules }),
+        body: JSON.stringify({ date, locationId, input: dayData.input, rules: dayData.extendedRules, aiPlan: ollamaPlan }),
         signal: controller.signal,
         cache: "no-store",
       });
@@ -138,6 +199,8 @@ export async function POST(request: Request) {
     return NextResponse.json({
       success: audit.problems.length === 0 && complete,
       previewOnly: true,
+      ollamaUsed,
+      aiPlan: ollamaPlan,
       date, locationId,
       assignments: audit.problems.length === 0 ? data.assignments : [],
       metrics: { requiredClientSlots: audit.required, coveredClientSlots: audit.covered,
