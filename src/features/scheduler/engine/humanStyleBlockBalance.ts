@@ -89,7 +89,8 @@ function clientRuns(
     const current = runs[runs.length - 1];
     const previous = current?.[current.length - 1];
 
-    if (previous && previous.staffId === assignment.staffId) {
+    if (previous && previous.staffId === assignment.staffId &&
+      shiftTime(previous.startTime, 30) === assignment.startTime) {
       current.push(assignment);
     } else {
       runs.push([assignment]);
@@ -162,9 +163,12 @@ function schedulePenalty(
     const isRotationClient =
       client.supportLevel === "ROTATION" ||
       client.supportLevel === "HIGH_SUPPORT";
+    // Only explicitly rotational/high-support clients require different
+    // staff. Ordinary clients should not be split purely to reach a
+    // generic "two staff per client" balancing target.
     const desiredStaff = isRotationClient
       ? Math.max(client.desiredDifferentStaffPerDay ?? preferredStaffPerClient, 1)
-      : preferredStaffPerClient;
+      : Math.max(client.desiredDifferentStaffPerDay ?? 1, 1);
 
     // Human-readable schedules avoid one-block islands and repeated handoffs.
     penalty += Math.max(runs.length - 1, 0) * 65;
@@ -203,7 +207,11 @@ function schedulePenalty(
 
     const distinctClients = staffClientIds(member.id, assignments).size;
 
-    if (distinctClients < preferredClientsPerStaff) {
+    // One continuous compatible client run is better than unnecessary
+    // switching solely to meet a default diversity count. Explicit rotation
+    // is handled at the client level above.
+    if (distinctClients < preferredClientsPerStaff &&
+      rules.preventSameStaffClientRepeatSameDay) {
       penalty +=
         (preferredClientsPerStaff - distinctClients) * 110;
     }
