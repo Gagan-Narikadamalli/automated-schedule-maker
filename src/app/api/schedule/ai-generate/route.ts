@@ -7,6 +7,7 @@ import {
   SCHEDULE_WRITE_ROLES,
 } from "@/lib/api/auth";
 import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySchedulerInput";
+import { applyHistoricalTraining } from "@/features/scheduler/server/applyHistoricalTraining";
 import { persistScheduleReplacementSafely } from "@/features/scheduler/server/persistScheduleReplacementSafely";
 import { getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
 import { connectToDatabase } from "@/lib/db";
@@ -148,7 +149,10 @@ export async function POST(request: Request) {
     });
     // A specialized Ollama scheduling prompt operates only on pseudonymous IDs.
     // Database credentials and staff/client names never leave the application.
-    const roster = dayData.input;
+    // Learn from date-safe imported workbook records already stored in MongoDB.
+    // Never use future schedules or the target date as historical examples.
+    const historicalTraining=await applyHistoricalTraining(locationId,date,dayData.input);
+    const roster=historicalTraining.input;
     const staffRefs = new Map(roster.staff.map((p,i)=>["S"+i,p.id]));
     const clientRefs = new Map(roster.clients.map((p,i)=>["C"+i,p.id]));
     const staffAlias = new Map([...staffRefs].map(([alias,id])=>[id,alias]));
@@ -213,6 +217,8 @@ export async function POST(request: Request) {
       currentAssignments:deidentifiedAssignments(roster.existingAssignments).slice(0,80),
       referenceAssignments:deidentifiedAssignments(roster.referenceAssignments.slice(0,48)),
       calledOutStaff:roster.callOutStaffIds.map(id=>staffAlias.get(id)).filter(Boolean),
+      importedWorkbookTraining:{matchedScheduleDays:historicalTraining.matchedScheduleDayCount,
+        matchedAssignments:historicalTraining.matchedRecordCount},
     };
     let aiPreferences:AiChoices={};
     let ollamaUsed=false;
@@ -267,6 +273,17 @@ export async function POST(request: Request) {
       if (!Object.values(ranking).some(values=>values.length>0) && Object.keys(naps).length===0) {
         throw new Error("Ollama returned no usable staff preferences or nap selections");
       }
+      // Combine model suggestions with historical pairing evidence. Historical
+      // data are preferences only; hard constraints remain in the validator.
+      const learned=roster.historicalPatterns?.pairingScores??{};
+      for(const client of roster.clients) {
+        const byHistory=roster.staff
+          .filter(staff=>client.staffRelationships[staff.id]!=="HARD_RESTRICTION")
+          .sort((a,b)=>(learned[b.id+"|"+client.id]??0)-(learned[a.id+"|"+client.id]??0))
+          .filter(staff=>(learned[staff.id+"|"+client.id]??0)>0)
+          .map(staff=>staff.id);
+        ranking[client.id]=[...new Set([...(ranking[client.id]??[]),...byHistory])];
+      }
       aiPreferences={ranking,naps,explanation:typeof proposal.explanation==="string"?proposal.explanation.slice(0,1000):undefined};
       ollamaUsed=true;
       ollamaDiagnostic="Ollama generated accepted scheduling preferences";
@@ -277,7 +294,16 @@ export async function POST(request: Request) {
       // if Ollama is slow. Never label the fallback as an Ollama-generated plan.
       ollamaUsed=false;
       ollamaDiagnostic=timedOut ? "Ollama request timed out after 35 seconds" : (error instanceof Error ? `Ollama request failed: ${error.message.slice(0,120)}` : "Ollama returned an invalid planning response");
-      aiPreferences={explanation: timedOut
+      const learned=roster.historicalPatterns?.pairingScores??{};
+      const ranking:Record<string,string[]>={};
+      for(const client of roster.clients) {
+        ranking[client.id]=roster.staff
+          .filter(staff=>client.staffRelationships[staff.id]!=="HARD_RESTRICTION" &&
+            (learned[staff.id+"|"+client.id]??0)>0)
+          .sort((a,b)=>(learned[b.id+"|"+client.id]??0)-(learned[a.id+"|"+client.id]??0))
+          .map(staff=>staff.id);
+      }
+      aiPreferences={ranking,explanation: timedOut
         ? "Ollama planning timed out; the website scheduling engine generated the placements."
         : "Ollama planning was unavailable; the website scheduling engine generated the placements."};
     }
@@ -353,6 +379,7 @@ export async function POST(request: Request) {
       regenerationSummary,
       ollamaUsed,
       ollamaDiagnostic,
+      historicalTraining:{matchedScheduleDays:historicalTraining.matchedScheduleDayCount,matchedAssignments:historicalTraining.matchedRecordCount},
       aiPlan: aiPreferences,
       date, locationId,
       assignments: audit.problems.length === 0 ? data.assignments : [],
