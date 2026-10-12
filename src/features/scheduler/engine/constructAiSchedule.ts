@@ -66,9 +66,6 @@ export function constructAiSchedule(input:SchedulerInput,choices:AiChoices={}) {
           ? linkedNaps.get(cid+"|"+t)===sid && reservations.get(sid)===t
           : reservations.get(sid)!==t || event.get(cid+"|"+t)==="SPEECH");
     };
-    const rank=(cid:string,sid:string)=>{
-      const index=(choices.ranking?.[cid]??[]).indexOf(sid);return index<0?999:index;
-    };
     // Preserve full client/staff runs whenever legal. First reserve the
     // incumbents from the previous half-hour, then match remaining clients.
     // Only displace an incumbent when it is necessary to cover an otherwise
