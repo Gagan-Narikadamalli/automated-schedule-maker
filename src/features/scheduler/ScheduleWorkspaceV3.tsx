@@ -889,6 +889,40 @@ export function ScheduleWorkspaceV3() {
     }
   }
 
+  async function requestDeleteSchedule() {
+    if (demoMode) {
+      setStatusMessage("Deleting schedules is unavailable in demo mode.");
+      return;
+    }
+    const confirmed = await confirmation.ask({
+      eyebrow: "DELETE SELECTED DATE",
+      title: `Delete all assignments for ${selectedDate}?`,
+      message: `Location: ${locationName}\nDate: ${selectedDate}\nThis permanently deletes every assigned schedule block for this date, including manual, locked, template, break, nap and speech cells. The date's Unplaced Assignments tray is cleared as well. Other dates, staff/client records, events, and saved templates are not deleted.`,
+      confirmLabel: "Delete Schedule",
+      cancelLabel: "Keep Schedule",
+    });
+    if (!confirmed) return;
+    try {
+      setWorking(true);
+      setStatusMessage(`Deleting schedule for ${selectedDate}...`);
+      const response = await fetch("/api/schedule/delete-day", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({locationId,date:selectedDate,confirmation:`DELETE_SCHEDULE:${selectedDate}`}),
+      });
+      const data = await readJson<{success?:boolean;deletedAssignmentCount?:number;deletedUnplacedCount?:number;error?:string}>(response);
+      if (!response.ok || !data.success) throw new Error(data.error ?? "Could not delete this date's schedule.");
+      await loadSchedule();
+      setSchedulerWarnings([]);
+      setShowSchedulerWarnings(false);
+      setStatusMessage(`Deleted ${data.deletedAssignmentCount ?? 0} assigned blocks and ${data.deletedUnplacedCount ?? 0} unplaced records for ${selectedDate}. Other dates were preserved.`);
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Could not delete the selected schedule.");
+    } finally {
+      setWorking(false);
+    }
+  }
+
   async function requestAutoGenerate() {
     if (demoMode) {
       loadDemoSchedule();
@@ -1142,6 +1176,7 @@ export function ScheduleWorkspaceV3() {
         </div>
         <div className="toolbar-group">
           <button type="button" className={`button ${manualMode ? "button-warning" : "button-secondary"}`} disabled={working || loading || staff.length === 0} onClick={toggleManualMode}>Manual Mode: {manualMode ? "On" : "Off"}</button>
+          <button type="button" className="button button-warning" disabled={working || loading || demoMode} onClick={() => void requestDeleteSchedule()} title="Delete all scheduled blocks for this date only, after confirmation.">Delete Schedule</button>
           <button type="button" className="button button-secondary" disabled={working || loading || staff.length === 0} onClick={() => void requestGenerateWeek()}>Auto Generate Week</button>
           <button type="button" className="button button-primary" disabled={working || loading || staff.length === 0} onClick={() => void requestAutoGenerate()}>{working ? "Working..." : "Auto Generate Day"}</button>
           <button type="button" className="button button-secondary" disabled={working || loading || staff.length === 0} onClick={() => void requestAiGenerate()} title="Generate a full schedule with the website AI, validate it, and save only if complete.">AI Generate</button>
