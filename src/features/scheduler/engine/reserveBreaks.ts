@@ -504,33 +504,27 @@ export function enrichBreakAssignmentsWithFixedEvents(
   clients: SchedulerClient[],
   slotLengthMinutes: number
 ): SchedulerAssignment[] {
-  // Automatic staff breaks remain plain BREAK records. We still inspect fixed
-  // client-event windows so an aligned break can keep a useful audit note, but
-  // Nap/Speech are added and edited separately in Manual mode.
-  return assignments.map((assignment) => {
-    if (
-      assignment.source !== "AUTO" ||
-      (assignment.assignmentType !== "BREAK" &&
-        assignment.assignmentType !== "BREAK_NAP" &&
-        assignment.assignmentType !== "BREAK_SPEECH")
-    ) {
+  // Preserve linked break records. Upgrade only an ordinary break when a
+  // contiguous client assignment establishes the event-supervision link.
+  return assignments.map(assignment => {
+    if (assignment.source !== "AUTO" || assignment.assignmentType !== "BREAK") {
       return assignment;
     }
-
     const fixedEvent = findSupervisedFixedEventClient(
-      assignment,
-      assignments,
-      clients,
-      slotLengthMinutes
+      assignment, assignments, clients, slotLengthMinutes
     );
-
+    if (!fixedEvent) return assignment;
+    const alreadySupervised = assignments.some(other =>
+      other.clientId === fixedEvent.client.id &&
+      other.startTime === assignment.startTime &&
+      other.id !== assignment.id
+    );
+    if (alreadySupervised) return assignment;
     return {
       ...assignment,
-      clientId: undefined,
-      assignmentType: "BREAK",
-      note: fixedEvent
-        ? "Automatically reserved staff break during a fixed client-event window."
-        : assignment.note || "Automatically reserved staff break.",
+      clientId: fixedEvent.client.id,
+      assignmentType: fixedEvent.assignmentType,
+      note: "Automatically linked staff break with a supervised client event.",
     };
   });
 }
