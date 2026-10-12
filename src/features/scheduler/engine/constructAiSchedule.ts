@@ -31,6 +31,29 @@ export function constructAiSchedule(input:SchedulerInput,choices:AiChoices={}) {
     const selected=options.find(t=>slack(t)>0)??options[0];
     reservations.set(s.id,selected);reservedCount.set(selected,(reservedCount.get(selected)??0)+1);
   }
+  // Each selected client nap must be the staff member's one linked break.
+  // Reserve a distinct eligible staff break for as many nap events as possible.
+  const napEvents=[...event.entries()].filter(([,kind])=>kind==="NAP");
+  const linkedNaps=new Map<string,string>();
+  const usedNapStaff=new Set<string>();
+  for(const [key] of napEvents.sort((a,b)=>{
+    const [ca,ta]=a[0].split("|"),[cb,tb]=b[0].split("|");
+    const count=(cid:string,t:string)=>people.filter(p=>availability.get(p.id)?.has(t)&&eligible(p.id,cid)).length;
+    return count(ca,ta)-count(cb,tb);
+  })){
+    const [cid,t]=key.split("|");
+    const candidates=people.filter(p=>!usedNapStaff.has(p.id)&&availability.get(p.id)?.has(t)&&eligible(p.id,cid))
+      .sort((a,b)=>Number(reservations.get(a.id)!==t)-Number(reservations.get(b.id)!==t)||
+        (a.availableSlots.length-b.availableSlots.length)||a.id.localeCompare(b.id));
+    const selected=candidates[0];
+    if(!selected)continue;
+    linkedNaps.set(key,selected.id);
+    usedNapStaff.add(selected.id);
+    const previous=reservations.get(selected.id);
+    if(previous)reservedCount.set(previous,Math.max(0,(reservedCount.get(previous)??0)-1));
+    reservations.set(selected.id,t);
+    reservedCount.set(t,(reservedCount.get(t)??0)+1);
+  }
   const assigned:AiCell[]=[],last=new Map<string,string>(),load=new Map(people.map(s=>[s.id,0]));
   const uncovered:{clientId:string;clientCode:string;startTime:string}[]=[];
   for(const t of slots) {
@@ -39,7 +62,9 @@ export function constructAiSchedule(input:SchedulerInput,choices:AiChoices={}) {
       const s=people.find(p=>p.id===sid);
       return !!s&&availability.get(sid)?.has(t)&&eligible(sid,cid)&&
         (s.maximumDailyHours===undefined||(load.get(sid)??0)<Math.floor(s.maximumDailyHours*2))&&
-        (reservations.get(sid)!==t||event.has(cid+"|"+t));
+        (event.get(cid+"|"+t)==="NAP"
+          ? linkedNaps.get(cid+"|"+t)===sid && reservations.get(sid)===t
+          : reservations.get(sid)!==t || event.get(cid+"|"+t)==="SPEECH");
     };
     const rank=(cid:string,sid:string)=>{
       const index=(choices.ranking?.[cid]??[]).indexOf(sid);return index<0?999:index;
@@ -62,7 +87,9 @@ export function constructAiSchedule(input:SchedulerInput,choices:AiChoices={}) {
     for(const c of clientsAt)if(!match(c.id,new Set()))uncovered.push({clientId:c.id,clientCode:c.displayCode,startTime:t});
     for(const [cid,sid] of matched) {
       const type=event.get(cid+"|"+t),breakHere=reservations.get(sid)===t;
-      assigned.push({staffId:sid,clientId:cid,startTime:t,assignmentType:breakHere?(type==="NAP"?"BREAK_NAP":"BREAK_SPEECH"):(type??"CLIENT_1_TO_1")});
+      assigned.push({staffId:sid,clientId:cid,startTime:t,assignmentType:breakHere
+        ? (type==="NAP"?"BREAK_NAP":type==="SPEECH"?"BREAK_SPEECH":"CLIENT_1_TO_1")
+        : (type==="SPEECH"?"SPEECH":"CLIENT_1_TO_1")});
       last.set(cid,sid);load.set(sid,(load.get(sid)??0)+1);
     }
     for(const [sid,when] of reservations)if(when===t&&!occupied.has(sid))assigned.push({staffId:sid,startTime:t,assignmentType:"BREAK"});
