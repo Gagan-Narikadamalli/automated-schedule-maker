@@ -339,10 +339,29 @@ function findBestFreeBreaks(
           detail.fixedEvent ? detail.fixedEvent.priority : 100
         )
       );
+      // Avoid choosing an ordinary break inside an otherwise continuous
+      // client/staff run. A break linked to the client's nap/speech is the
+      // intentional exception and is scored by its fixed event priority.
+      const priorTime = shiftTime(startTime, -rules.slotLengthMinutes);
+      const nextTime = shiftTime(
+        startTime, rules.defaultBreakMinutes
+      );
+      const prior = assignments.find(a => a.staffId === staffMember.id &&
+        a.startTime === priorTime && a.assignmentType === "CLIENT_1_TO_1");
+      const next = assignments.find(a => a.staffId === staffMember.id &&
+        a.startTime === nextTime && a.assignmentType === "CLIENT_1_TO_1");
+      const splitsClientRun = Boolean(prior?.clientId &&
+        next?.clientId && prior.clientId === next.clientId);
+      const splitsStaffRun = Boolean(prior && next);
+      const plainBreak = details.every(detail => !detail.fixedEvent);
+      const interruptionPenalty = plainBreak
+        ? (splitsClientRun ? 500 : splitsStaffRun ? 200 : 0)
+        : 0;
       const score =
         eventPriority * 10 +
         timeDistanceFromNoon(startTime) -
-        Math.min(historicalCount, 4) * historicalPriority;
+        Math.min(historicalCount, 4) * historicalPriority +
+        interruptionPenalty;
 
       return {
         startTime,
