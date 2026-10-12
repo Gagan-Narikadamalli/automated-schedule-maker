@@ -158,7 +158,7 @@ export async function POST(request: Request) {
           .map(([id])=>staffAlias.get(id)).filter(Boolean),
         preferredStaff:Object.entries(p.staffRelationships).filter(([,kind])=>kind==="PREFERRED")
           .map(([id])=>staffAlias.get(id)).filter(Boolean)})),
-      recentExampleAssignments:roster.referenceAssignments.slice(0,200).map(a=>({
+      recentExampleAssignments:roster.referenceAssignments.slice(0,24).map(a=>({
         staff:staffAlias.get(a.staffId),client:a.clientId?clientAlias.get(a.clientId):undefined,
         time:a.startTime,type:a.assignmentType
       })).filter(a=>a.staff),
@@ -168,7 +168,7 @@ export async function POST(request: Request) {
     let ollamaUsed=false;
     try {
       const controller=new AbortController();
-      const timeout=setTimeout(()=>controller.abort(),85000);
+      const timeout=setTimeout(()=>controller.abort(),35000);
       let result:Response;
       try {
         result=await fetch("https://ollama.com/api/chat",{
@@ -180,7 +180,7 @@ export async function POST(request: Request) {
               {role:"system",content:
                 "You are the dedicated AI planner for this clinic's scheduling website. "+
                 "Use only the anonymized staff/client identifiers in the provided JSON. "+
-                "Choose preferred staff for each client and one 30-minute nap slot per client "+
+                "Return at most two preferred staff per client when useful, and one 30-minute nap slot per client "+
                 "inside its provided napSlots. The website will independently construct "+
                 "and validate the complete schedule, staffing, speech, breaks and coverage. "+
                 "Never invent staff, clients or time slots. Return JSON only: "+
@@ -212,9 +212,12 @@ export async function POST(request: Request) {
     } catch(error) {
       const timedOut = error instanceof Error && (error.name === "AbortError" || error.message.includes("aborted"));
       console.warn("Website Ollama scheduling request failed",error instanceof Error?error.message:"unknown");
-      return invalid(timedOut
-        ? "Ollama took too long to prepare the schedule (85 seconds). No schedule was changed; please retry."
-        : "Website AI could not reach Ollama or parse its scheduling response. No schedule was changed.",503);
+      // The scheduling engine can still produce a valid, auditable partial schedule
+      // if Ollama is slow. Never label the fallback as an Ollama-generated plan.
+      ollamaUsed=false;
+      aiPreferences={explanation: timedOut
+        ? "Ollama planning timed out; the website scheduling engine generated the placements."
+        : "Ollama planning was unavailable; the website scheduling engine generated the placements."};
     }
     const generated=constructAiSchedule(roster,aiPreferences);
     const data:ResponseBody={
