@@ -35,7 +35,7 @@ function check(name:string,staff:SchedulerStaff[],clients:SchedulerClient[],call
       } else assert.equal(ev.filter(a=>a.startTime==="12:30" && (a.assignmentType==="SPEECH"||a.assignmentType==="BREAK_SPEECH")).length,1);
     }
   }
-  else assert.ok(result.uncoveredRequirements.length>0);
+  if(!expected)assert.ok(result.uncoveredRequirements.length>0);
   console.log(`PASS ${name}: covered=${covered.size}; breaks=${[...breaks.values()].reduce((a,b)=>a+b,0)}; missing=${result.uncoveredRequirements.length}`);
 }
 check("20 clients and 26 staff",
