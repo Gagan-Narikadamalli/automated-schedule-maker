@@ -84,6 +84,14 @@ export function constructAiSchedule(input:SchedulerInput,choices:AiChoices={}) {
       const index=(choices.ranking?.[cid]??[]).indexOf(sid);
       return index<0?999:index;
     };
+    const teamAndRelationshipAffinity=(cid:string,sid:string)=>{
+      const c=clients.find(item=>item.id===cid);
+      const member=people.find(item=>item.id===sid);
+      if(!c||!member)return 2;
+      const preferred=c.staffRelationships[sid]==="PREFERRED";
+      const sameTeam=!!c.teamId&&!!member.teamId&&c.teamId===member.teamId;
+      return (preferred?0:2)+(input.rules.preferSameTeam!==false&&sameTeam?0:1);
+    };
     const templateAffinity=(cid:string,sid:string)=>
       input.referenceAssignments.some(a=>a.clientId===cid&&a.staffId===sid&&
         a.startTime===t&&a.assignmentType==="CLIENT_1_TO_1")?0:1;
@@ -91,6 +99,7 @@ export function constructAiSchedule(input:SchedulerInput,choices:AiChoices={}) {
       const candidates=people.filter(s=>can(s.id,cid)).sort((a,b)=>
         Number(occupied.has(a.id))-Number(occupied.has(b.id))||
         templateAffinity(cid,a.id)-templateAffinity(cid,b.id)||
+        teamAndRelationshipAffinity(cid,a.id)-teamAndRelationshipAffinity(cid,b.id)||
         Number(last.get(cid)!==a.id)-Number(last.get(cid)!==b.id)||
         rank(cid,a.id)-rank(cid,b.id)||
         (load.get(a.id)??0)-(load.get(b.id)??0)||a.id.localeCompare(b.id));
