@@ -78,6 +78,10 @@ function validatePreview(input: Awaited<ReturnType<typeof buildDaySchedulerInput
       problems.push(`Service-setting mismatch: ${row.staffId} / ${row.clientId}`);
     }
   }
+  // AI nap supervision is a single linked staff break, never a second NAP cell.
+  for(const row of values) {
+    if(row.assignmentType==="NAP")problems.push(`Standalone nap is not a linked staff break: ${row.clientId} at ${row.startTime}`);
+  }
   for (const person of input.staff) {
     if (calledOut.has(person.id) || person.availableSlots.length === 0) continue;
     const count = breakCount.get(person.id) ?? 0;
