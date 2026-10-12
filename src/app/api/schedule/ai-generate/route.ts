@@ -12,7 +12,7 @@ type Candidate = {
   staffId: string;
   clientId?: string | null;
   startTime: string;
-  assignmentType: "CLIENT_1_TO_1" | "BREAK" | "BREAK_NAP" | "BREAK_SPEECH";
+  assignmentType: "CLIENT_1_TO_1" | "NAP" | "SPEECH" | "BREAK" | "BREAK_NAP" | "BREAK_SPEECH";
 };
 type ResponseBody = { assignments?: Candidate[]; explanation?: string };
 
@@ -28,7 +28,7 @@ function validatePreview(input: Awaited<ReturnType<typeof buildDaySchedulerInput
   const allTimes = new Set([...input.staff.flatMap(s => s.availableSlots), ...input.clients.flatMap(c => c.requiredSlots)]);
   const calledOut = new Set(input.callOutStaffIds);
   const problems: string[] = [];
-  const allowedTypes = new Set(["CLIENT_1_TO_1", "BREAK", "BREAK_NAP", "BREAK_SPEECH"]);
+  const allowedTypes = new Set(["CLIENT_1_TO_1", "NAP", "SPEECH", "BREAK", "BREAK_NAP", "BREAK_SPEECH"]);
   for (const [index, row] of values.entries()) {
     if (!row || typeof row !== "object" || !allowedTypes.has(row.assignmentType) ||
         typeof row.staffId !== "string" || typeof row.startTime !== "string" ||
@@ -44,14 +44,17 @@ function validatePreview(input: Awaited<ReturnType<typeof buildDaySchedulerInput
     const sk = `${row.staffId}|${row.startTime}`;
     if (staffSlots.has(sk)) problems.push(`Staff double-booked: ${sk}`);
     staffSlots.add(sk);
-    if (row.assignmentType !== "CLIENT_1_TO_1") {
-      if (row.clientId) problems.push(`Break must not have a client: ${sk}`);
+    if (["BREAK", "BREAK_NAP", "BREAK_SPEECH"].includes(row.assignmentType)) {
+      if (row.assignmentType === "BREAK" && row.clientId) problems.push(`Break must not have a client: ${sk}`);
+      if (row.assignmentType !== "BREAK" && !row.clientId) problems.push(`Linked break missing client: ${sk}`);
       breakCount.set(row.staffId, (breakCount.get(row.staffId) ?? 0) + 1);
       if ((breakCount.get(row.staffId) ?? 0) > 1) problems.push(`Duplicate break: ${row.staffId}`);
-      continue;
+      if (row.assignmentType === "BREAK") continue;
     }
     const client = row.clientId ? clients.get(row.clientId) : null;
-    if (!client || !client.requiredSlots.includes(row.startTime)) {
+    const event = ["NAP", "SPEECH", "BREAK_NAP", "BREAK_SPEECH"].includes(row.assignmentType);
+    const eventSlots = row.assignmentType.endsWith("NAP") || row.assignmentType === "NAP" ? client?.napSlots : client?.speechSlots;
+    if (!client || (event ? !(eventSlots ?? []).includes(row.startTime) : !client.requiredSlots.includes(row.startTime))) {
       problems.push(`Client unavailable/unknown at ${row.startTime}: ${row.clientId ?? "none"}`);
       continue;
     }
