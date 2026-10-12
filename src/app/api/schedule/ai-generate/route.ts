@@ -7,6 +7,9 @@ import {
   SCHEDULE_WRITE_ROLES,
 } from "@/lib/api/auth";
 import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySchedulerInput";
+import { persistScheduleReplacementSafely } from "@/features/scheduler/server/persistScheduleReplacementSafely";
+import { getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
+import { connectToDatabase } from "@/lib/db";
 
 type Candidate = {
   staffId: string;
@@ -69,6 +72,18 @@ function validatePreview(input: Awaited<ReturnType<typeof buildDaySchedulerInput
       problems.push(`Service-setting mismatch: ${row.staffId} / ${row.clientId}`);
     }
   }
+  for (const person of input.staff) {
+    if (calledOut.has(person.id) || person.availableSlots.length === 0) continue;
+    const count = breakCount.get(person.id) ?? 0;
+    if (count !== 1) problems.push(`Staff requires exactly one 30-minute break: ${person.id} (${count})`);
+  }
+  for (const row of values) {
+    if (row?.assignmentType?.startsWith("BREAK")) {
+      const [h,m] = row.startTime.split(":").map(Number);
+      const minute = h * 60 + m;
+      if (minute < 660 || minute >= 840) problems.push(`Break outside 11:00-14:00: ${row.staffId}`);
+    }
+  }
   const missing = input.clients.flatMap(c => c.requiredSlots
     .filter(slot => !clientSlots.has(`${c.id}|${slot}`))
     .map(slot => ({ clientId: c.id, clientCode: c.displayCode, startTime: slot })));
@@ -78,7 +93,7 @@ function validatePreview(input: Awaited<ReturnType<typeof buildDaySchedulerInput
 
 /**
  * Independent AI Generate preview. Does not import or call the existing
- * generateSchedule function and NEVER writes to MongoDB.
+ * generateSchedule function. Writes only after complete independent validation
  * The optimizer endpoint must be configured by the deployment administrator.
  * Language-model output is untrusted and is independently checked here.
  */
@@ -87,7 +102,7 @@ export async function POST(request: Request) {
   if (auth.error) return auth.error;
   if (!sessionHasAnyRole(auth.session, SCHEDULE_WRITE_ROLES)) return forbiddenResponse();
   try {
-    const body = await request.json() as { locationId?: string; date?: string };
+    const body = await request.json() as { locationId?: string; date?: string; save?: boolean };
     const locationId = body.locationId?.trim();
     const date = body.date?.trim();
     if (!locationId || !date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -196,9 +211,51 @@ export async function POST(request: Request) {
     }
     const audit = validatePreview(dayData.input, data.assignments);
     const complete = audit.missing.length === 0;
+    const valid = audit.problems.length === 0 && complete;
+    let saved = false;
+    let regenerationSummary: Record<string, number> | undefined;
+    if (body.save === true) {
+      if (!valid) {
+        return NextResponse.json({
+          success:false, saved:false, error:complete
+            ? "AI schedule failed independent validation; no changes saved."
+            : "Unable to generate today's complete schedule: more client coverage is required than available eligible staff can provide. Human scheduling decision needed.",
+          violations:audit.problems, uncoveredRequirements:audit.missing,
+        },{status:422});
+      }
+      if (process.env.SCHEDULER_AI_AUTONOMOUS_WRITES !== "true") {
+        return invalid("AI schedule saving is disabled by server configuration; no schedule was changed.",503);
+      }
+      await connectToDatabase();
+      const replacements = data.assignments.map((assignment) => ({
+        locationId,date,
+        staffId:assignment.staffId,
+        clientId:assignment.clientId || null,
+        startTime:assignment.startTime,
+        endTime:getEndTimeForSlot(assignment.startTime),
+        assignmentType:assignment.assignmentType,
+        source:"AUTO",locked:false,manuallyOverridden:false,
+        note:"AI Generate",
+      }));
+      const outcome = await persistScheduleReplacementSafely({
+        locationId,date,replacements,replaceableFilter:{}
+      });
+      if (outcome.blockedEmptyReplacement) {
+        return invalid("AI Generate refused an empty replacement; existing schedule preserved.",409);
+      }
+      saved = true;
+      regenerationSummary = {
+        added:outcome.addedCount,
+        changed:outcome.changedCount,
+        unchanged:outcome.unchangedCount,
+        removed:outcome.removedStaleCount,
+      };
+    }
     return NextResponse.json({
-      success: audit.problems.length === 0 && complete,
-      previewOnly: true,
+      success: valid,
+      previewOnly: !saved,
+      saved,
+      regenerationSummary,
       ollamaUsed,
       aiPlan: ollamaPlan,
       date, locationId,
@@ -210,7 +267,7 @@ export async function POST(request: Request) {
       uncoveredRequirements: audit.missing,
       explanation: typeof data.explanation === "string" ? data.explanation.slice(0, 4000) : "",
       error: !complete ? "Unable to generate today's complete schedule: more client coverage is required than available eligible staff can provide. Human scheduling decision needed." : undefined,
-      message: "Preview only: no schedule was overwritten.",
+      message: saved ? "Complete AI schedule validated and saved." : "Validated AI schedule preview; no schedule was overwritten.",
     }, { status: audit.problems.length || !complete ? 422 : 200 });
   } catch (error) {
     console.error("AI Schedule preview error:", error);
