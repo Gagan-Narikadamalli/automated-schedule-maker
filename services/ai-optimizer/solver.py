@@ -133,7 +133,9 @@ def solve(payload):
     missing=[{"clientId":c["id"],"clientCode":c.get("displayCode",c["id"]),"startTime":t}
              for c in clients for t in sorted(attend[c["id"]]) if (c["id"],t) not in seen_client]
     covered=expected-len(missing)
-    return {"success":True,"completeCoverage":not missing,"solverStatus":solver.StatusName(status),
+    return {"success":not missing,"completeCoverage":not missing,"solverStatus":solver.StatusName(status),
+            "failureCode":"INSUFFICIENT_STAFF_COVERAGE" if missing else None,
+            "message":("Unable to generate today's complete schedule: more client coverage is required than available eligible staff can provide. Human scheduling decision needed." if missing else "Complete schedule generated."),
             "assignments":rows,"uncoveredRequirements":missing,"hardViolations":[],
             "metrics":{"requiredClientSlots":expected,"coveredClientSlots":covered,
                        "uncoveredClientSlots":len(missing),
