@@ -131,3 +131,24 @@ check("insufficient staffing",Array.from({length:8},(_,i)=>s(i,slots())),
   assert.equal(unresolved.pinned.find(a=>a.startTime==="11:30")?.assignmentType,"BREAK");
   console.log("PASS legacy Break/Nap links adjacent previous client only when a valid nap exists");
 }
+
+{
+  const slot=["11:00","11:30","12:00"];
+  const staff=[s(1,slot)];
+  const blocked=c(1,slot,{napSlots:["11:30"],staffRelationships:{s1:"HARD_RESTRICTION"}});
+  const template={staff,clients:[blocked],callOutStaffIds:[],
+    rules:{slotLengthMinutes:30},existingAssignments:[],
+    referenceAssignments:[{id:"linked",staffId:"s1",clientId:"c1",startTime:"11:30",
+      assignmentType:"BREAK_NAP",source:"TEMPLATE",locked:false,
+      note:"Priority 1 saved workbook template: restricted"}]
+  } as unknown as SchedulerInput;
+  const denied=pinWorkbookTemplates(template);
+  assert.equal(denied.pinned.length,0);
+  assert.ok(denied.rejected.some(x=>x.reason.includes("restriction")));
+  const conflict:SchedulerAssignment[]=[
+    {id:"nap",staffId:"s1",clientId:"c1",startTime:"11:30",assignmentType:"BREAK_NAP",source:"AUTO",locked:true},
+    {id:"duplicate",staffId:"s2",clientId:"c1",startTime:"11:30",assignmentType:"CLIENT_1_TO_1",source:"AUTO",locked:false}
+  ];
+  assert.ok(auditLinkedNapBreakRules(conflict,[blocked]).some(x=>x.includes("Client double-booked")));
+  console.log("PASS template restrictions and duplicate client supervision audit");
+}
