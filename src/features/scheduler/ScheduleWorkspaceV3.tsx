@@ -946,6 +946,7 @@ export function ScheduleWorkspaceV3() {
         explanation?: string;
         message?: string;
         partialBuild?: boolean;
+        ollamaUsed?: boolean;
         unplacedCount?: number;
         placementIssues?: Array<{clientCode:string;startTime:string;reason:string}>;
         breakIssues?: string[];
@@ -961,6 +962,7 @@ export function ScheduleWorkspaceV3() {
         ...(data.breakIssues ?? []),
         ...(data.violations ?? []),
       ];
+      if (data.ollamaUsed === false) issues.unshift("Ollama planning was unavailable; placements were calculated by the independent website scheduler.");
       setSchedulerWarnings(issues);
       setShowSchedulerWarnings(issues.length > 0);
       setStatusMessage(data.partialBuild
@@ -1247,7 +1249,7 @@ export function ScheduleWorkspaceV3() {
           <div className="panel-heading-row">
             <div>
               <h2>Scheduler Warnings ({schedulerWarnings.length})</h2>
-              <p>Review the exact issues from the most recent Auto Generate Day run.</p>
+              <p>Review the exact issues from the most recent scheduling run.</p>
             </div>
             <button type="button" className="button button-secondary"
               aria-expanded={showSchedulerWarnings}
