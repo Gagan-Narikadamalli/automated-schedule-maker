@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { constructAiSchedule } from "../src/features/scheduler/engine/constructAiSchedule";
+import { enrichBreakAssignmentsWithFixedEvents } from "../src/features/scheduler/engine/reserveBreaks";
+import type { SchedulerAssignment } from "../src/features/scheduler/engine/types";
 import type { SchedulerInput, SchedulerClient, SchedulerStaff } from "../src/features/scheduler/engine/types";
 const slots=(start=8,end=16)=>Array.from({length:(end-start)*2},(_,i)=>{
   const m=start*60+i*30;return `${String(Math.floor(m/60)).padStart(2,"0")}:${String(m%60).padStart(2,"0")}`;
@@ -52,3 +54,18 @@ check("two staff callouts",Array.from({length:26},(_,i)=>s(i,slots())),
   Array.from({length:20},(_,i)=>c(i,slots())),["s24","s25"],true);
 check("insufficient staffing",Array.from({length:8},(_,i)=>s(i,slots())),
   Array.from({length:20},(_,i)=>c(i,slots())),[],false);
+
+{
+  const client = c(1,["11:00","11:30","12:00"],{napSlots:["11:30"]});
+  const assignments:SchedulerAssignment[]=[
+    {id:"a",staffId:"s1",clientId:"c1",startTime:"11:00",assignmentType:"CLIENT_1_TO_1",source:"AUTO",locked:false},
+    {id:"b",staffId:"s1",startTime:"11:30",assignmentType:"BREAK",source:"AUTO",locked:true},
+    {id:"c",staffId:"s1",clientId:"c1",startTime:"12:00",assignmentType:"CLIENT_1_TO_1",source:"AUTO",locked:false},
+  ];
+  const linked=enrichBreakAssignmentsWithFixedEvents(assignments,[client],30);
+  assert.equal(linked[1].assignmentType,"BREAK_NAP");
+  assert.equal(linked[1].clientId,"c1");
+  const again=enrichBreakAssignmentsWithFixedEvents(linked,[client],30);
+  assert.equal(again[1].assignmentType,"BREAK_NAP");
+  console.log("PASS linked break + nap preserved");
+}
