@@ -111,7 +111,7 @@ export async function POST(request: Request) {
     let ollamaPlan: { priorities?: string[]; rationale?: string } | undefined;
     let ollamaUsed = false;
     const ollamaKey = process.env.OLLAMA_API_KEY?.trim();
-    const ollamaModel = process.env.OLLAMA_SCHEDULER_MODEL?.trim();
+    const ollamaModel = (process.env.OLLAMA_SCHEDULER_MODEL || process.env.SCHEDULER_AI_MODEL)?.trim();
     if (ollamaKey && ollamaModel) {
       const roster = dayData.input;
       const sanitized = {
