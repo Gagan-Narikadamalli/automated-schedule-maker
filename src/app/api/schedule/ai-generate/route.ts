@@ -112,7 +112,7 @@ export async function POST(request: Request) {
     if (!sessionCanAccessLocation(auth.session, locationId)) return forbiddenResponse();
     const ollamaKey = process.env.OLLAMA_API_KEY?.trim();
     const ollamaModel = process.env.OLLAMA_SCHEDULER_MODEL?.trim() || "gpt-oss:20b";
-    if (!ollamaKey || !ollamaModel) return invalid("AI Generate needs OLLAMA_API_KEY and SCHEDULER_AI_MODEL on the server.",503);
+    if (!ollamaKey || !ollamaModel) return invalid("AI Generate needs OLLAMA_API_KEY on the server.",503);
     const dayData = await buildDaySchedulerInput(locationId, date);
     // A specialized Ollama scheduling prompt operates only on pseudonymous IDs.
     // Database credentials and staff/client names never leave the application.
@@ -129,7 +129,13 @@ export async function POST(request: Request) {
         napSlots:p.napSlots,speechSlots:p.speechSlots,serviceSetting:p.serviceSetting,
         supportLevel:p.supportLevel,
         excludedStaff:Object.entries(p.staffRelationships).filter(([,kind])=>kind==="HARD_RESTRICTION")
+          .map(([id])=>staffAlias.get(id)).filter(Boolean),
+        preferredStaff:Object.entries(p.staffRelationships).filter(([,kind])=>kind==="PREFERRED")
           .map(([id])=>staffAlias.get(id)).filter(Boolean)})),
+      recentExampleAssignments:roster.referenceAssignments.slice(0,200).map(a=>({
+        staff:staffAlias.get(a.staffId),client:a.clientId?clientAlias.get(a.clientId):undefined,
+        time:a.startTime,type:a.assignmentType
+      })).filter(a=>a.staff),
       calledOutStaff:roster.callOutStaffIds.map(id=>staffAlias.get(id)).filter(Boolean),
     };
     let aiPreferences:AiChoices={};
