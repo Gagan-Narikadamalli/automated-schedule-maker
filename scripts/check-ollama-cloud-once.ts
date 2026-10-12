@@ -1,7 +1,7 @@
 async function main() {
 /** One-time Vercel build smoke test. Do not leave this in the normal build pipeline. */
 const key = process.env.OLLAMA_API_KEY?.trim();
-const model = (process.env.OLLAMA_SCHEDULER_MODEL || process.env.SCHEDULER_AI_MODEL)?.trim();
+const model = process.env.OLLAMA_SCHEDULER_MODEL?.trim() || "gpt-oss:20b";
 if (!key || !model) throw new Error("Ollama API key or scheduling model is not configured in this deployment.");
 const controller = new AbortController();
 const t = Date.now();
