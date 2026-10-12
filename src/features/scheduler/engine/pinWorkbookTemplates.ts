@@ -100,6 +100,12 @@ export function pinWorkbookTemplates(input: SchedulerInput): {
         reason = "Linked template break does not match a saved client nap/speech event";
       } else if (clientSlots.has(clientKey)) {
         reason = "Another template assignment already supervises this client event";
+      } else if (client.staffRelationships[reference.staffId] === "HARD_RESTRICTION") {
+        reason = "Hard staff/client restriction for linked event";
+      } else if (member.serviceSetting && client.serviceSetting &&
+        member.serviceSetting !== "BOTH" && client.serviceSetting !== "BOTH" &&
+        member.serviceSetting !== client.serviceSetting) {
+        reason = "Incompatible service setting for linked event";
       }
     } else if (!["BREAK", "BREAK_NAP", "BREAK_SPEECH"].includes(reference.assignmentType)) {
       reason = "Unsupported workbook block type";
