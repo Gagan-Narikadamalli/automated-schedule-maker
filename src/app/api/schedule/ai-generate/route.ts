@@ -10,6 +10,8 @@ import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySche
 import { persistScheduleReplacementSafely } from "@/features/scheduler/server/persistScheduleReplacementSafely";
 import { getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
 import { connectToDatabase } from "@/lib/db";
+import { NapSession } from "@/models/NapSession";
+import { getSlotsInsideTimeRange } from "@/features/scheduler/engine/dateUtils";
 import { constructAiSchedule, type AiChoices } from "@/features/scheduler/engine/constructAiSchedule";
 
 type Candidate = {
@@ -114,6 +116,27 @@ export async function POST(request: Request) {
     const ollamaModel = process.env.OLLAMA_SCHEDULER_MODEL?.trim() || "gpt-oss:20b";
     if (!ollamaKey || !ollamaModel) return invalid("AI Generate needs OLLAMA_API_KEY on the server.",503);
     const dayData = await buildDaySchedulerInput(locationId, date);
+    // The normal scheduler excludes fixed speech cells from requiredSlots and
+    // leaves napSlots empty until its separate event processing runs.
+    // AI Generate needs a complete, independent snapshot before planning.
+    await connectToDatabase();
+    const napDocuments = await NapSession.find({ locationId, date })
+      .select("clientId startTime endTime").lean() as unknown as Array<{
+        clientId: unknown;startTime:string;endTime:string
+      }>;
+    const windows = new Map<string,Set<string>>();
+    for(const nap of napDocuments) {
+      const id=String(nap.clientId);
+      const allowed=getSlotsInsideTimeRange(nap.startTime,nap.endTime,30);
+      const set=windows.get(id)??new Set<string>();
+      for(const t of allowed)set.add(t);
+      windows.set(id,set);
+    }
+    dayData.input.clients=dayData.input.clients.map(c=>{
+      const napSlots=[...(windows.get(c.id)??new Set<string>())].sort();
+      return {...c,napSlots,
+        requiredSlots:[...new Set([...c.requiredSlots,...c.speechSlots,...napSlots])].sort()};
+    });
     // A specialized Ollama scheduling prompt operates only on pseudonymous IDs.
     // Database credentials and staff/client names never leave the application.
     const roster = dayData.input;
