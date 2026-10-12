@@ -10,6 +10,7 @@ import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySche
 import { persistScheduleReplacementSafely } from "@/features/scheduler/server/persistScheduleReplacementSafely";
 import { getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
 import { connectToDatabase } from "@/lib/db";
+import { syncAutoUnplacedGaps } from "@/features/scheduler/server/syncAutoUnplacedGaps";
 import { NapSession } from "@/models/NapSession";
 import { getSlotsInsideTimeRange } from "@/features/scheduler/engine/dateUtils";
 import { constructAiSchedule, type AiChoices } from "@/features/scheduler/engine/constructAiSchedule";
@@ -224,28 +225,23 @@ export async function POST(request: Request) {
       message:generated.success?"AI Generate constructed a complete schedule.":
         "Unable to generate today's complete schedule: more client coverage is required than available eligible staff can provide. Human scheduling decision needed."
     };
-    if(!data.success) {
-      return NextResponse.json({
-        success:false,previewOnly:true,saved:false,code:data.failureCode,
-        error:data.message,uncoveredRequirements:data.uncoveredRequirements,
-        unplacedBreakStaffIds:generated.unplacedBreakStaffIds,ollamaUsed,
-      },{status:422});
-    }
     if (!Array.isArray(data.assignments) || data.assignments.length > 10000) {
       return invalid("AI optimizer returned an invalid assignments array.", 502);
     }
     const audit = validatePreview(dayData.input, data.assignments);
     const complete = audit.missing.length === 0;
-    const valid = audit.problems.length === 0 && complete;
+    const valid = audit.problems.length === 0 && generated.unplacedBreakStaffIds.length === 0;
+    const placementIssues = audit.missing.map(gap => ({...gap,reason:"No eligible available staff could cover this client at the requested time."}));
+    const breakIssues = generated.unplacedBreakStaffIds.map(id=>`Staff ${id} has no available 30-minute break between 11:00 and 14:00.`);
     let saved = false;
+    let unplacedCount = 0;
     let regenerationSummary: Record<string, number> | undefined;
     if (body.save === true) {
       if (!valid) {
         return NextResponse.json({
-          success:false, saved:false, error:complete
-            ? "AI schedule failed independent validation; no changes saved."
-            : "Unable to generate today's complete schedule: more client coverage is required than available eligible staff can provide. Human scheduling decision needed.",
-          violations:audit.problems, uncoveredRequirements:audit.missing,
+          success:false,saved:false,
+          error:"AI schedule failed independent validation or a required staff break. Existing schedule preserved.",
+          violations:[...audit.problems,...breakIssues],uncoveredRequirements:placementIssues,
         },{status:422});
       }
       if (process.env.SCHEDULER_AI_AUTONOMOUS_WRITES !== "true") {
@@ -268,6 +264,10 @@ export async function POST(request: Request) {
       if (outcome.blockedEmptyReplacement) {
         return invalid("AI Generate refused an empty replacement; existing schedule preserved.",409);
       }
+      unplacedCount = await syncAutoUnplacedGaps(locationId,date,placementIssues.map(p=>({...p,reason:p.reason})),data.assignments.map((a,i)=>({
+        id:`ai-${i}`,staffId:a.staffId,clientId:a.clientId??undefined,startTime:a.startTime,
+        assignmentType:a.assignmentType,source:"AUTO" as const,locked:false
+      })));
       saved = true;
       regenerationSummary = {
         added:outcome.addedCount ?? 0,
@@ -278,6 +278,11 @@ export async function POST(request: Request) {
     }
     return NextResponse.json({
       success: valid,
+      completeCoverage:complete,
+      partialBuild:!complete,
+      unplacedCount,
+      placementIssues,
+      breakIssues,
       previewOnly: !saved,
       saved,
       regenerationSummary,
@@ -289,11 +294,11 @@ export async function POST(request: Request) {
         uncoveredClientSlots: audit.missing.length,
         coveragePercent: audit.required ? 100 * audit.covered / audit.required : 100 },
       violations: audit.problems,
-      uncoveredRequirements: audit.missing,
+      uncoveredRequirements: placementIssues,
       explanation: typeof data.explanation === "string" ? data.explanation.slice(0, 4000) : "",
       error: !complete ? "Unable to generate today's complete schedule: more client coverage is required than available eligible staff can provide. Human scheduling decision needed." : undefined,
-      message: saved ? "Complete AI schedule validated and saved." : "Validated AI schedule preview; no schedule was overwritten.",
-    }, { status: audit.problems.length || !complete ? 422 : 200 });
+      message: saved ? (complete ? "Complete AI schedule validated and saved." : `Partial AI schedule saved. ${placementIssues.length} uncovered client blocks added to Unplaced Assignments for human placement.`) : "Validated AI schedule preview; no schedule was overwritten.",
+    }, { status: valid ? 200 : 422 });
   } catch (error) {
     console.error("AI Schedule preview error:", error);
     return invalid("AI Generate preview failed. The existing schedule was not changed.", 500);
