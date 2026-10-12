@@ -181,7 +181,12 @@ check("insufficient staffing",Array.from({length:8},(_,i)=>s(i,slots())),
   const times=slots(8,12);
   const staff=[{...s(1,times),teamId:"red"},{...s(2,times),teamId:"blue"}];
   const clients=[{...c(1,times),teamId:"blue",staffRelationships:{s1:"ALLOWED" as const,s2:"PREFERRED" as const}}];
-  const rules={slotLengthMinutes:30,preferSameTeam:true,sameTeamPriority:80,preferredStaffPriority:90} as SchedulerInput["rules"];
+  const rules={slotLengthMinutes:30,preferSameTeam:true,sameTeamPriority:80,preferredStaffPriority:90,
+    btCoveragePriority:0,continuityPriority:0,rotationPriority:0,clientHandoffPenaltyPriority:0,
+    staffScheduleCompactnessPriority:0,workloadBalancePriority:0,weeklyHoursPriority:0,
+    scheduleStabilityPriority:0,weekdayTemplatePriority:0,
+    autoUseHistoricalPatterns:false,preferStaffContinuity:true
+  } as SchedulerInput["rules"];
   const input={staff,clients,callOutStaffIds:[],rules,existingAssignments:[],referenceAssignments:[]} as SchedulerInput;
   const ai=constructAiSchedule(input);
   const first=ai.assignments.find(a=>a.clientId==="c1"&&a.startTime==="08:00");
