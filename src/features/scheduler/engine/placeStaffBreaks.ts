@@ -814,6 +814,17 @@ function alignPlainBreaksWithAdjacentNaps(
     if(ownedBreaks.length!==1||ownedBreaks[0].assignmentType!=="BREAK"||
       ownedBreaks[0].source!=="AUTO")continue;
     const old=ownedBreaks[0];
+    // A plain break can already be sitting on the client's selected nap.
+    // Convert that SAME cell to BREAK_NAP before trying to move it elsewhere.
+    const fixedHere=findFixedEventForStaffSlot(person.id,old.startTime,result,clients,rules.slotLengthMinutes);
+    if(fixedHere?.assignmentType==="BREAK_NAP" &&
+      !result.some(a=>a.clientId===fixedHere.client.id&&a.startTime===old.startTime)) {
+      const at=result.findIndex(a=>a.id===old.id&&a.staffId===person.id);
+      if(at>=0) {
+        result[at]=createBreakAssignment(person,old.startTime,fixedHere);
+        continue;
+      }
+    }
     const choices=person.availableSlots.filter(time=>
       time>=rules.breakWindowStart&&time<rules.breakWindowEnd &&
       time!==old.startTime &&
