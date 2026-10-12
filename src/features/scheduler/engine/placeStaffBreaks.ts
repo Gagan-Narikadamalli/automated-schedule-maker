@@ -775,6 +775,43 @@ function smoothShortClientRuns(
   }
 }
 
+/**
+ * When the client has a confirmed nap, prefer using that 30-minute window
+ * for the linked staff break instead of leaving a blank calendar cell and
+ * retaining an unrelated automatic plain BREAK elsewhere.
+ * Only movable AUTO breaks are considered; protected/template breaks stay put.
+ */
+function alignPlainBreaksWithAdjacentNaps(
+  assignments: SchedulerAssignment[],
+  staff: SchedulerStaff[],
+  clients: SchedulerClient[],
+  rules: PostCoverageBreakRules
+): SchedulerAssignment[] {
+  if (rules.defaultBreakMinutes !== rules.slotLengthMinutes) return assignments;
+  const result=assignments.map(a=>({...a}));
+  for(const person of staff) {
+    const ownedBreaks=result.filter(a=>a.staffId===person.id&&
+      ["BREAK","BREAK_NAP","BREAK_SPEECH"].includes(a.assignmentType));
+    if(ownedBreaks.length!==1||ownedBreaks[0].assignmentType!=="BREAK"||
+      ownedBreaks[0].source!=="AUTO")continue;
+    const old=ownedBreaks[0];
+    const choices=person.availableSlots.filter(time=>
+      time>=rules.breakWindowStart&&time<rules.breakWindowEnd &&
+      time!==old.startTime &&
+      !result.some(a=>a.staffId===person.id&&a.startTime===time)
+    ).map(time=>({time,event:findFixedEventForStaffSlot(
+      person.id,time,result,clients,rules.slotLengthMinutes
+    )})).filter(item=>item.event?.assignmentType==="BREAK_NAP" &&
+      !result.some(a=>a.clientId===item.event?.client.id&&a.startTime===item.time));
+    if(choices.length===0)continue;
+    choices.sort((a,b)=>Math.abs(timeDistanceFromNoon(a.time))-Math.abs(timeDistanceFromNoon(b.time)));
+    const chosen=choices[0],at=result.findIndex(a=>a.id===old.id&&a.staffId===person.id);
+    if(at<0||!chosen.event)continue;
+    result[at]=createBreakAssignment(person,chosen.time,chosen.event);
+  }
+  return result;
+}
+
 export function placeStaffBreaksAfterCoverage({
   staff,
   clients,
@@ -916,8 +953,11 @@ export function placeStaffBreaksAfterCoverage({
     rules: schedulerRules,
   });
 
+  const napAlignedAssignments=alignPlainBreaksWithAdjacentNaps(
+    humanBalance.assignments,staff,clients,rules
+  );
   return {
-    assignments: humanBalance.assignments,
+    assignments: napAlignedAssignments,
     reservedBreaks,
     reliefSwapCount,
     humanStyleBlockSwapCount: humanBalance.blockSwapCount,
