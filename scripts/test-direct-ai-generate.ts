@@ -108,3 +108,26 @@ check("insufficient staffing",Array.from({length:8},(_,i)=>s(i,slots())),
   assert.equal(pinWorkbookTemplates(invalid).pinned.length,0);
   console.log("PASS template linked nap and speech breaks retain client IDs and reject invalid windows");
 }
+
+{
+  const day=["11:00","11:30","12:00"];
+  const staff=[s(1,day)];
+  const clients=[c(1,day,{napSlots:["11:30"]}),c(2,day,{napSlots:[]})];
+  const ref=(id:string,clientId:string|undefined,time:string,type:"CLIENT_1_TO_1"|"BREAK_NAP"):SchedulerAssignment=>({
+    id,staffId:"s1",clientId,startTime:time,assignmentType:type,source:"TEMPLATE",locked:false,
+    note:"Priority 1 saved workbook template: legacy"
+  });
+  const input={staff,clients,callOutStaffIds:[],rules:{slotLengthMinutes:30},
+    existingAssignments:[],referenceAssignments:[
+      ref("previous","c1","11:00","CLIENT_1_TO_1"),
+      ref("legacy",undefined,"11:30","BREAK_NAP"),
+      ref("next","c2","12:00","CLIENT_1_TO_1")
+    ]} as unknown as SchedulerInput;
+  const resolved=pinWorkbookTemplates(input);
+  const nap=resolved.pinned.find(a=>a.startTime==="11:30");
+  assert.equal(nap?.assignmentType,"BREAK_NAP");
+  assert.equal(nap?.clientId,"c1");
+  const unresolved=pinWorkbookTemplates({...input,clients:clients.map(x=>({...x,napSlots:[]}))});
+  assert.equal(unresolved.pinned.find(a=>a.startTime==="11:30")?.assignmentType,"BREAK");
+  console.log("PASS legacy Break/Nap links adjacent previous client only when a valid nap exists");
+}
