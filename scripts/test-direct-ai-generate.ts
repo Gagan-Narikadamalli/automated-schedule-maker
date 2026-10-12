@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { constructAiSchedule } from "../src/features/scheduler/engine/constructAiSchedule";
 import { enrichBreakAssignmentsWithFixedEvents } from "../src/features/scheduler/engine/reserveBreaks";
 import { auditLinkedNapBreakRules } from "../src/features/scheduler/engine/auditLinkedNapBreakRules";
+import { pinWorkbookTemplates } from "../src/features/scheduler/engine/pinWorkbookTemplates";
 import type { SchedulerAssignment } from "../src/features/scheduler/engine/types";
 import type { SchedulerInput, SchedulerClient, SchedulerStaff } from "../src/features/scheduler/engine/types";
 const slots=(start=8,end=16)=>Array.from({length:(end-start)*2},(_,i)=>{
@@ -82,4 +83,28 @@ check("insufficient staffing",Array.from({length:8},(_,i)=>s(i,slots())),
   assert.ok(auditLinkedNapBreakRules([item("a","s1","BREAK_NAP"),item("b","s1","BREAK","12:00")],[napClient]).some(x=>x.includes("multiple breaks")));
   assert.ok(auditLinkedNapBreakRules([item("a","s1","BREAK_NAP"),item("b","s2","BREAK_NAP")],[napClient]).some(x=>x.includes("Duplicate")));
   console.log("PASS shared one-nap/one-break rules for Day and Week");
+}
+
+{
+  const day=slots(11,14);
+  const staff=[s(1,day),s(2,day)];
+  const clients=[c(1,day,{napSlots:["12:00"],speechSlots:["13:00"]})];
+  const reference=(id:string,staffId:string,time:string,type:"BREAK_NAP"|"BREAK_SPEECH"):SchedulerAssignment=>({
+    id,staffId,clientId:"c1",startTime:time,assignmentType:type,source:"TEMPLATE",locked:false,
+    note:"Priority 1 saved workbook template: test"
+  });
+  const input={staff,clients,callOutStaffIds:[],rules:{slotLengthMinutes:30},
+    existingAssignments:[],referenceAssignments:[
+      reference("nap","s1","12:00","BREAK_NAP"),
+      reference("speech","s2","13:00","BREAK_SPEECH"),
+    ]} as unknown as SchedulerInput;
+  const result=pinWorkbookTemplates(input);
+  assert.equal(result.rejected.length,0,JSON.stringify(result.rejected));
+  assert.equal(result.pinned.length,2);
+  assert.equal(result.pinned[0].clientId,"c1");
+  assert.equal(result.pinned[0].assignmentType,"BREAK_NAP");
+  assert.equal(result.pinned[1].assignmentType,"BREAK_SPEECH");
+  const invalid={...input,referenceAssignments:[reference("wrong","s1","11:30","BREAK_NAP")]};
+  assert.equal(pinWorkbookTemplates(invalid).pinned.length,0);
+  console.log("PASS template linked nap and speech breaks retain client IDs and reject invalid windows");
 }
