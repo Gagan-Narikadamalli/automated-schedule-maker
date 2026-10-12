@@ -69,22 +69,51 @@ export function constructAiSchedule(input:SchedulerInput,choices:AiChoices={}) {
     const rank=(cid:string,sid:string)=>{
       const index=(choices.ranking?.[cid]??[]).indexOf(sid);return index<0?999:index;
     };
-    function match(cid:string,seen:Set<string>):boolean {
+    // Preserve full client/staff runs whenever legal. First reserve the
+    // incumbents from the previous half-hour, then match remaining clients.
+    // Only displace an incumbent when it is necessary to cover an otherwise
+    // unstaffed client (never merely to improve a preference score).
+    const clientsAt=requiredBySlot(t).sort((a,b)=>
+      people.filter(s=>can(s.id,a.id)).length-people.filter(s=>can(s.id,b.id)).length||
+      a.id.localeCompare(b.id));
+    for(const c of clientsAt) {
+      const sid=last.get(c.id);
+      if(sid&&can(sid,c.id)&&!occupied.has(sid)) {
+        occupied.set(sid,c.id);
+        matched.set(c.id,sid);
+      }
+    }
+    const rank=(cid:string,sid:string)=>{
+      const index=(choices.ranking?.[cid]??[]).indexOf(sid);
+      return index<0?999:index;
+    };
+    const templateAffinity=(cid:string,sid:string)=>
+      input.referenceAssignments.some(a=>a.clientId===cid&&a.staffId===sid&&
+        a.startTime===t&&a.assignmentType==="CLIENT_1_TO_1")?0:1;
+    function match(cid:string,seen:Set<string>,allowReassignment:boolean):boolean {
       const candidates=people.filter(s=>can(s.id,cid)).sort((a,b)=>
-        Number(reservations.get(a.id)===t)-Number(reservations.get(b.id)===t)||
+        Number(occupied.has(a.id))-Number(occupied.has(b.id))||
+        templateAffinity(cid,a.id)-templateAffinity(cid,b.id)||
         Number(last.get(cid)!==a.id)-Number(last.get(cid)!==b.id)||
-        rank(cid,a.id)-rank(cid,b.id)||(load.get(a.id)??0)-(load.get(b.id)??0)||a.id.localeCompare(b.id));
-      for(const s of candidates){
-        if(seen.has(s.id))continue;seen.add(s.id);
+        rank(cid,a.id)-rank(cid,b.id)||
+        (load.get(a.id)??0)-(load.get(b.id)??0)||a.id.localeCompare(b.id));
+      for(const s of candidates) {
+        if(seen.has(s.id))continue;
+        seen.add(s.id);
         const previous=occupied.get(s.id);
-        if(!previous||match(previous,seen)){
+        if(!previous) {
+          occupied.set(s.id,cid);matched.set(cid,s.id);return true;
+        }
+        if(allowReassignment&&previous!==cid&&match(previous,seen,true)) {
           occupied.set(s.id,cid);matched.set(cid,s.id);return true;
         }
       }
       return false;
     }
-    const clientsAt=requiredBySlot(t).sort((a,b)=>people.filter(s=>can(s.id,a.id)).length-people.filter(s=>can(s.id,b.id)).length||a.id.localeCompare(b.id));
-    for(const c of clientsAt)if(!match(c.id,new Set()))uncovered.push({clientId:c.id,clientCode:c.displayCode,startTime:t});
+    for(const c of clientsAt)if(!matched.has(c.id)) {
+      if(!match(c.id,new Set(),false)&&!match(c.id,new Set(),true))
+        uncovered.push({clientId:c.id,clientCode:c.displayCode,startTime:t});
+    }
     for(const [cid,sid] of matched) {
       const type=event.get(cid+"|"+t),breakHere=reservations.get(sid)===t;
       assigned.push({staffId:sid,clientId:cid,startTime:t,assignmentType:breakHere
