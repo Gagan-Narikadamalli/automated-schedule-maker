@@ -264,6 +264,9 @@ export async function POST(request: Request) {
         const id=clientRefs.get(alias);
         if(id && typeof chosen==="string")naps[id]=chosen;
       }
+      if (!Object.values(ranking).some(values=>values.length>0) && Object.keys(naps).length===0) {
+        throw new Error("Ollama returned no usable staff preferences or nap selections");
+      }
       aiPreferences={ranking,naps,explanation:typeof proposal.explanation==="string"?proposal.explanation.slice(0,1000):undefined};
       ollamaUsed=true;
       ollamaDiagnostic="Ollama generated accepted scheduling preferences";
