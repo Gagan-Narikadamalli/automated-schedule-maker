@@ -871,7 +871,8 @@ function mapReferenceAssignments(
     ) {
       // Linked workbook breaks must keep the client identity. A missing client
       // is not a valid linked event and must never become an anonymous break.
-      if (!clientId || !clientById.has(clientId)) return;
+      if (clientId && !clientById.has(clientId)) return;
+      // Legacy workbook Break/Nap may be unlabeled; resolve from adjacent client blocks later.
     } else if (assignmentType !== "BREAK") {
       return;
     }
