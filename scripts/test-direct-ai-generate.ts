@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { constructAiSchedule } from "../src/features/scheduler/engine/constructAiSchedule";
 import { enrichBreakAssignmentsWithFixedEvents } from "../src/features/scheduler/engine/reserveBreaks";
+import { auditLinkedNapBreakRules } from "../src/features/scheduler/engine/auditLinkedNapBreakRules";
 import type { SchedulerAssignment } from "../src/features/scheduler/engine/types";
 import type { SchedulerInput, SchedulerClient, SchedulerStaff } from "../src/features/scheduler/engine/types";
 const slots=(start=8,end=16)=>Array.from({length:(end-start)*2},(_,i)=>{
@@ -68,4 +69,17 @@ check("insufficient staffing",Array.from({length:8},(_,i)=>s(i,slots())),
   const again=enrichBreakAssignmentsWithFixedEvents(linked,[client],30);
   assert.equal(again[1].assignmentType,"BREAK_NAP");
   console.log("PASS linked break + nap preserved");
+}
+
+{
+  const napClient=c(99,["11:00","11:30","12:00"],{napSlots:["11:30"]});
+  const item=(id:string,staffId:string,type:"NAP"|"BREAK_NAP"|"BREAK",time="11:30"):SchedulerAssignment=>({
+    id,staffId,clientId:type==="BREAK"?undefined:"c99",startTime:time,
+    assignmentType:type,source:"AUTO",locked:false
+  });
+  assert.equal(auditLinkedNapBreakRules([item("a","s1","BREAK_NAP")],[napClient]).length,0);
+  assert.ok(auditLinkedNapBreakRules([item("a","s1","NAP")],[napClient]).some(x=>x.includes("Standalone")));
+  assert.ok(auditLinkedNapBreakRules([item("a","s1","BREAK_NAP"),item("b","s1","BREAK","12:00")],[napClient]).some(x=>x.includes("multiple breaks")));
+  assert.ok(auditLinkedNapBreakRules([item("a","s1","BREAK_NAP"),item("b","s2","BREAK_NAP")],[napClient]).some(x=>x.includes("Duplicate")));
+  console.log("PASS shared one-nap/one-break rules for Day and Week");
 }
