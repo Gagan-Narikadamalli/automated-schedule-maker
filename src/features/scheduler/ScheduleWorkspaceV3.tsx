@@ -981,6 +981,7 @@ export function ScheduleWorkspaceV3() {
         message?: string;
         partialBuild?: boolean;
         ollamaUsed?: boolean;
+        ollamaDiagnostic?: string;
         unplacedCount?: number;
         placementIssues?: Array<{clientCode:string;startTime:string;reason:string}>;
         breakIssues?: string[];
@@ -996,7 +997,7 @@ export function ScheduleWorkspaceV3() {
         ...(data.breakIssues ?? []),
         ...(data.violations ?? []),
       ];
-      if (data.ollamaUsed === false) issues.unshift("Ollama planning was unavailable; placements were calculated by the independent website scheduler.");
+      if (data.ollamaUsed === false) issues.unshift(data.ollamaDiagnostic ?? "Ollama planning was unavailable; placements were calculated by the independent website scheduler.");
       setSchedulerWarnings(issues);
       setShowSchedulerWarnings(issues.length > 0);
       setStatusMessage(data.partialBuild
