@@ -928,16 +928,16 @@ export function ScheduleWorkspaceV3() {
 
   async function requestAiGenerate() {
     if (demoMode) {
-      setStatusMessage("AI Generate requires a configured optimizer service and a real location.");
+      setStatusMessage("AI Generate requires a real location.");
       return;
     }
     try {
       setWorking(true);
-      setStatusMessage("Requesting an independent AI schedule preview; the saved schedule will not change...");
+      setStatusMessage("Asking website AI to generate and validate the full schedule...");
       const response = await fetch("/api/schedule/ai-generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ locationId, date: selectedDate }),
+        body: JSON.stringify({ locationId, date: selectedDate, save: true }),
       });
       const data = await readJson<{
         error?: string;
@@ -953,7 +953,8 @@ export function ScheduleWorkspaceV3() {
         : "No coverage metrics returned.";
       setSchedulerWarnings(data.violations ?? []);
       setShowSchedulerWarnings((data.violations ?? []).length > 0);
-      setStatusMessage(`AI Generate preview: ${coverage} ${data.explanation ?? ""} Preview only—nothing was saved or replaced.`);
+      setStatusMessage(`AI Generate: ${coverage} ${data.explanation ?? ""} Schedule saved and refreshed.`);
+      await loadSchedule();
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "AI Generate preview failed; the saved schedule was not changed.");
     } finally {
@@ -1129,7 +1130,7 @@ export function ScheduleWorkspaceV3() {
           <button type="button" className={`button ${manualMode ? "button-warning" : "button-secondary"}`} disabled={working || loading || staff.length === 0} onClick={toggleManualMode}>Manual Mode: {manualMode ? "On" : "Off"}</button>
           <button type="button" className="button button-secondary" disabled={working || loading || staff.length === 0} onClick={() => void requestGenerateWeek()}>Auto Generate Week</button>
           <button type="button" className="button button-primary" disabled={working || loading || staff.length === 0} onClick={() => void requestAutoGenerate()}>{working ? "Working..." : "Auto Generate Day"}</button>
-          <button type="button" className="button button-secondary" disabled={working || loading || staff.length === 0} onClick={() => void requestAiGenerate()} title="Preview an independently optimized schedule. Does not overwrite the current day. Requires a configured AI optimizer service.">AI Generate (Preview)</button>
+          <button type="button" className="button button-secondary" disabled={working || loading || staff.length === 0} onClick={() => void requestAiGenerate()} title="Generate a full schedule with the website AI, validate it, and save only if complete.">AI Generate</button>
         </div>
       </section>
 
