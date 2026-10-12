@@ -68,6 +68,13 @@ export function pinWorkbookTemplates(input: SchedulerInput): {
         member.serviceSetting !== client.serviceSetting) {
         reason = "Incompatible service setting";
       }
+    } else if (reference.assignmentType === "BREAK_NAP" || reference.assignmentType === "BREAK_SPEECH") {
+      const eventSlots = reference.assignmentType === "BREAK_NAP" ? client?.napSlots : client?.speechSlots;
+      if (!client || !eventSlots?.includes(reference.startTime)) {
+        reason = "Linked template break does not match a saved client nap/speech event";
+      } else if (clientSlots.has(clientKey)) {
+        reason = "Another template assignment already supervises this client event";
+      }
     } else if (!["BREAK", "BREAK_NAP", "BREAK_SPEECH"].includes(reference.assignmentType)) {
       reason = "Unsupported workbook block type";
     }
@@ -86,7 +93,7 @@ export function pinWorkbookTemplates(input: SchedulerInput): {
     });
     staffSlots.add(staffKey);
     if (isBreak) staffWithBreak.add(reference.staffId);
-    if (reference.assignmentType === "CLIENT_1_TO_1") clientSlots.add(clientKey);
+    if (reference.clientId) clientSlots.add(clientKey);
     if (reference.note?.startsWith("Priority 1")) primaryCount++;
     else secondaryCount++;
   }
