@@ -944,6 +944,11 @@ export function ScheduleWorkspaceV3() {
         previewOnly?: boolean;
         violations?: string[];
         explanation?: string;
+        message?: string;
+        partialBuild?: boolean;
+        unplacedCount?: number;
+        placementIssues?: Array<{clientCode:string;startTime:string;reason:string}>;
+        breakIssues?: string[];
         metrics?: { coveredClientSlots: number; requiredClientSlots: number; uncoveredClientSlots: number; coveragePercent: number };
       }>(response);
       if (!response.ok) throw new Error(data.error || data.violations?.join("; ") || "AI Generate could not validate a schedule.");
@@ -951,9 +956,16 @@ export function ScheduleWorkspaceV3() {
       const coverage = metrics
         ? `${metrics.coveredClientSlots}/${metrics.requiredClientSlots} required slots covered (${metrics.coveragePercent.toFixed(1)}%), ${metrics.uncoveredClientSlots} uncovered.`
         : "No coverage metrics returned.";
-      setSchedulerWarnings(data.violations ?? []);
-      setShowSchedulerWarnings((data.violations ?? []).length > 0);
-      setStatusMessage(`AI Generate: ${coverage} ${data.explanation ?? ""} Schedule saved and refreshed.`);
+      const issues = [
+        ...(data.placementIssues ?? []).map(item => `${item.clientCode} at ${item.startTime}: ${item.reason}`),
+        ...(data.breakIssues ?? []),
+        ...(data.violations ?? []),
+      ];
+      setSchedulerWarnings(issues);
+      setShowSchedulerWarnings(issues.length > 0);
+      setStatusMessage(data.partialBuild
+        ? `AI Generate saved a partial schedule: ${coverage} ${data.unplacedCount ?? issues.length} blocks sent to Unplaced Assignments. Review the placement issues below.`
+        : `AI Generate: ${coverage} ${data.explanation ?? ""} Schedule saved and refreshed.`);
       await loadSchedule();
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "AI Generate preview failed; the saved schedule was not changed.");
