@@ -178,8 +178,8 @@ export async function POST(request: Request) {
       aiPreferences={ranking,naps,explanation:typeof proposal.explanation==="string"?proposal.explanation.slice(0,1000):undefined};
       ollamaUsed=true;
     } catch(error) {
-      console.warn("Ollama planning unavailable; in-app scheduler will use local safe defaults",
-        error instanceof Error?error.message:"unknown");
+      console.warn("Website Ollama scheduling request failed",error instanceof Error?error.message:"unknown");
+      return invalid("Website AI could not reach Ollama or parse its scheduling response. No schedule was changed.",503);
     }
     const generated=constructAiSchedule(roster,aiPreferences);
     const data:ResponseBody={
@@ -236,10 +236,10 @@ export async function POST(request: Request) {
       }
       saved = true;
       regenerationSummary = {
-        added:outcome.addedCount,
-        changed:outcome.changedCount,
-        unchanged:outcome.unchangedCount,
-        removed:outcome.removedStaleCount,
+        added:outcome.addedCount ?? 0,
+        changed:outcome.changedCount ?? 0,
+        unchanged:outcome.unchangedCount ?? 0,
+        removed:outcome.removedStaleCount ?? 0,
       };
     }
     return NextResponse.json({
