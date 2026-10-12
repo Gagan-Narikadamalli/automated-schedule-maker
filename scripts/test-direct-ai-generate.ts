@@ -9,7 +9,7 @@ const c=(n:number,t:string[],extras:Partial<SchedulerClient>={}):SchedulerClient
   id:`c${n}`,displayCode:`C${n}`,requiredSlots:t,napSlots:[],speechSlots:[],staffRelationships:{},...extras
 });
 function check(name:string,staff:SchedulerStaff[],clients:SchedulerClient[],callOutStaffIds:string[],expected:boolean){
-  const input={staff,clients,callOutStaffIds,rules:{slotLengthMinutes:30},existingAssignments:[],referenceAssignments:[]} as SchedulerInput;
+  const input={staff,clients,callOutStaffIds,rules:{slotLengthMinutes:30},existingAssignments:[],referenceAssignments:[]} as unknown as SchedulerInput;
   const result=constructAiSchedule(input);
   assert.equal(result.success,expected,`${name}: ${JSON.stringify(result.uncoveredRequirements.slice(0,3))}`);
   const occupied=new Set<string>(),covered=new Set<string>(),breaks=new Map<string,number>();
