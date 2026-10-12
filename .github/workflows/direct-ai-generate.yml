@@ -1,0 +1,26 @@
+name: Direct AI Generate smoke tests
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/ai-generate-preview
+    paths:
+      - 'src/features/scheduler/engine/constructAiSchedule.ts'
+      - 'src/app/api/schedule/ai-generate/route.ts'
+      - 'scripts/test-direct-ai-generate.ts'
+      - '.github/workflows/direct-ai-generate.yml'
+jobs:
+  direct-ai-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Five schedules and failure handling
+        run: npx tsx scripts/test-direct-ai-generate.ts
+      - name: Strict TypeScript
+        run: npx tsc --noEmit --noUnusedLocals --noUnusedParameters
