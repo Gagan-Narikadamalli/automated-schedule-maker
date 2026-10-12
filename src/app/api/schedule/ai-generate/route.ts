@@ -127,7 +127,7 @@ export async function POST(request: Request) {
     const windows = new Map<string,Set<string>>();
     for(const nap of napDocuments) {
       const id=String(nap.clientId);
-      const allowed=getSlotsInsideTimeRange(nap.startTime,nap.endTime,30);
+      const allowed=getSlotsInsideTimeRange(nap.startTime,nap.endTime);
       const set=windows.get(id)??new Set<string>();
       for(const t of allowed)set.add(t);
       windows.set(id,set);
