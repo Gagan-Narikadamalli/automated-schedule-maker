@@ -13,7 +13,15 @@ export function auditLinkedNapBreakRules(
   const naps=new Map<string,number>();
   const eventSlots=new Set(clients.flatMap(c=>c.napSlots.map(time=>`${c.id}|${time}`)));
   const occupied=new Set<string>();
+  const clientAssignments=new Map<string,number>();
+  const staffAssignments=new Map<string,number>();
   for(const a of assignments) {
+    const staffKey=`${a.staffId}|${a.startTime}`;
+    staffAssignments.set(staffKey,(staffAssignments.get(staffKey)??0)+1);
+    if(a.clientId) {
+      const clientKey=`${a.clientId}|${a.startTime}`;
+      clientAssignments.set(clientKey,(clientAssignments.get(clientKey)??0)+1);
+    }
     if(a.assignmentType==="NAP" && a.source==="AUTO")
       problems.push(`Standalone automatic NAP: ${a.clientId??"unknown"} at ${a.startTime}; use a single BREAK_NAP instead`);
     if(!["BREAK","BREAK_NAP","BREAK_SPEECH"].includes(a.assignmentType))continue;
@@ -33,5 +41,7 @@ export function auditLinkedNapBreakRules(
     naps.set(a.clientId,n);
     if(n>1)problems.push(`Client ${a.clientId} has multiple naps`);
   }
+  for(const [key,count] of staffAssignments)if(count>1)problems.push(`Staff double-booked: ${key}`);
+  for(const [key,count] of clientAssignments)if(count>1)problems.push(`Client double-booked: ${key}`);
   return problems;
 }
