@@ -152,3 +152,26 @@ check("insufficient staffing",Array.from({length:8},(_,i)=>s(i,slots())),
   assert.ok(auditLinkedNapBreakRules(conflict,[blocked]).some(x=>x.includes("Client double-booked")));
   console.log("PASS template restrictions and duplicate client supervision audit");
 }
+
+{
+  const staff=Array.from({length:26},(_,i)=>s(i,slots(8,16)));
+  const clients=Array.from({length:20},(_,i)=>c(i,slots(8,16)));
+  const input={staff,clients,callOutStaffIds:[],rules:{slotLengthMinutes:30},
+    existingAssignments:[],referenceAssignments:[]} as unknown as SchedulerInput;
+  const result=constructAiSchedule(input);
+  assert.equal(result.uncoveredRequirements.length,0);
+  let shortRuns=0,handOffs=0;
+  for(const client of clients){
+    const ordered=result.assignments.filter(a=>a.clientId===client.id && a.assignmentType==="CLIENT_1_TO_1")
+      .sort((a,b)=>a.startTime.localeCompare(b.startTime));
+    for(let i=1;i<ordered.length;i++){
+      if(ordered[i-1].staffId!==ordered[i].staffId) {
+        handOffs++;
+        if(i===1 || i===ordered.length-1)shortRuns++;
+      }
+    }
+  }
+  assert.ok(handOffs<=40,`Too many fragmented handoffs: ${handOffs}`);
+  assert.ok(shortRuns<=20,`Too many short client runs: ${shortRuns}`);
+  console.log(`PASS AI contiguous client runs: handoffs=${handOffs}, short-run edges=${shortRuns}`);
+}
