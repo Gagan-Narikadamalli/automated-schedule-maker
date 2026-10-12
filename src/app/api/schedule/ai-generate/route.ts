@@ -1,0 +1,142 @@
+import { NextResponse } from "next/server";
+import {
+  forbiddenResponse,
+  requireApiSession,
+  sessionCanAccessLocation,
+  sessionHasAnyRole,
+  SCHEDULE_WRITE_ROLES,
+} from "@/lib/api/auth";
+import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySchedulerInput";
+
+type Candidate = {
+  staffId: string;
+  clientId?: string | null;
+  startTime: string;
+  assignmentType: "CLIENT_1_TO_1" | "BREAK" | "BREAK_NAP" | "BREAK_SPEECH";
+};
+type ResponseBody = { assignments?: Candidate[]; explanation?: string };
+
+function invalid(message: string, status = 422) {
+  return NextResponse.json({ error: message }, { status });
+}
+function validatePreview(input: Awaited<ReturnType<typeof buildDaySchedulerInput>>["input"], values: Candidate[]) {
+  const staff = new Map(input.staff.map(s => [s.id, s]));
+  const clients = new Map(input.clients.map(c => [c.id, c]));
+  const staffSlots = new Set<string>();
+  const clientSlots = new Set<string>();
+  const breakCount = new Map<string, number>();
+  const allTimes = new Set([...input.staff.flatMap(s => s.availableSlots), ...input.clients.flatMap(c => c.requiredSlots)]);
+  const calledOut = new Set(input.callOutStaffIds);
+  const problems: string[] = [];
+  const allowedTypes = new Set(["CLIENT_1_TO_1", "BREAK", "BREAK_NAP", "BREAK_SPEECH"]);
+  for (const [index, row] of values.entries()) {
+    if (!row || typeof row !== "object" || !allowedTypes.has(row.assignmentType) ||
+        typeof row.staffId !== "string" || typeof row.startTime !== "string" ||
+        !/^\d{2}:\d{2}$/.test(row.startTime) || !allTimes.has(row.startTime)) {
+      problems.push(`Invalid assignment at index ${index}`);
+      continue;
+    }
+    const member = staff.get(row.staffId);
+    if (!member || calledOut.has(row.staffId) || !member.availableSlots.includes(row.startTime)) {
+      problems.push(`Staff unavailable at ${row.startTime}: ${row.staffId}`);
+      continue;
+    }
+    const sk = `${row.staffId}|${row.startTime}`;
+    if (staffSlots.has(sk)) problems.push(`Staff double-booked: ${sk}`);
+    staffSlots.add(sk);
+    if (row.assignmentType !== "CLIENT_1_TO_1") {
+      if (row.clientId) problems.push(`Break must not have a client: ${sk}`);
+      breakCount.set(row.staffId, (breakCount.get(row.staffId) ?? 0) + 1);
+      if ((breakCount.get(row.staffId) ?? 0) > 1) problems.push(`Duplicate break: ${row.staffId}`);
+      continue;
+    }
+    const client = row.clientId ? clients.get(row.clientId) : null;
+    if (!client || !client.requiredSlots.includes(row.startTime)) {
+      problems.push(`Client unavailable/unknown at ${row.startTime}: ${row.clientId ?? "none"}`);
+      continue;
+    }
+    const ck = `${row.clientId}|${row.startTime}`;
+    if (clientSlots.has(ck)) problems.push(`Client double-booked: ${ck}`);
+    clientSlots.add(ck);
+    if (client.staffRelationships[row.staffId] === "HARD_RESTRICTION") {
+      problems.push(`Hard relationship restriction: ${row.staffId} / ${row.clientId}`);
+    }
+    const ss = member.serviceSetting, cs = client.serviceSetting;
+    if (ss && cs && ss !== "BOTH" && cs !== "BOTH" && ss !== cs) {
+      problems.push(`Service-setting mismatch: ${row.staffId} / ${row.clientId}`);
+    }
+  }
+  const missing = input.clients.flatMap(c => c.requiredSlots
+    .filter(slot => !clientSlots.has(`${c.id}|${slot}`))
+    .map(slot => ({ clientId: c.id, clientCode: c.displayCode, startTime: slot })));
+  return { problems, missing, covered: clientSlots.size,
+    required: input.clients.reduce((sum,c) => sum + c.requiredSlots.length, 0) };
+}
+
+/**
+ * Independent AI Generate preview. Does not import or call the existing
+ * generateSchedule function and NEVER writes to MongoDB.
+ * The optimizer endpoint must be configured by the deployment administrator.
+ * Language-model output is untrusted and is independently checked here.
+ */
+export async function POST(request: Request) {
+  const auth = await requireApiSession();
+  if (auth.error) return auth.error;
+  if (!sessionHasAnyRole(auth.session, SCHEDULE_WRITE_ROLES)) return forbiddenResponse();
+  try {
+    const body = await request.json() as { locationId?: string; date?: string };
+    const locationId = body.locationId?.trim();
+    const date = body.date?.trim();
+    if (!locationId || !date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return invalid("A locationId and date (YYYY-MM-DD) are required.", 400);
+    }
+    if (!sessionCanAccessLocation(auth.session, locationId)) return forbiddenResponse();
+    const endpoint = process.env.AI_SCHEDULER_OPTIMIZER_URL?.trim();
+    const token = process.env.AI_SCHEDULER_OPTIMIZER_TOKEN?.trim();
+    if (!endpoint || !token) return invalid(
+      "AI Generate is not configured yet. Set AI_SCHEDULER_OPTIMIZER_URL and AI_SCHEDULER_OPTIMIZER_TOKEN on the server.",
+      503
+    );
+    const parsed = new URL(endpoint);
+    if (parsed.protocol !== "https:" && !(parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost")) {
+      return invalid("AI scheduler service must use HTTPS (except localhost).", 503);
+    }
+    const dayData = await buildDaySchedulerInput(locationId, date);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 60000);
+    let result: Response;
+    try {
+      result = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({ date, locationId, input: dayData.input, rules: dayData.extendedRules }),
+        signal: controller.signal,
+        cache: "no-store",
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+    if (!result.ok) return invalid(`AI optimizer service returned HTTP ${result.status}; no schedule was changed.`, 502);
+    const data = await result.json() as ResponseBody;
+    if (!Array.isArray(data.assignments) || data.assignments.length > 10000) {
+      return invalid("AI optimizer returned an invalid assignments array.", 502);
+    }
+    const audit = validatePreview(dayData.input, data.assignments);
+    return NextResponse.json({
+      success: audit.problems.length === 0,
+      previewOnly: true,
+      date, locationId,
+      assignments: audit.problems.length === 0 ? data.assignments : [],
+      metrics: { requiredClientSlots: audit.required, coveredClientSlots: audit.covered,
+        uncoveredClientSlots: audit.missing.length,
+        coveragePercent: audit.required ? 100 * audit.covered / audit.required : 100 },
+      violations: audit.problems,
+      uncoveredRequirements: audit.missing,
+      explanation: typeof data.explanation === "string" ? data.explanation.slice(0, 4000) : "",
+      message: "Preview only: no schedule was overwritten. Review before approving any future save.",
+    }, { status: audit.problems.length ? 422 : 200 });
+  } catch (error) {
+    console.error("AI Schedule preview error:", error);
+    return invalid("AI Generate preview failed. The existing schedule was not changed.", 500);
+  }
+}
