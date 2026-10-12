@@ -1,3 +1,4 @@
+async function main() {
 /** One-time Vercel build smoke test. Do not leave this in the normal build pipeline. */
 const key = process.env.OLLAMA_API_KEY?.trim();
 const model = (process.env.OLLAMA_SCHEDULER_MODEL || process.env.SCHEDULER_AI_MODEL)?.trim();
@@ -22,3 +23,6 @@ try {
   if(typeof parsed!=="object"||parsed===null)throw new Error("Ollama returned invalid JSON.");
   console.log(`Ollama scheduling model connection succeeded in ${Date.now()-t}ms (one minimal API request).`);
 } finally {clearTimeout(timeout);}
+
+}
+void main().catch(error=>{ console.error(error instanceof Error?error.message:'Ollama test failed');process.exitCode=1; });
