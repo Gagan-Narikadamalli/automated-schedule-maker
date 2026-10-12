@@ -10,7 +10,7 @@ export function constructAiSchedule(input:SchedulerInput,choices:AiChoices={}) {
     if(!s||!c||c.staffRelationships[sid]==="HARD_RESTRICTION")return false;
     return !(s.serviceSetting&&c.serviceSetting&&s.serviceSetting!=="BOTH"&&c.serviceSetting!=="BOTH"&&s.serviceSetting!==c.serviceSetting);
   };
-  const slots=[...new Set(clients.flatMap(c=>c.requiredSlots))].sort((a,b)=>clock(a)-clock(b));
+  const slots=[...new Set([...clients.flatMap(c=>c.requiredSlots),...people.flatMap(p=>p.availableSlots)])].sort((a,b)=>clock(a)-clock(b));
   const event=new Map<string,"NAP"|"SPEECH">();
   for(const c of clients){
     const nap=c.napSlots.filter(t=>c.requiredSlots.includes(t));
@@ -69,5 +69,5 @@ export function constructAiSchedule(input:SchedulerInput,choices:AiChoices={}) {
   }
   const complete=uncovered.length===0&&noBreak.length===0;
   return {success:complete,assignments:assigned,uncoveredRequirements:uncovered,unplacedBreakStaffIds:noBreak,
-    failureCode:complete?undefined:"INSUFFICIENT_STAFF_COVERAGE"};
+    failureCode:complete?undefined:(noBreak.length?"NO_BREAK_WINDOW":"INSUFFICIENT_STAFF_COVERAGE")};
 }
