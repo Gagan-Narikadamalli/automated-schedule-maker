@@ -17,10 +17,24 @@ function check(name:string,staff:SchedulerStaff[],clients:SchedulerClient[],call
     const key=`${a.staffId}|${a.startTime}`;
     assert.ok(!occupied.has(key),`${name}: double-booking ${key}`);occupied.add(key);
     if(a.clientId){const ck=`${a.clientId}|${a.startTime}`;assert.ok(!covered.has(ck));covered.add(ck);}
-    if(a.assignmentType.startsWith("BREAK"))breaks.set(a.staffId,(breaks.get(a.staffId)??0)+1);
+    if(a.assignmentType.startsWith("BREAK")){
+      breaks.set(a.staffId,(breaks.get(a.staffId)??0)+1);
+      const [h,m]=a.startTime.split(":").map(Number);
+      assert.ok(h*60+m>=660 && h*60+m<840,`${name}: break outside 11-14`);
+    }
   }
   for(const p of staff.filter(p=>!callOutStaffIds.includes(p.id)))assert.equal(breaks.get(p.id),1,`${name}: break ${p.id}`);
   if(expected)assert.equal(result.uncoveredRequirements.length,0);
+  if(name==="naps and speech") {
+    for(let i=0;i<20;i++){
+      const ev=result.assignments.filter(a=>a.clientId===`c${i}`);
+      if(i<10){
+        assert.equal(ev.filter(a=>a.assignmentType==="NAP"||a.assignmentType==="BREAK_NAP").length,1);
+        assert.ok(ev.some(a=>a.startTime==="12:00"||a.startTime==="12:30"));
+        assert.equal(ev.filter(a=>(a.startTime==="12:00"||a.startTime==="12:30")).length,2);
+      } else assert.equal(ev.filter(a=>a.startTime==="12:30" && (a.assignmentType==="SPEECH"||a.assignmentType==="BREAK_SPEECH")).length,1);
+    }
+  }
   else assert.ok(result.uncoveredRequirements.length>0);
   console.log(`PASS ${name}: covered=${covered.size}; breaks=${[...breaks.values()].reduce((a,b)=>a+b,0)}; missing=${result.uncoveredRequirements.length}`);
 }
