@@ -37,3 +37,7 @@ jobs:
           assert solver.value(x) == 1
           print("OR-Tools dependency and CP-SAT smoke test passed")
           PY
+
+      - name: Run AI optimizer integration tests
+        working-directory: services/ai-optimizer
+        run: python -m unittest discover -p 'test_*.py' -v
