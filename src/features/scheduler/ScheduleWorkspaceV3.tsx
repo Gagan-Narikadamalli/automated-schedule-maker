@@ -926,6 +926,41 @@ export function ScheduleWorkspaceV3() {
     }
   }
 
+  async function requestAiGenerate() {
+    if (demoMode) {
+      setStatusMessage("AI Generate requires a configured optimizer service and a real location.");
+      return;
+    }
+    try {
+      setWorking(true);
+      setStatusMessage("Requesting an independent AI schedule preview; the saved schedule will not change...");
+      const response = await fetch("/api/schedule/ai-generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ locationId, date: selectedDate }),
+      });
+      const data = await readJson<{
+        error?: string;
+        previewOnly?: boolean;
+        violations?: string[];
+        explanation?: string;
+        metrics?: { coveredClientSlots: number; requiredClientSlots: number; uncoveredClientSlots: number; coveragePercent: number };
+      }>(response);
+      if (!response.ok) throw new Error(data.error || data.violations?.join("; ") || "AI Generate could not validate a schedule.");
+      const metrics = data.metrics;
+      const coverage = metrics
+        ? `${metrics.coveredClientSlots}/${metrics.requiredClientSlots} required slots covered (${metrics.coveragePercent.toFixed(1)}%), ${metrics.uncoveredClientSlots} uncovered.`
+        : "No coverage metrics returned.";
+      setSchedulerWarnings(data.violations ?? []);
+      setShowSchedulerWarnings((data.violations ?? []).length > 0);
+      setStatusMessage(`AI Generate preview: ${coverage} ${data.explanation ?? ""} Preview only—nothing was saved or replaced.`);
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "AI Generate preview failed; the saved schedule was not changed.");
+    } finally {
+      setWorking(false);
+    }
+  }
+
   async function requestGenerateWeek() {
     if (demoMode) {
       setStatusMessage("Week generation is disabled in preview mode.");
@@ -1094,6 +1129,7 @@ export function ScheduleWorkspaceV3() {
           <button type="button" className={`button ${manualMode ? "button-warning" : "button-secondary"}`} disabled={working || loading || staff.length === 0} onClick={toggleManualMode}>Manual Mode: {manualMode ? "On" : "Off"}</button>
           <button type="button" className="button button-secondary" disabled={working || loading || staff.length === 0} onClick={() => void requestGenerateWeek()}>Auto Generate Week</button>
           <button type="button" className="button button-primary" disabled={working || loading || staff.length === 0} onClick={() => void requestAutoGenerate()}>{working ? "Working..." : "Auto Generate Day"}</button>
+          <button type="button" className="button button-secondary" disabled={working || loading || staff.length === 0} onClick={() => void requestAiGenerate()} title="Preview an independently optimized schedule. Does not overwrite the current day. Requires a configured AI optimizer service.">AI Generate (Preview)</button>
         </div>
       </section>
 
