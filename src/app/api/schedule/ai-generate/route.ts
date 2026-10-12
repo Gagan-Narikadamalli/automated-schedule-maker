@@ -14,7 +14,7 @@ type Candidate = {
   startTime: string;
   assignmentType: "CLIENT_1_TO_1" | "NAP" | "SPEECH" | "BREAK" | "BREAK_NAP" | "BREAK_SPEECH";
 };
-type ResponseBody = { assignments?: Candidate[]; explanation?: string };
+type ResponseBody = { assignments?: Candidate[]; explanation?: string; message?: string; failureCode?: string; uncoveredRequirements?: unknown[]; hardViolations?: string[]; success?: boolean };
 
 function invalid(message: string, status = 422) {
   return NextResponse.json({ error: message }, { status });
@@ -119,14 +119,24 @@ export async function POST(request: Request) {
     } finally {
       clearTimeout(timeout);
     }
-    if (!result.ok) return invalid(`AI optimizer service returned HTTP ${result.status}; no schedule was changed.`, 502);
     const data = await result.json() as ResponseBody;
+    if (!result.ok || data.success === false) {
+      const humanMessage = data.failureCode === "INSUFFICIENT_STAFF_COVERAGE"
+        ? "Unable to generate today's complete schedule: more client coverage is required than available eligible staff can provide. Human scheduling decision needed."
+        : (data.message || "AI optimizer cannot produce a feasible complete schedule for today's staffing and mandatory rules.");
+      return NextResponse.json({
+        success: false, previewOnly: true, code: data.failureCode || "SCHEDULE_INFEASIBLE",
+        error: humanMessage, uncoveredRequirements: data.uncoveredRequirements ?? [],
+        violations: data.hardViolations ?? [],
+      }, { status: 422 });
+    }
     if (!Array.isArray(data.assignments) || data.assignments.length > 10000) {
       return invalid("AI optimizer returned an invalid assignments array.", 502);
     }
     const audit = validatePreview(dayData.input, data.assignments);
+    const complete = audit.missing.length === 0;
     return NextResponse.json({
-      success: audit.problems.length === 0,
+      success: audit.problems.length === 0 && complete,
       previewOnly: true,
       date, locationId,
       assignments: audit.problems.length === 0 ? data.assignments : [],
@@ -136,8 +146,9 @@ export async function POST(request: Request) {
       violations: audit.problems,
       uncoveredRequirements: audit.missing,
       explanation: typeof data.explanation === "string" ? data.explanation.slice(0, 4000) : "",
-      message: "Preview only: no schedule was overwritten. Review before approving any future save.",
-    }, { status: audit.problems.length ? 422 : 200 });
+      error: !complete ? "Unable to generate today's complete schedule: more client coverage is required than available eligible staff can provide. Human scheduling decision needed." : undefined,
+      message: "Preview only: no schedule was overwritten.",
+    }, { status: audit.problems.length || !complete ? 422 : 200 });
   } catch (error) {
     console.error("AI Schedule preview error:", error);
     return invalid("AI Generate preview failed. The existing schedule was not changed.", 500);
