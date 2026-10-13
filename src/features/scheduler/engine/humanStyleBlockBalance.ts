@@ -520,19 +520,20 @@ export function balanceScheduleLikeHuman({
   const assignments = initialAssignments.map((assignment) => ({
     ...assignment,
   }));
-  const penaltyBefore = schedulePenalty(
-    assignments,
-    staff,
-    clients,
-    rules
+  const penaltyBefore = schedulePenalty(assignments, staff, clients, rules);
+  // Mandatory safe continuity repair is independent of optional stylistic
+  // balancing. A disabled stylistic optimizer must not disable nap relief.
+  const repaired = repairLinkedNapReliefHandoffs(
+    assignments, staff, clients, callOutStaffIds, rules
   );
+  const repairedPenalty = schedulePenalty(repaired, staff, clients, rules);
 
   if (rules.humanStyleBlockBalancingEnabled === false) {
     return {
-      assignments,
+      assignments: repaired,
       blockSwapCount: 0,
       penaltyBefore,
-      penaltyAfter: penaltyBefore,
+      penaltyAfter: repairedPenalty,
     };
   }
 
@@ -543,7 +544,7 @@ export function balanceScheduleLikeHuman({
     clients.map((client) => [client.id, client])
   );
   const callOutSet = new Set(callOutStaffIds);
-  let working = repairLinkedNapReliefHandoffs(assignments,staff,clients,callOutStaffIds,rules);
+  let working = repaired;
   let blockSwapCount = 0;
   const maxPasses = Math.max(staff.length * 2, 12);
 
