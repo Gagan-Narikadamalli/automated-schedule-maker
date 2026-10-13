@@ -4,6 +4,7 @@ import { scoreCandidate } from "../src/features/scheduler/engine/scoring";
 import { enrichBreakAssignmentsWithFixedEvents } from "../src/features/scheduler/engine/reserveBreaks";
 import { auditLinkedNapBreakRules } from "../src/features/scheduler/engine/auditLinkedNapBreakRules";
 import { pinWorkbookTemplates } from "../src/features/scheduler/engine/pinWorkbookTemplates";
+import { repairLinkedNapReliefHandoffs } from "../src/features/scheduler/engine/humanStyleBlockBalance";
 import type { SchedulerAssignment } from "../src/features/scheduler/engine/types";
 import type { SchedulerInput, SchedulerClient, SchedulerStaff } from "../src/features/scheduler/engine/types";
 const slots=(start=8,end=16)=>Array.from({length:(end-start)*2},(_,i)=>{
@@ -201,4 +202,30 @@ check("insufficient staffing",Array.from({length:8},(_,i)=>s(i,slots())),
   assert.ok(!blocked.assignments.some(a=>a.clientId==="c1"&&a.staffId==="s2"),
     "AI hard restrictions must remain enforced");
   console.log("PASS AI and Auto Day/Week same-team preference with hard restriction");
+}
+
+{
+  const times=["11:00","11:30","12:00","12:30"];
+  const staff=[s(1,times),s(2,times)];
+  const clients=[c(1,times,{napSlots:["11:30"]})];
+  const cell=(id:string,staffId:string,startTime:string,assignmentType:SchedulerAssignment["assignmentType"],clientId?:string):SchedulerAssignment=>({
+    id,staffId,clientId,startTime,assignmentType,source:"AUTO",locked:assignmentType!=="CLIENT_1_TO_1"
+  });
+  const assigned=[
+    cell("prior","s2","11:00","CLIENT_1_TO_1","c1"),
+    cell("nap","s1","11:30","BREAK_NAP","c1"),
+    cell("after","s1","12:00","CLIENT_1_TO_1","c1"),
+    cell("other-break","s2","12:00","BREAK")
+  ];
+  const changed=repairLinkedNapReliefHandoffs(assigned,staff,clients,[],
+    {slotLengthMinutes:30} as SchedulerInput["rules"]);
+  assert.ok(changed.some(a=>a.staffId==="s2"&&a.startTime==="11:30"&&a.assignmentType==="BREAK_NAP"));
+  assert.ok(changed.some(a=>a.staffId==="s2"&&a.startTime==="12:00"&&a.clientId==="c1"));
+  assert.ok(changed.some(a=>a.staffId==="s1"&&a.startTime==="12:00"&&a.assignmentType==="BREAK"));
+  assert.equal(changed.filter(a=>a.assignmentType.startsWith("BREAK")).length,2);
+  assert.equal(auditLinkedNapBreakRules(changed,clients).length,0);
+  const prohibited=repairLinkedNapReliefHandoffs(assigned,staff,[{...clients[0],
+    staffRelationships:{s2:"HARD_RESTRICTION"}}],[],{slotLengthMinutes:30} as SchedulerInput["rules"]);
+  assert.ok(prohibited.some(a=>a.id==="nap"&&a.staffId==="s1"));
+  console.log("PASS coordinated nap-break exchange preserves breaks and honors matching restrictions");
 }
