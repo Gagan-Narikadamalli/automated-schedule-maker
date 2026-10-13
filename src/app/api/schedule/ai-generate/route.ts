@@ -13,6 +13,7 @@ import { getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
 import { connectToDatabase } from "@/lib/db";
 import { syncAutoUnplacedGaps } from "@/features/scheduler/server/syncAutoUnplacedGaps";
 import { NapSession } from "@/models/NapSession";
+import { ScheduleAssignment } from "@/models/ScheduleAssignment";
 import { ScheduleTemplate } from "@/models/ScheduleTemplate";
 import { AppliedScheduleTemplate } from "@/models/AppliedScheduleTemplate";
 import { getSlotsInsideTimeRange } from "@/features/scheduler/engine/dateUtils";
@@ -245,6 +246,13 @@ export async function POST(request: Request) {
                 "Review saved weekday templates, applied template choices, current assignments, "+
                 "linked BREAK_NAP and BREAK_SPEECH cells, fixed speech appointments, flexible nap windows, "+
                 "staff availability, call-outs and scheduling rules before recommending pairings. "+
+                "Preserve an existing eligible staff-client pairing across adjacent half-hour blocks unless a mandatory break, absence, clinical restriction, or coverage conflict prevents it. "+
+                "Do not recommend rotating ordinary clients merely for staff variety. "+
+                "BREAK_NAP is one client nap and one staff break in the same cell; BREAK_SPEECH is one linked speech event and break. "+
+                "Each eligible staff member has one 30-minute break from 11:00 through 13:30 inclusive. "+
+                "Client coverage, hard restrictions, break validity and no double bookings override all preferences. "+
+                "Historical schedules and template examples are preferences, not permissions to violate current rules. "+
+                "Return only nap slots explicitly listed for that client; never invent a nap for clients without eligible napSlots. "+
                 "Keep contiguous client blocks with the same staff where feasible. "+
                 "Prefer compatible staff in the same client team and explicit preferred pairings, "+
                 "but never relax staff/client hard restrictions or availability. "+
@@ -268,7 +276,7 @@ export async function POST(request: Request) {
       }
       for(const [alias,chosen] of Object.entries(proposal.naps??{})){
         const id=clientRefs.get(alias);
-        if(id && typeof chosen==="string")naps[id]=chosen;
+        if(id && typeof chosen==="string" && roster.clients.find(c=>c.id===id)?.napSlots.includes(chosen))naps[id]=chosen;
       }
       if (!Object.values(ranking).some(values=>values.length>0) && Object.keys(naps).length===0) {
         throw new Error("Ollama returned no usable staff preferences or nap selections");
@@ -319,7 +327,7 @@ export async function POST(request: Request) {
     if (!Array.isArray(data.assignments) || data.assignments.length > 10000) {
       return invalid("AI optimizer returned an invalid assignments array.", 502);
     }
-    const audit = validatePreview(dayData.input, data.assignments);
+    const audit = validatePreview(roster, data.assignments);
     const complete = audit.missing.length === 0;
     const valid = audit.problems.length === 0 && generated.unplacedBreakStaffIds.length === 0;
     const placementIssues = audit.missing.map(gap => ({...gap,reason:"No eligible available staff could cover this client at the requested time."}));
@@ -339,6 +347,24 @@ export async function POST(request: Request) {
         return invalid("AI schedule saving is disabled by server configuration; no schedule was changed.",503);
       }
       await connectToDatabase();
+      // AI Generate currently rebuilds the whole day rather than pinning
+      // protected rows inside its optimizer. Until pinning is supported,
+      // refuse to overwrite any manual, template-locked or overridden cell.
+      const protectedCount = await ScheduleAssignment.countDocuments({
+        locationId, date,
+        $or: [
+          { locked: true },
+          { manuallyOverridden: true },
+          { source: "MANUAL" },
+          { source: "TEMPLATE" }
+        ]
+      });
+      if (protectedCount > 0) {
+        return NextResponse.json({
+          success: false, saved: false,
+          error: `AI Generate cannot replace this date because ${protectedCount} manual/template/protected assignments exist. They remain unchanged. Use Auto Generate's protected-assignment workflow or remove the protected assignments explicitly.`
+        }, { status: 409 });
+      }
       const replacements = data.assignments.map((assignment) => ({
         locationId,date,
         staffId:assignment.staffId,
