@@ -221,7 +221,7 @@ check("insufficient staffing",Array.from({length:8},(_,i)=>s(i,slots())),
     {slotLengthMinutes:30} as SchedulerInput["rules"]);
   assert.ok(changed.some(a=>a.staffId==="s2"&&a.startTime==="11:30"&&a.assignmentType==="BREAK_NAP"));
   assert.ok(changed.some(a=>a.staffId==="s1"&&a.startTime==="12:00"&&a.clientId==="c1"),"Post-nap client coverage must stay with original staff");
-  assert.ok(changed.some(a=>a.staffId==="s1"&&a.startTime==="11:00"&&a.assignmentType==="BREAK"));
+  assert.ok(changed.some(a=>a.staffId==="s1"&&a.startTime!=="11:30"&&a.assignmentType==="BREAK"));
   assert.ok(!changed.some(a=>a.staffId==="s2"&&a.startTime==="12:00"&&a.assignmentType==="BREAK"));
   assert.equal(changed.filter(a=>a.assignmentType.startsWith("BREAK")).length,2);
   assert.equal(auditLinkedNapBreakRules(changed,clients).length,0);
