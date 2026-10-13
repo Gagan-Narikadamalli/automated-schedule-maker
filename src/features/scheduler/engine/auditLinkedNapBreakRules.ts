@@ -12,6 +12,7 @@ export function auditLinkedNapBreakRules(
   const breaks=new Map<string,number>();
   const naps=new Map<string,number>();
   const eventSlots=new Set(clients.flatMap(c=>c.napSlots.map(time=>`${c.id}|${time}`)));
+  const speechSlots=new Set(clients.flatMap(c=>c.speechSlots.map(time=>`${c.id}|${time}`)));
   const occupied=new Set<string>();
   const clientAssignments=new Map<string,number>();
   const staffAssignments=new Map<string,number>();
@@ -28,6 +29,12 @@ export function auditLinkedNapBreakRules(
     const count=(breaks.get(a.staffId)??0)+1;
     breaks.set(a.staffId,count);
     if(count>1)problems.push(`Staff ${a.staffId} was assigned multiple breaks`);
+    if(a.assignmentType==="BREAK_SPEECH") {
+      if(!a.clientId) problems.push(`BREAK_SPEECH missing client for staff ${a.staffId}`);
+      else if(!speechSlots.has(`${a.clientId}|${a.startTime}`))
+        problems.push(`BREAK_SPEECH outside selected speech session: ${a.clientId}|${a.startTime}`);
+      continue;
+    }
     if(a.assignmentType!=="BREAK_NAP")continue;
     if(!a.clientId) {
       problems.push(`BREAK_NAP missing client for staff ${a.staffId}`);
