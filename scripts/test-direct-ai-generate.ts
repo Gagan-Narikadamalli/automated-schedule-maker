@@ -220,12 +220,16 @@ check("insufficient staffing",Array.from({length:8},(_,i)=>s(i,slots())),
   const changed=repairLinkedNapReliefHandoffs(assigned,staff,clients,[],
     {slotLengthMinutes:30} as SchedulerInput["rules"]);
   assert.ok(changed.some(a=>a.staffId==="s2"&&a.startTime==="11:30"&&a.assignmentType==="BREAK_NAP"));
-  assert.ok(changed.some(a=>a.staffId==="s2"&&a.startTime==="12:00"&&a.clientId==="c1"));
-  assert.ok(changed.some(a=>a.staffId==="s1"&&a.startTime==="12:00"&&a.assignmentType==="BREAK"));
+  assert.ok(changed.some(a=>a.staffId==="s1"&&a.startTime==="12:00"&&a.clientId==="c1"),"Post-nap client coverage must stay with original staff");
+  assert.ok(changed.some(a=>a.staffId==="s1"&&a.startTime==="11:00"&&a.assignmentType==="BREAK"));
+  assert.ok(!changed.some(a=>a.staffId==="s2"&&a.startTime==="12:00"&&a.assignmentType==="BREAK"));
   assert.equal(changed.filter(a=>a.assignmentType.startsWith("BREAK")).length,2);
   assert.equal(auditLinkedNapBreakRules(changed,clients).length,0);
   const prohibited=repairLinkedNapReliefHandoffs(assigned,staff,[{...clients[0],
     staffRelationships:{s2:"HARD_RESTRICTION"}}],[],{slotLengthMinutes:30} as SchedulerInput["rules"]);
   assert.ok(prohibited.some(a=>a.id==="nap"&&a.staffId==="s1"));
-  console.log("PASS coordinated nap-break exchange preserves breaks and honors matching restrictions");
+  const noFreeTime=[...assigned,cell("busy","s1","11:00","CLIENT_1_TO_1","c2"),cell("busy2","s1","12:30","CLIENT_1_TO_1","c2")];
+  const unchanged=repairLinkedNapReliefHandoffs(noFreeTime,staff,clients,[],{slotLengthMinutes:30} as SchedulerInput["rules"]);
+  assert.ok(unchanged.some(a=>a.id==="nap"),"Keep linked break when its owner has no free replacement break slot");
+  console.log("PASS nap-break transfer preserves original client coverage, mandatory staff break, and eligibility");
 }
