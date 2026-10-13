@@ -233,3 +233,17 @@ check("insufficient staffing",Array.from({length:8},(_,i)=>s(i,slots())),
   assert.ok(unchanged.some(a=>a.id==="nap"),"Keep linked break when its owner has no free replacement break slot");
   console.log("PASS nap-break transfer preserves original client coverage, mandatory staff break, and eligibility");
 }
+
+{
+  const clients=[c(1,["11:00","11:30"],{speechSlots:["11:30"]})];
+  const linked=(clientId:string|undefined,time:string):SchedulerAssignment=>({
+    id:"speech-check",staffId:"s1",clientId,startTime:time,
+    assignmentType:"BREAK_SPEECH",source:"AUTO",locked:false
+  });
+  assert.equal(auditLinkedNapBreakRules([linked("c1","11:30")],clients).length,0);
+  assert.ok(auditLinkedNapBreakRules([linked(undefined,"11:30")],clients)
+    .some(problem=>problem.includes("missing client")));
+  assert.ok(auditLinkedNapBreakRules([linked("c1","11:00")],clients)
+    .some(problem=>problem.includes("outside selected speech")));
+  console.log("PASS linked speech breaks must have a client and correct appointment time");
+}
