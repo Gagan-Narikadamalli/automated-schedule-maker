@@ -427,6 +427,81 @@ function trySwapCandidate(
   return simulated;
 }
 
+/**
+ * Repair the common linked-nap handoff pattern:
+ *   A: BREAK_NAP(client) -> client coverage
+ *   B: empty             -> BREAK
+ * when B covered that same client immediately before the nap.
+ * Exchange breaks and hand the post-nap client block back to B.
+ * Both original breaks still exist, only their staff/time locations change.
+ */
+export function repairLinkedNapReliefHandoffs(
+  initial: SchedulerAssignment[],
+  staff: SchedulerStaff[],
+  clients: SchedulerClient[],
+  callOutStaffIds: string[],
+  rules: SchedulerRules
+): SchedulerAssignment[] {
+  const result=initial.map(a=>({...a}));
+  const byStaff=new Map(staff.map(p=>[p.id,p]));
+  const byClient=new Map(clients.map(c=>[c.id,c]));
+  const absent=new Set(callOutStaffIds);
+  for(const linked of [...result]) {
+    if(linked.assignmentType!=="BREAK_NAP"||!linked.clientId||
+      linked.source!=="AUTO"||absent.has(linked.staffId))continue;
+    const next=shiftTime(linked.startTime,rules.slotLengthMinutes);
+    const previous=shiftTime(linked.startTime,-rules.slotLengthMinutes);
+    if(!next||!previous)continue;
+    const coverage=result.find(a=>a.staffId===linked.staffId&&
+      a.startTime===next&&a.clientId===linked.clientId&&
+      isMutableClientAssignment(a));
+    if(!coverage)continue;
+    const client=byClient.get(linked.clientId);
+    if(!client||!client.napSlots.includes(linked.startTime))continue;
+    for(const previousCoverage of result.filter(a=>
+      a.startTime===previous&&a.clientId===client.id&&
+      a.assignmentType==="CLIENT_1_TO_1"&&a.staffId!==linked.staffId)) {
+      const replacementStaff=byStaff.get(previousCoverage.staffId);
+      const originalStaff=byStaff.get(linked.staffId);
+      if(!replacementStaff||!originalStaff||
+        absent.has(replacementStaff.id)||
+        result.some(a=>a.staffId===replacementStaff.id&&a.startTime===linked.startTime))continue;
+      const reliefBreak=result.find(a=>a.staffId===replacementStaff.id&&
+        a.startTime===next&&a.assignmentType==="BREAK"&&a.source==="AUTO");
+      if(!reliefBreak)continue;
+      if(client.staffRelationships[replacementStaff.id]==="HARD_RESTRICTION")continue;
+      const compatible=!replacementStaff.serviceSetting||!client.serviceSetting||
+        replacementStaff.serviceSetting==="BOTH"||client.serviceSetting==="BOTH"||
+        replacementStaff.serviceSetting===client.serviceSetting;
+      if(!compatible||!replacementStaff.availableSlots.includes(linked.startTime)||
+        !replacementStaff.availableSlots.includes(next)||!originalStaff.availableSlots.includes(next))continue;
+      // Keep the client's nap and 1:1 assignment in their original slots.
+      // Moving the nap-linked break is safe only when the new staff is a valid match.
+      const newClientCoverage={...coverage,staffId:replacementStaff.id,
+        id:`nap-relief-coverage-${client.id}-${next}-${replacementStaff.id}`,
+        note:"Continued the pre-nap staff/client pairing after a coordinated break exchange."};
+      const newLinked={...linked,staffId:replacementStaff.id,
+        id:`nap-relief-linked-${client.id}-${linked.startTime}-${replacementStaff.id}`,
+        note:"Linked nap break moved to continue the existing staff/client pairing."};
+      const newBreak={...reliefBreak,staffId:originalStaff.id,
+        id:`nap-relief-break-${originalStaff.id}-${next}`,
+        note:"Exchanged staff breaks to preserve client continuity."};
+      const removed=new Set([linked.id,coverage.id,reliefBreak.id]);
+      const simulated=result.filter(a=>!removed.has(a.id));
+      const check=canAssignStaffToClient({
+        staffMember:replacementStaff,client,startTime:next,
+        assignments:simulated,callOutStaffIds:absent,rules,
+        allowSameDayPairRepeat:true,allowCoverageLimitException:true
+      });
+      if(!check.allowed)continue;
+      if(simulated.some(a=>a.staffId===originalStaff.id&&a.startTime===next))continue;
+      result.splice(0,result.length,...simulated,newLinked,newClientCoverage,newBreak);
+      break;
+    }
+  }
+  return result;
+}
+
 export function balanceScheduleLikeHuman({
   staff,
   clients,
@@ -468,7 +543,7 @@ export function balanceScheduleLikeHuman({
     clients.map((client) => [client.id, client])
   );
   const callOutSet = new Set(callOutStaffIds);
-  let working = assignments;
+  let working = repairLinkedNapReliefHandoffs(assignments,staff,clients,callOutStaffIds,rules);
   let blockSwapCount = 0;
   const maxPasses = Math.max(staff.length * 2, 12);
 
