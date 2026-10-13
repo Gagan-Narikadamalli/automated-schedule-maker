@@ -889,6 +889,40 @@ export function ScheduleWorkspaceV3() {
     }
   }
 
+  async function requestDeleteSchedule() {
+    if (demoMode) {
+      setStatusMessage("Deleting schedules is unavailable in demo mode.");
+      return;
+    }
+    const confirmed = await confirmation.ask({
+      eyebrow: "DELETE SELECTED DATE",
+      title: `Delete all assignments for ${selectedDate}?`,
+      message: `Location: ${locationName}\nDate: ${selectedDate}\nThis permanently deletes every assigned schedule block for this date, including manual, locked, template, break, nap and speech cells. The date's Unplaced Assignments tray is cleared as well. Other dates, staff/client records, events, and saved templates are not deleted.`,
+      confirmLabel: "Delete Schedule",
+      cancelLabel: "Keep Schedule",
+    });
+    if (!confirmed) return;
+    try {
+      setWorking(true);
+      setStatusMessage(`Deleting schedule for ${selectedDate}...`);
+      const response = await fetch("/api/schedule/delete-day", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({locationId,date:selectedDate,confirmation:`DELETE_SCHEDULE:${selectedDate}`}),
+      });
+      const data = await readJson<{success?:boolean;deletedAssignmentCount?:number;deletedUnplacedCount?:number;error?:string}>(response);
+      if (!response.ok || !data.success) throw new Error(data.error ?? "Could not delete this date's schedule.");
+      await loadSchedule();
+      setSchedulerWarnings([]);
+      setShowSchedulerWarnings(false);
+      setStatusMessage(`Deleted ${data.deletedAssignmentCount ?? 0} assigned blocks and ${data.deletedUnplacedCount ?? 0} unplaced records for ${selectedDate}. Other dates were preserved.`);
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Could not delete the selected schedule.");
+    } finally {
+      setWorking(false);
+    }
+  }
+
   async function requestAutoGenerate() {
     if (demoMode) {
       loadDemoSchedule();
@@ -921,6 +955,57 @@ export function ScheduleWorkspaceV3() {
       setStatusMessage(`Auto Generate finished. ${formatMetrics(data.metrics)}${changeDetails}${warningTexts.length ? ` ${warningTexts.length} scheduler warning(s) listed below.` : ""}`);
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "The schedule could not be generated.");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function requestAiGenerate() {
+    if (demoMode) {
+      setStatusMessage("AI Generate requires a real location.");
+      return;
+    }
+    try {
+      setWorking(true);
+      setStatusMessage("Asking website AI to generate and validate the full schedule...");
+      const response = await fetch("/api/schedule/ai-generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ locationId, date: selectedDate, save: true }),
+      });
+      const data = await readJson<{
+        error?: string;
+        previewOnly?: boolean;
+        violations?: string[];
+        explanation?: string;
+        message?: string;
+        partialBuild?: boolean;
+        ollamaUsed?: boolean;
+        ollamaDiagnostic?: string;
+        unplacedCount?: number;
+        placementIssues?: Array<{clientCode:string;startTime:string;reason:string}>;
+        breakIssues?: string[];
+        metrics?: { coveredClientSlots: number; requiredClientSlots: number; uncoveredClientSlots: number; coveragePercent: number };
+      }>(response);
+      if (!response.ok) throw new Error(data.error || data.violations?.join("; ") || "AI Generate could not validate a schedule.");
+      const metrics = data.metrics;
+      const coverage = metrics
+        ? `${metrics.coveredClientSlots}/${metrics.requiredClientSlots} required slots covered (${metrics.coveragePercent.toFixed(1)}%), ${metrics.uncoveredClientSlots} uncovered.`
+        : "No coverage metrics returned.";
+      const issues = [
+        ...(data.placementIssues ?? []).map(item => `${item.clientCode} at ${item.startTime}: ${item.reason}`),
+        ...(data.breakIssues ?? []),
+        ...(data.violations ?? []),
+      ];
+      if (data.ollamaUsed === false) issues.unshift(data.ollamaDiagnostic ?? "Ollama planning was unavailable; placements were calculated by the independent website scheduler.");
+      setSchedulerWarnings(issues);
+      setShowSchedulerWarnings(issues.length > 0);
+      setStatusMessage(data.partialBuild
+        ? `AI Generate saved a partial schedule: ${coverage} ${data.unplacedCount ?? issues.length} blocks sent to Unplaced Assignments. Review the placement issues below.`
+        : `AI Generate: ${coverage} ${data.explanation ?? ""} Schedule saved and refreshed.`);
+      await loadSchedule();
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "AI Generate preview failed; the saved schedule was not changed.");
     } finally {
       setWorking(false);
     }
@@ -1092,8 +1177,10 @@ export function ScheduleWorkspaceV3() {
         </div>
         <div className="toolbar-group">
           <button type="button" className={`button ${manualMode ? "button-warning" : "button-secondary"}`} disabled={working || loading || staff.length === 0} onClick={toggleManualMode}>Manual Mode: {manualMode ? "On" : "Off"}</button>
+          <button type="button" className="button button-warning" disabled={working || loading || demoMode} onClick={() => void requestDeleteSchedule()} title="Delete all scheduled blocks for this date only, after confirmation.">Delete Schedule</button>
           <button type="button" className="button button-secondary" disabled={working || loading || staff.length === 0} onClick={() => void requestGenerateWeek()}>Auto Generate Week</button>
           <button type="button" className="button button-primary" disabled={working || loading || staff.length === 0} onClick={() => void requestAutoGenerate()}>{working ? "Working..." : "Auto Generate Day"}</button>
+          <button type="button" className="button button-secondary" disabled={working || loading || staff.length === 0} onClick={() => void requestAiGenerate()} title="Generate a full schedule with the website AI, validate it, and save only if complete.">AI Generate</button>
         </div>
       </section>
 
@@ -1198,7 +1285,7 @@ export function ScheduleWorkspaceV3() {
           <div className="panel-heading-row">
             <div>
               <h2>Scheduler Warnings ({schedulerWarnings.length})</h2>
-              <p>Review the exact issues from the most recent Auto Generate Day run.</p>
+              <p>Review the exact issues from the most recent scheduling run.</p>
             </div>
             <button type="button" className="button button-secondary"
               aria-expanded={showSchedulerWarnings}

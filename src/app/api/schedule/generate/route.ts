@@ -9,9 +9,11 @@ import {
 
 
 import { auditFinalCoverage } from "@/features/scheduler/engine/auditFinalCoverage";
+import { auditLinkedNapBreakRules } from "@/features/scheduler/engine/auditLinkedNapBreakRules";
 import { getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
 import { generateSchedule } from "@/features/scheduler/engine/generateSchedule";
 import { placeStaffBreaksAfterCoverage } from "@/features/scheduler/engine/placeStaffBreaks";
+import { enrichBreakAssignmentsWithFixedEvents } from "@/features/scheduler/engine/reserveBreaks";
 import { calculateSchedulerReadiness } from "@/features/scheduler/engine/preflight";
 import type {
   SchedulerAssignment,
@@ -108,10 +110,9 @@ export async function POST(request: Request) {
     }
 
     const dayData = await buildDaySchedulerInput(locationId, date);
-    // Manager nap events do not override workbook coverage during generation.
-    // Date-specific attendance call-outs/call-ins still apply.
+    // Day and week generation must honor the same saved nap and speech events.
     const fixedNapApplication = await applyFixedNapSessions(
-      locationId, date, dayData.input, { ignoreNapSessions: true }
+      locationId, date, dayData.input
     );
 
     const workbookTraining = await applyLivingstonWorkbookTrial(
@@ -179,11 +180,24 @@ export async function POST(request: Request) {
       const pinned = templatePinning.pinned.find(item =>
         item.staffId === assignment.staffId && item.startTime === assignment.startTime
       );
-      return pinned ? {...assignment, assignmentType:pinned.assignmentType} : assignment;
+      return pinned ? {...assignment, assignmentType:pinned.assignmentType, clientId:pinned.clientId} : assignment;
     });
+    const eventEnrichedAssignments = enrichBreakAssignmentsWithFixedEvents(
+      enrichedAssignments,
+      schedulerInput.clients,
+      dayData.extendedRules.slotLengthMinutes
+    );
+    const linkedEventProblems = auditLinkedNapBreakRules(eventEnrichedAssignments,schedulerInput.clients);
+    if(linkedEventProblems.length) {
+      return NextResponse.json({
+        error:"Generated schedule contains inconsistent nap/break assignments; no schedules were overwritten.",
+        violations:linkedEventProblems,
+        date,
+      },{status:422});
+    }
     const finalCoverage = auditFinalCoverage(
       schedulerInput.clients,
-      enrichedAssignments,
+      eventEnrichedAssignments,
       coverageResult.metrics,
       dayData.extendedRules.slotLengthMinutes,
       coverageResult.uncoveredRequirements
@@ -217,7 +231,7 @@ export async function POST(request: Request) {
 
     await connectToDatabase();
 
-    const autoAssignments = enrichedAssignments;
+    const autoAssignments = eventEnrichedAssignments;
     const generatedRecords = autoAssignments.map((assignment) => ({
       locationId,
       date,
@@ -254,13 +268,13 @@ export async function POST(request: Request) {
       locationId,
       date,
       finalCoverage.uncoveredRequirements,
-      enrichedAssignments
+      eventEnrichedAssignments
     );
 
     const completeCoverage = metrics.uncoveredClientSlots === 0;
     const partialBuild = !completeCoverage;
     const coverageByRole = buildCoverageByRole(
-      enrichedAssignments,
+      eventEnrichedAssignments,
       schedulerInput.staff,
       dayData.extendedRules.slotLengthMinutes
     );

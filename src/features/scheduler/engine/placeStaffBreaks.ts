@@ -206,19 +206,21 @@ function countReferenceBreaks(
 function createBreakAssignment(
   staffMember: SchedulerStaff,
   startTime: string,
-  _fixedEvent: FixedEventCandidate | null
+  fixedEvent: FixedEventCandidate | null
 ): SchedulerAssignment {
-  // Automatic generation only creates a plain staff BREAK. Nap and other
-  // client events are managed separately in Manual mode and must not be
-  // encoded into the staff break record.
+  // A linked break occupies one cell: the staff break and supervised client
+  // event are represented together, not as competing or duplicate cells.
   return {
     id: `break-${staffMember.id}-${startTime}`,
     staffId: staffMember.id,
+    clientId: fixedEvent?.client.id,
     startTime,
-    assignmentType: "BREAK",
+    assignmentType: fixedEvent?.assignmentType ?? "BREAK",
     source: "AUTO",
     locked: true,
-    note: "Automatically reserved staff break.",
+    note: fixedEvent
+      ? "Staff break linked to the client's fixed nap/speech event."
+      : "Automatically reserved staff break.",
   };
 }
 
@@ -337,10 +339,29 @@ function findBestFreeBreaks(
           detail.fixedEvent ? detail.fixedEvent.priority : 100
         )
       );
+      // Avoid choosing an ordinary break inside an otherwise continuous
+      // client/staff run. A break linked to the client's nap/speech is the
+      // intentional exception and is scored by its fixed event priority.
+      const priorTime = shiftTime(startTime, -rules.slotLengthMinutes);
+      const nextTime = shiftTime(
+        startTime, rules.defaultBreakMinutes
+      );
+      const prior = assignments.find(a => a.staffId === staffMember.id &&
+        a.startTime === priorTime && a.assignmentType === "CLIENT_1_TO_1");
+      const next = assignments.find(a => a.staffId === staffMember.id &&
+        a.startTime === nextTime && a.assignmentType === "CLIENT_1_TO_1");
+      const splitsClientRun = Boolean(prior?.clientId &&
+        next?.clientId && prior.clientId === next.clientId);
+      const splitsStaffRun = Boolean(prior && next);
+      const plainBreak = details.every(detail => !detail.fixedEvent);
+      const interruptionPenalty = plainBreak
+        ? (splitsClientRun ? 500 : splitsStaffRun ? 200 : 0)
+        : 0;
       const score =
         eventPriority * 10 +
         timeDistanceFromNoon(startTime) -
-        Math.min(historicalCount, 4) * historicalPriority;
+        Math.min(historicalCount, 4) * historicalPriority +
+        interruptionPenalty;
 
       return {
         startTime,
@@ -773,6 +794,54 @@ function smoothShortClientRuns(
   }
 }
 
+/**
+ * When the client has a confirmed nap, prefer using that 30-minute window
+ * for the linked staff break instead of leaving a blank calendar cell and
+ * retaining an unrelated automatic plain BREAK elsewhere.
+ * Only movable AUTO breaks are considered; protected/template breaks stay put.
+ */
+function alignPlainBreaksWithAdjacentNaps(
+  assignments: SchedulerAssignment[],
+  staff: SchedulerStaff[],
+  clients: SchedulerClient[],
+  rules: PostCoverageBreakRules
+): SchedulerAssignment[] {
+  if (rules.defaultBreakMinutes !== rules.slotLengthMinutes) return assignments;
+  const result=assignments.map(a=>({...a}));
+  for(const person of staff) {
+    const ownedBreaks=result.filter(a=>a.staffId===person.id&&
+      ["BREAK","BREAK_NAP","BREAK_SPEECH"].includes(a.assignmentType));
+    if(ownedBreaks.length!==1||ownedBreaks[0].assignmentType!=="BREAK"||
+      ownedBreaks[0].source!=="AUTO")continue;
+    const old=ownedBreaks[0];
+    // A plain break can already be sitting on the client's selected nap.
+    // Convert that SAME cell to BREAK_NAP before trying to move it elsewhere.
+    const fixedHere=findFixedEventForStaffSlot(person.id,old.startTime,result,clients,rules.slotLengthMinutes);
+    if(fixedHere?.assignmentType==="BREAK_NAP" &&
+      !result.some(a=>a.clientId===fixedHere.client.id&&a.startTime===old.startTime)) {
+      const at=result.findIndex(a=>a.id===old.id&&a.staffId===person.id);
+      if(at>=0) {
+        result[at]=createBreakAssignment(person,old.startTime,fixedHere);
+        continue;
+      }
+    }
+    const choices=person.availableSlots.filter(time=>
+      time>=rules.breakWindowStart&&time<rules.breakWindowEnd &&
+      time!==old.startTime &&
+      !result.some(a=>a.staffId===person.id&&a.startTime===time)
+    ).map(time=>({time,event:findFixedEventForStaffSlot(
+      person.id,time,result,clients,rules.slotLengthMinutes
+    )})).filter(item=>item.event?.assignmentType==="BREAK_NAP" &&
+      !result.some(a=>a.clientId===item.event?.client.id&&a.startTime===item.time));
+    if(choices.length===0)continue;
+    choices.sort((a,b)=>Math.abs(timeDistanceFromNoon(a.time))-Math.abs(timeDistanceFromNoon(b.time)));
+    const chosen=choices[0],at=result.findIndex(a=>a.id===old.id&&a.staffId===person.id);
+    if(at<0||!chosen.event)continue;
+    result[at]=createBreakAssignment(person,chosen.time,chosen.event);
+  }
+  return result;
+}
+
 export function placeStaffBreaksAfterCoverage({
   staff,
   clients,
@@ -914,8 +983,11 @@ export function placeStaffBreaksAfterCoverage({
     rules: schedulerRules,
   });
 
+  const napAlignedAssignments=alignPlainBreaksWithAdjacentNaps(
+    humanBalance.assignments,staff,clients,rules
+  );
   return {
-    assignments: humanBalance.assignments,
+    assignments: napAlignedAssignments,
     reservedBreaks,
     reliefSwapCount,
     humanStyleBlockSwapCount: humanBalance.blockSwapCount,

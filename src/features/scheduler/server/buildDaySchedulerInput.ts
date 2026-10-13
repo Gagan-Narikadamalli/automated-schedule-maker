@@ -866,17 +866,21 @@ function mapReferenceAssignments(
         return;
       }
     } else if (
-      assignmentType !== "BREAK" &&
-      assignmentType !== "BREAK_NAP" &&
-      assignmentType !== "BREAK_SPEECH"
+      assignmentType === "BREAK_NAP" ||
+      assignmentType === "BREAK_SPEECH"
     ) {
+      // Linked workbook breaks must keep the client identity. A missing client
+      // is not a valid linked event and must never become an anonymous break.
+      if (clientId && !clientById.has(clientId)) return;
+      // Legacy workbook Break/Nap may be unlabeled; resolve from adjacent client blocks later.
+    } else if (assignmentType !== "BREAK") {
       return;
     }
 
     references.push({
       id: `${source.toLowerCase()}-${index}-${staffId}-${startTime}`,
       staffId,
-      clientId: assignmentType === "CLIENT_1_TO_1" ? clientId : undefined,
+      clientId: assignmentType === "BREAK" ? undefined : clientId,
       startTime,
       assignmentType,
       source,

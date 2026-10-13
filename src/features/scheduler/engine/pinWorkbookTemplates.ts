@@ -38,7 +38,33 @@ export function pinWorkbookTemplates(input: SchedulerInput): {
      item.note?.startsWith("Priority 2 saved workbook template:"))
   );
 
-  for (const reference of references) {
+  const shift=(time:string,delta:number)=>{
+    const [h,m]=time.split(":").map(Number), n=h*60+m+delta;
+    return n>=0&&n<1440?`${String(Math.floor(n/60)).padStart(2,"0")}:${String(n%60).padStart(2,"0")}`:"";
+  };
+  for (const original of references) {
+    // Old templates sometimes store "Break/Nap" without a client ID.
+    // Resolve it only from the immediately preceding or following client on
+    // the SAME staff column, and only when that client's nap event is valid.
+    let reference=original;
+    if(original.assignmentType==="BREAK_NAP"&&!original.clientId){
+      const neighbors=references.filter(a=>a.staffId===original.staffId &&
+        a.assignmentType==="CLIENT_1_TO_1"&&a.clientId &&
+        (a.startTime===shift(original.startTime,-30)||a.startTime===shift(original.startTime,30)));
+      const eligible=[...new Set(neighbors.map(a=>a.clientId as string))]
+        .filter(id=>clients.get(id)?.napSlots.includes(original.startTime));
+      if(eligible.length===1)reference={...original,clientId:eligible[0]};
+      else if(eligible.length===0) {
+        reference={...original,assignmentType:"BREAK",clientId:undefined};
+        rejected.push({staffId:original.staffId,startTime:original.startTime,
+          reason:"Unlabeled Break/Nap has no adjacent client with a saved nap; kept as a plain staff break"});
+      } else {
+        // No reliable tie-breaker: do not attribute a client nap to the wrong child.
+        reference={...original,assignmentType:"BREAK",clientId:undefined};
+        rejected.push({staffId:original.staffId,startTime:original.startTime,
+          reason:"Unlabeled Break/Nap matches two adjacent napping clients; kept as a plain staff break"});
+      }
+    }
     const member = staff.get(reference.staffId);
     const client = reference.clientId ? clients.get(reference.clientId) : null;
     const isBreak = ["BREAK", "BREAK_NAP", "BREAK_SPEECH"].includes(reference.assignmentType);
@@ -68,6 +94,19 @@ export function pinWorkbookTemplates(input: SchedulerInput): {
         member.serviceSetting !== client.serviceSetting) {
         reason = "Incompatible service setting";
       }
+    } else if (reference.assignmentType === "BREAK_NAP" || reference.assignmentType === "BREAK_SPEECH") {
+      const eventSlots = reference.assignmentType === "BREAK_NAP" ? client?.napSlots : client?.speechSlots;
+      if (!client || !eventSlots?.includes(reference.startTime)) {
+        reason = "Linked template break does not match a saved client nap/speech event";
+      } else if (clientSlots.has(clientKey)) {
+        reason = "Another template assignment already supervises this client event";
+      } else if (client.staffRelationships[reference.staffId] === "HARD_RESTRICTION") {
+        reason = "Hard staff/client restriction for linked event";
+      } else if (member.serviceSetting && client.serviceSetting &&
+        member.serviceSetting !== "BOTH" && client.serviceSetting !== "BOTH" &&
+        member.serviceSetting !== client.serviceSetting) {
+        reason = "Incompatible service setting for linked event";
+      }
     } else if (!["BREAK", "BREAK_NAP", "BREAK_SPEECH"].includes(reference.assignmentType)) {
       reason = "Unsupported workbook block type";
     }
@@ -86,7 +125,7 @@ export function pinWorkbookTemplates(input: SchedulerInput): {
     });
     staffSlots.add(staffKey);
     if (isBreak) staffWithBreak.add(reference.staffId);
-    if (reference.assignmentType === "CLIENT_1_TO_1") clientSlots.add(clientKey);
+    if (reference.clientId) clientSlots.add(clientKey);
     if (reference.note?.startsWith("Priority 1")) primaryCount++;
     else secondaryCount++;
   }

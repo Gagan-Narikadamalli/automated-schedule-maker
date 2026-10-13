@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { auditFinalCoverage } from "@/features/scheduler/engine/auditFinalCoverage";
+import { auditLinkedNapBreakRules } from "@/features/scheduler/engine/auditLinkedNapBreakRules";
 import { getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
 import { generateSchedule } from "@/features/scheduler/engine/generateSchedule";
 import { placeStaffBreaksAfterCoverage } from "@/features/scheduler/engine/placeStaffBreaks";
@@ -230,7 +231,15 @@ export async function POST(request: Request) {
         schedulerInput.clients,
         dayData.extendedRules.slotLengthMinutes
       );
-      const finalCoverage = auditFinalCoverage(
+      const linkedEventProblems = auditLinkedNapBreakRules(enrichedAssignments,schedulerInput.clients);
+    if(linkedEventProblems.length) {
+      return NextResponse.json({
+        error:"Generated schedule contains inconsistent nap/break assignments; no schedules were overwritten.",
+        violations:linkedEventProblems,
+        date,
+      },{status:422});
+    }
+    const finalCoverage = auditFinalCoverage(
         schedulerInput.clients,
         enrichedAssignments,
         coverageResult.metrics,

@@ -147,6 +147,16 @@ export async function GET(request: Request) {
       .sort((left, right) => right.localeCompare(left))
       .slice(0, 8);
 
+    // Staff with persisted assignments must remain visible even when their
+    // current shift/attendance settings no longer match the saved schedule.
+    // Otherwise client view displays coverage with no corresponding staff cell.
+    const assignedStaffIds = new Set(
+      plainAssignments.map((assignment) =>
+        String(typeof assignment.staffId === "object"
+          ? assignment.staffId?._id ?? assignment.staffId?.id ?? ""
+          : assignment.staffId ?? "")
+      ).filter(Boolean)
+    );
     const absentClientIds = new Set(dayData.input.clients.map((client) => client.id));
     const clientRows = plainClientDocuments.map((client) => ({ id: String(client._id), code: String(client.displayCode ?? ""), name: firstNameOnly(client.fullName ?? client.displayCode), color: String(client.color ?? "#D9F4EE") }));
 
@@ -167,7 +177,7 @@ export async function GET(request: Request) {
           const hasShiftToday = Array.isArray(staffMember.shiftPatterns) && staffMember.shiftPatterns.some(
             (pattern: PlainDatabaseRecord) => patternMatchesDate(pattern.days ?? [], date)
           );
-          return Boolean(schedulerMember && (schedulerMember.availableSlots.length > 0 || hasShiftToday));
+          return assignedStaffIds.has(String(staffMember._id)) || Boolean(schedulerMember && (schedulerMember.availableSlots.length > 0 || hasShiftToday));
         })
         .map((staffMember) => ({
           id: String(staffMember._id),
