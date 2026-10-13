@@ -435,6 +435,12 @@ function trySwapCandidate(
  * Exchange breaks and hand the post-nap client block back to B.
  * Both original breaks still exist, only their staff/time locations change.
  */
+/**
+ * Reassign a linked nap break to another compatible, idle staff member who
+ * already has a movable ordinary break. Keep ALL client coverage unchanged.
+ * The original linked-break owner receives a break in a genuinely free slot;
+ * the receiving staff member's prior ordinary break is removed.
+ */
 export function repairLinkedNapReliefHandoffs(
   initial: SchedulerAssignment[],
   staff: SchedulerStaff[],
@@ -442,60 +448,65 @@ export function repairLinkedNapReliefHandoffs(
   callOutStaffIds: string[],
   rules: SchedulerRules
 ): SchedulerAssignment[] {
-  const result=initial.map(a=>({...a}));
-  const byStaff=new Map(staff.map(p=>[p.id,p]));
-  const byClient=new Map(clients.map(c=>[c.id,c]));
-  const absent=new Set(callOutStaffIds);
-  for(const linked of [...result]) {
-    if(linked.assignmentType!=="BREAK_NAP"||!linked.clientId||
-      linked.source!=="AUTO"||absent.has(linked.staffId))continue;
-    const next=shiftTime(linked.startTime,rules.slotLengthMinutes);
-    const previous=shiftTime(linked.startTime,-rules.slotLengthMinutes);
-    if(!next||!previous)continue;
-    const coverage=result.find(a=>a.staffId===linked.staffId&&
-      a.startTime===next&&a.clientId===linked.clientId&&
-      isMutableClientAssignment(a));
-    if(!coverage)continue;
-    const client=byClient.get(linked.clientId);
-    if(!client||!client.napSlots.includes(linked.startTime))continue;
-    for(const previousCoverage of result.filter(a=>
-      a.startTime===previous&&a.clientId===client.id&&
-      a.assignmentType==="CLIENT_1_TO_1"&&a.staffId!==linked.staffId)) {
-      const replacementStaff=byStaff.get(previousCoverage.staffId);
-      const originalStaff=byStaff.get(linked.staffId);
-      if(!replacementStaff||!originalStaff||
-        absent.has(replacementStaff.id)||
-        result.some(a=>a.staffId===replacementStaff.id&&a.startTime===linked.startTime))continue;
-      const reliefBreak=result.find(a=>a.staffId===replacementStaff.id&&
-        a.startTime===next&&a.assignmentType==="BREAK"&&a.source==="AUTO");
-      if(!reliefBreak)continue;
-      if(client.staffRelationships[replacementStaff.id]==="HARD_RESTRICTION")continue;
-      const compatible=!replacementStaff.serviceSetting||!client.serviceSetting||
-        replacementStaff.serviceSetting==="BOTH"||client.serviceSetting==="BOTH"||
-        replacementStaff.serviceSetting===client.serviceSetting;
-      if(!compatible||!replacementStaff.availableSlots.includes(linked.startTime)||
-        !replacementStaff.availableSlots.includes(next)||!originalStaff.availableSlots.includes(next))continue;
-      // Keep the client's nap and 1:1 assignment in their original slots.
-      // Moving the nap-linked break is safe only when the new staff is a valid match.
-      const newClientCoverage={...coverage,staffId:replacementStaff.id,
-        id:`nap-relief-coverage-${client.id}-${next}-${replacementStaff.id}`,
-        note:"Continued the pre-nap staff/client pairing after a coordinated break exchange."};
-      const newLinked={...linked,staffId:replacementStaff.id,
-        id:`nap-relief-linked-${client.id}-${linked.startTime}-${replacementStaff.id}`,
-        note:"Linked nap break moved to continue the existing staff/client pairing."};
-      const newBreak={...reliefBreak,staffId:originalStaff.id,
-        id:`nap-relief-break-${originalStaff.id}-${next}`,
-        note:"Exchanged staff breaks to preserve client continuity."};
-      const removed=new Set([linked.id,coverage.id,reliefBreak.id]);
-      const simulated=result.filter(a=>!removed.has(a.id));
-      const check=canAssignStaffToClient({
-        staffMember:replacementStaff,client,startTime:next,
-        assignments:simulated,callOutStaffIds:absent,rules,
-        allowSameDayPairRepeat:true,allowCoverageLimitException:true
-      });
-      if(!check.allowed)continue;
-      if(simulated.some(a=>a.staffId===originalStaff.id&&a.startTime===next))continue;
-      result.splice(0,result.length,...simulated,newLinked,newClientCoverage,newBreak);
+  const result = initial.map(a => ({ ...a }));
+  const byClient = new Map(clients.map(c => [c.id, c]));
+  const absent = new Set(callOutStaffIds);
+  const breakTypes = new Set(["BREAK", "BREAK_NAP", "BREAK_SPEECH"]);
+  const breakStart = "11:00", breakEnd = "14:00";
+  for (const linked of [...result]) {
+    if (linked.assignmentType !== "BREAK_NAP" || !linked.clientId ||
+      linked.source !== "AUTO" || absent.has(linked.staffId)) continue;
+    const client = byClient.get(linked.clientId);
+    if (!client || !client.napSlots.includes(linked.startTime)) continue;
+    const owner = staff.find(p => p.id === linked.staffId);
+    if (!owner) continue;
+    // Never transfer the break if the original employee has another break.
+    if (result.filter(a => a.staffId === owner.id && breakTypes.has(a.assignmentType)).length !== 1) continue;
+    // A linked nap only moves to a staff member genuinely free at the nap time.
+    for (const candidate of staff) {
+      if (candidate.id === owner.id || absent.has(candidate.id) ||
+        !candidate.availableSlots.includes(linked.startTime) ||
+        result.some(a => a.staffId === candidate.id && a.startTime === linked.startTime) ||
+        client.staffRelationships[candidate.id] === "HARD_RESTRICTION") continue;
+      if (candidate.serviceSetting && client.serviceSetting &&
+        candidate.serviceSetting !== "BOTH" && client.serviceSetting !== "BOTH" &&
+        candidate.serviceSetting !== client.serviceSetting) continue;
+      const candidateBreaks = result.filter(a => a.staffId === candidate.id && breakTypes.has(a.assignmentType));
+      if (candidateBreaks.length !== 1) continue;
+      const ordinaryBreak = candidateBreaks[0];
+      if (ordinaryBreak.assignmentType !== "BREAK" || ordinaryBreak.source !== "AUTO" ||
+        !ordinaryBreak.startTime || ordinaryBreak.startTime === linked.startTime) continue;
+      // Find another truly empty legal break cell for the previous nap-break owner,
+      // excluding the nap itself; never displace or erase client coverage.
+      const alternative = owner.availableSlots
+        .filter(time => time >= breakStart && time < breakEnd &&
+          time !== linked.startTime &&
+          !result.some(a => a.staffId === owner.id && a.startTime === time))
+        .sort((a,b) => {
+          const near = (t:string) => {
+            const [h,m] = t.split(":").map(Number);
+            return Math.abs(h*60+m-750);
+          };
+          return near(a)-near(b) || a.localeCompare(b);
+        })[0];
+      if (!alternative) continue;
+      const replacementLinked:SchedulerAssignment = {
+        ...linked, id:`nap-relief-linked-${client.id}-${linked.startTime}-${candidate.id}`,
+        staffId:candidate.id,
+        note:"Linked nap break placed with eligible staff available at the nap time."
+      };
+      const replacementBreak:SchedulerAssignment = {
+        ...ordinaryBreak, id:`nap-relief-break-${owner.id}-${alternative}`,
+        staffId:owner.id, startTime:alternative,
+        note:"Relocated break without interrupting any client coverage."
+      };
+      const dropped = new Set([linked.id, ordinaryBreak.id]);
+      const simulated = result.filter(a => !dropped.has(a.id));
+      // Guard against staff double-booking and duplicate nap supervision.
+      if (simulated.some(a => (a.staffId === candidate.id && a.startTime === linked.startTime) ||
+        (a.staffId === owner.id && a.startTime === alternative) ||
+        (a.clientId === client.id && a.startTime === linked.startTime))) continue;
+      result.splice(0, result.length, ...simulated, replacementLinked, replacementBreak);
       break;
     }
   }
