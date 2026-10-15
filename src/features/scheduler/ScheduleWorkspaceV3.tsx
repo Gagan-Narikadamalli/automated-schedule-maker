@@ -965,50 +965,10 @@ export function ScheduleWorkspaceV3() {
       setStatusMessage("AI Generate requires a real location.");
       return;
     }
-    try {
-      setWorking(true);
-      setStatusMessage("Asking website AI to generate and validate the full schedule...");
-      const response = await fetch("/api/schedule/ai-generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ locationId, date: selectedDate, save: true }),
-      });
-      const data = await readJson<{
-        error?: string;
-        previewOnly?: boolean;
-        violations?: string[];
-        explanation?: string;
-        message?: string;
-        partialBuild?: boolean;
-        ollamaUsed?: boolean;
-        ollamaDiagnostic?: string;
-        unplacedCount?: number;
-        placementIssues?: Array<{clientCode:string;startTime:string;reason:string}>;
-        breakIssues?: string[];
-        metrics?: { coveredClientSlots: number; requiredClientSlots: number; uncoveredClientSlots: number; coveragePercent: number };
-      }>(response);
-      if (!response.ok) throw new Error(data.error || data.violations?.join("; ") || "AI Generate could not validate a schedule.");
-      const metrics = data.metrics;
-      const coverage = metrics
-        ? `${metrics.coveredClientSlots}/${metrics.requiredClientSlots} required slots covered (${metrics.coveragePercent.toFixed(1)}%), ${metrics.uncoveredClientSlots} uncovered.`
-        : "No coverage metrics returned.";
-      const issues = [
-        ...(data.placementIssues ?? []).map(item => `${item.clientCode} at ${item.startTime}: ${item.reason}`),
-        ...(data.breakIssues ?? []),
-        ...(data.violations ?? []),
-      ];
-      if (data.ollamaUsed === false) issues.unshift(data.ollamaDiagnostic ?? "Ollama planning was unavailable; placements were calculated by the independent website scheduler.");
-      setSchedulerWarnings(issues);
-      setShowSchedulerWarnings(issues.length > 0);
-      setStatusMessage(data.partialBuild
-        ? `AI Generate saved a partial schedule: ${coverage} ${data.unplacedCount ?? issues.length} blocks sent to Unplaced Assignments. Review the placement issues below.`
-        : `AI Generate: ${coverage} ${data.explanation ?? ""} Schedule saved and refreshed.`);
-      await loadSchedule();
-    } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : "AI Generate preview failed; the saved schedule was not changed.");
-    } finally {
-      setWorking(false);
-    }
+    window.dispatchEvent(new CustomEvent("scheduler:openai-generate", {
+      detail: { locationId, date: selectedDate },
+    }));
+    setStatusMessage("OpenAI Generate started in the linked assistant. Results and decision summaries appear in that conversation.");
   }
 
   async function requestGenerateWeek() {
@@ -1180,7 +1140,7 @@ export function ScheduleWorkspaceV3() {
           <button type="button" className="button button-warning" disabled={working || loading || demoMode} onClick={() => void requestDeleteSchedule()} title="Delete all scheduled blocks for this date only, after confirmation.">Delete Schedule</button>
           <button type="button" className="button button-secondary" disabled={working || loading || staff.length === 0} onClick={() => void requestGenerateWeek()}>Auto Generate Week</button>
           <button type="button" className="button button-primary" disabled={working || loading || staff.length === 0} onClick={() => void requestAutoGenerate()}>{working ? "Working..." : "Auto Generate Day"}</button>
-          <button type="button" className="button button-secondary" disabled={working || loading || staff.length === 0} onClick={() => void requestAiGenerate()} title="Generate a full schedule with the website AI, validate it, and save only if complete.">AI Generate</button>
+          <button type="button" className="button button-secondary" disabled={working || loading || staff.length === 0} onClick={() => void requestAiGenerate()} title="Open OpenAI schedule generation in the linked assistant conversation.">AI Generate</button>
         </div>
       </section>
 

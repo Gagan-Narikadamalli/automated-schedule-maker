@@ -222,7 +222,7 @@ Native AI is **text-only**. It intentionally rejects image uploads instead of de
 
 ### Paid Scheduler AI
 
-Paid AI uses an external reasoning model through the AI gateway (the current default in code is GPT-5.6 Sol, configurable with environment variables). It has the same authoritative scheduler tools/validations, but it can perform richer multi-step natural-language planning and can analyze screenshots with the configured vision model.
+Paid AI uses OpenAI directly (default: GPT-6.1 Sol, configurable with OPENAI_SCHEDULER_MODEL). AI Generate shares the same assistant thread and OpenAI generation endpoint, with independent model-designed placements and a decision summary. It has the same authoritative scheduler tools/validations, but it can perform richer multi-step natural-language planning and can analyze screenshots with the configured vision model.
 
 A new screenshot upload is deliberately preview-only: the Paid AI extracts and compares the visible source data but cannot write on that upload turn. The manager must confirm the proposed import/change in a later turn.
 
@@ -322,9 +322,9 @@ Relevant variables include:
 
 ```text
 SCHEDULER_AI_AUTONOMOUS_WRITES=true|false
-SCHEDULER_AI_PAID_MODEL=<AI Gateway model>
-SCHEDULER_AI_MODEL=<fallback paid model>
-SCHEDULER_AI_VISION_MODEL=<vision-capable model>
+OPENAI_API_KEY=<server-only OpenAI key>
+OPENAI_SCHEDULER_MODEL=gpt-6.1-sol
+OPENAI_SCHEDULER_VISION_MODEL=gpt-6.1-sol
 ```
 
 When autonomous writes are disabled, AI operations remain read/advisory only. Native and Paid AI provider graphs are tested independently so the Native path does not import the Paid AI implementation.

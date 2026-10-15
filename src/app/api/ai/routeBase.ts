@@ -1,4 +1,7 @@
 import { ToolLoopAgent, generateText, stepCountIs } from "ai";
+import { getSchedulerOpenAIModel, schedulerOpenAIOptions, OPENAI_SETUP_MESSAGE } from "@/features/ai/openaiProvider";
+import { isWebsiteRequest, WEBSITE_SCOPE_REPLY } from "@/features/ai/websiteScope";
+import { createOpenAIGenerationTools } from "@/features/ai/openaiGenerationTools";
 import { NextResponse } from "next/server";
 
 import {
@@ -41,8 +44,6 @@ import { AITrainingExample } from "@/models/AITrainingExample";
 
 export const maxDuration = 300;
 
-const DEFAULT_SCHEDULER_AI_PAID_MODEL = "openai/gpt-5.6-sol";
-const DEFAULT_SCHEDULER_AI_VISION_MODEL = "openai/gpt-5.4";
 const MAX_MESSAGE_LENGTH = 5000;
 const MAX_HISTORY_MESSAGES = 12;
 const MAX_ATTACHMENT_CONTEXT_LENGTH = 14_000;
@@ -362,12 +363,11 @@ async function analyzeSchedulerAttachments(args: {
   locationName?: string;
   selectedDate: string;
 }): Promise<string> {
-  const visionModel =
-    process.env.SCHEDULER_AI_VISION_MODEL?.trim() ||
-    DEFAULT_SCHEDULER_AI_VISION_MODEL;
+  const visionModel = getSchedulerOpenAIModel(true);
 
   const result = await generateText({
     model: visionModel,
+    providerOptions: schedulerOpenAIOptions,
     instructions: `You are the screenshot-reading layer for an Automatic Schedule Maker.
 Your only job is to extract scheduling facts from the attached screenshots accurately.
 
@@ -529,12 +529,12 @@ export async function POST(request: Request) {
       return forbiddenResponse("You do not have access to this scheduler location.");
     }
 
-    const aiProvider = "gateway" as const;
+    const aiProvider = "openai" as const;
     const thinkingLevel = "high" as const;
-    const model =
-      process.env.SCHEDULER_AI_PAID_MODEL?.trim() ||
-      process.env.SCHEDULER_AI_MODEL?.trim() ||
-      DEFAULT_SCHEDULER_AI_PAID_MODEL;
+    const model = getSchedulerOpenAIModel();
+    if (!(await isWebsiteRequest(message, history, attachmentPreviewOnly))) {
+      return NextResponse.json({reply:WEBSITE_SCOPE_REPLY,provider:aiProvider,thinkingLevel,changed:false,mode:"READ_ONLY",toolsUsed:[],writeToolsUsed:[],trainingExampleId:null});
+    }
     const autonomousWrites =
       process.env.SCHEDULER_AI_AUTONOMOUS_WRITES?.trim().toLowerCase() === "true";
     const writeToolsEnabled = autonomousWrites && !attachmentPreviewOnly;
@@ -645,6 +645,7 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
           ...createSchedulerWriteTools(context),
           ...createSchedulerBulkTools(context),
           ...createPaidTemplateTools(context),
+          ...createOpenAIGenerationTools(context),
         }
       : {
           ...readTools,
@@ -743,6 +744,7 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
     } else {
       const agent = new ToolLoopAgent({
         model,
+        providerOptions: schedulerOpenAIOptions,
         instructions: sharedInstructions,
         tools,
         toolChoice: "auto",
@@ -751,16 +753,16 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
         maxOutputTokens: 2400,
       });
 
-      const gatewayResult = await agent.generate({
+      const openaiResult = await agent.generate({
         prompt: buildConversationPrompt(history, normalizedMessage, dateContext),
         timeout: {
           totalMs: 260_000,
-          stepMs: 65_000,
+          stepMs: 245_000,
         },
       });
 
-      resultText = gatewayResult.text;
-      resultSteps = gatewayResult.steps.map((step) => ({
+      resultText = openaiResult.text;
+      resultSteps = openaiResult.steps.map((step) => ({
         toolCalls: step.toolCalls.map((toolCall) => ({
           toolName: toolCall.toolName,
           input:
@@ -872,6 +874,7 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
       try {
         const synthesis = await generateText({
           model,
+          providerOptions: schedulerOpenAIOptions,
           instructions: `You are the final-response writer for the Automatic Schedule Maker assistant. Answer the user's actual scheduler question using ONLY the supplied date context and scheduler tool evidence. You may discuss staff availability, client attendance/requirements, assignments, who is taking care of whom, time ranges, breaks, nap/speech, call-outs, uncovered work, unplaced work, schedule health, replacement-analysis results, bulk replacement results, advisory suggestions, override conflicts, and completed changes. Do not invent anything. Keep the effective date exact and never label it with the wrong weekday. If scheduleAvailable=false for a live-calendar question, state that the schedule has not been generated and ask whether the user wants it generated. For replace_schedule_blocks evidence, report what was replaced/swapped and explicitly list any unplacedCreated leftovers; if leftovers exist, offer to move them to a staff/time the user specifies. If replace_schedule_blocks reports confirmationType=OCCUPIED_TARGET or requiresOccupiedReplacementConfirmation=true, do NOT call it an override: say the replacement staff already has the listed clashing blocks, explain that those existing client blocks will go to Unplaced if the user proceeds, and ask whether they still want to proceed. For place_unplaced_assignment evidence, state the exact placed client/staff/time and any different client newly displaced to Unplaced. For analyze_client_replacement evidence, describe only what that analysis supports. For advisory suggestions, clearly label them as recommendations rather than completed changes. If a write result requires confirmation or override, explain the exact conflict and ask whether the user allows the override. If the evidence cannot support a reliable answer, say that you couldn't generate a reliable answer and ask for a different date/person/client/time or more detail. If no write tool was used, do not imply anything changed.`,
           prompt: `Clinic: ${locationName || "Clinic"}\nEffective date: ${resolvedDate.date}\nOriginal user request: ${message}\nWrite tools used: ${writeToolsUsed.join(", ") || "none"}\n\nScheduler evidence:\n${stringifyLimited(
             toolEvidence,
@@ -927,6 +930,13 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
       reply = "I understand that you want me to change the schedule, but Paid AI write actions are disabled in this deployment. I have not changed anything. An administrator must enable autonomous scheduling writes before I can execute it.";
     }
 
+    const generationEvidence = [...toolEvidence].reverse().find(entry => entry.toolName === "generate_schedule")?.output as Record<string, unknown> | undefined;
+    if (generationEvidence?.saved === true) {
+      const decisions = Array.isArray(generationEvidence.decisionSummary) ? generationEvidence.decisionSummary.filter((item): item is string => typeof item === "string").slice(0,5) : [];
+      const tradeoffs = Array.isArray(generationEvidence.tradeoffs) ? generationEvidence.tradeoffs.filter((item): item is string => typeof item === "string").slice(0,3) : [];
+      if (decisions.length) reply += "\n\nDecision summary:\n" + decisions.map(item => `• ${item}`).join("\n");
+      if (tradeoffs.length) reply += "\n\nTradeoffs:\n" + tradeoffs.map(item => `• ${item}`).join("\n");
+    }
     reply = ensureSchedulerConversationClosing(reply);
 
     let trainingExampleId: string | null = null;
@@ -938,7 +948,7 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
         userId: auth.session.userId,
         request: message,
         assistantResponse: reply,
-        model,
+        model: model.modelId,
         mode,
         toolsSelected: toolsUsed,
         managerAccepted: null,
@@ -970,6 +980,7 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
 
     return NextResponse.json(response);
   } catch (error) {
+    if (error instanceof Error && error.message === OPENAI_SETUP_MESSAGE) return NextResponse.json({error:OPENAI_SETUP_MESSAGE},{status:503});
     console.error("Scheduler AI request failed:", error);
     const message = error instanceof Error ? error.message : "";
     const creditOrAccessProblem =

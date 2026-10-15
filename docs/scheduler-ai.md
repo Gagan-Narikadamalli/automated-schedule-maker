@@ -16,9 +16,9 @@ It cannot generate, repair, move, delete, create call-outs, or otherwise modify 
 
 ## Runtime setup
 
-Paid AI uses Vercel AI SDK and AI Gateway through the independent `/api/ai/paid` endpoint. Its default model is `openai/gpt-5.6-sol`, configurable with `SCHEDULER_AI_PAID_MODEL`. Free/Native AI uses the separate `/api/ai/native` endpoint and does not import or call the paid model stack.
+Paid AI calls the OpenAI Responses API directly through `@ai-sdk/openai` and `/api/ai/paid`. Its default model is `gpt-6.1-sol`, configurable with `OPENAI_SCHEDULER_MODEL`. AI SDK is the application library, not a model provider or Gateway route. Free/Native AI uses the separate `/api/ai/native` endpoint and does not import or call the paid model stack.
 
-Production on Vercel should use the project's AI Gateway/OIDC configuration. For local development, use Vercel OIDC or set `AI_GATEWAY_API_KEY` in `.env.local`. Never commit the real key.
+Set server-only `OPENAI_API_KEY` in the Vercel Preview and Production environments and redeploy. For local use, set it in `.env.local`. Never commit the key. Optional `OPENAI_SCHEDULER_VISION_MODEL` controls screenshots; otherwise the same default model is used. Missing credentials return an explicit 503 setup error without model or scheduling fallback.
 
 ## Training data already collected
 
@@ -66,3 +66,16 @@ Fine-tune or otherwise specialize a model only after the tool-based assistant is
 ## Important boundary
 
 The AI should learn how to understand manager intent, select scheduler operations, and explain results. It should not replace deterministic constraints, coverage calculations, break rules, repair logic, or database validation with learned behavior.
+
+
+## Linked OpenAI generation and assistant
+
+AI Generate opens the existing assistant and submits a date-specific generation request in the same thread. Follow-up questions share that thread and the effective date. The paid assistant's `generate_schedule` tool invokes the same `/api/schedule/ai-generate` endpoint. Free Native mode remains available independently; AI Generate selects OpenAI explicitly.
+
+OpenAI independently designs continuous assignment segments from anonymized staff/client aliases, current shifts, attendance, restrictions, nap/speech windows, templates and historical patterns. It does not receive placements from the deterministic auto-generation engine. The website expands segments into grid cells and validates hard eligibility, double booking, fixed events, one nap per eligible client, one break per staff, clinical rotation limits, and daily/weekly hours. Invalid results receive one bounded correction attempt; provider failure never silently uses Ollama or deterministic generation. Protected manual/template assignments block full-day replacement. Availability/rules/events are checked again before saving. Missing coverage is disclosed and sent to Unplaced when an otherwise valid partial schedule is saved.
+
+Team matching, continuity, historical pairings, target staff/client counts and general consecutive-hour preferences are guidelines for the model's judgment. Clinical restrictions and availability remain enforced. The model returns a concise explanation, main decision reasons and tradeoffs, not private internal chain-of-thought. These explanations describe model decisions and are not proof that a validation check passed; only independent validator results establish that.
+
+A website-scope classification runs before paid website tools or database reads. Unrelated and mixed unrelated requests are declined. The assistant has only the website's controlled tools; no external web-search or general-purpose execution tools. OpenAI calls use `store:false`; conversation history is supplied by the application. This setting is not a claim of zero retention.
+
+Validation: `npm run test:openai` uses a mocked OpenAI Responses endpoint and synthetic roster data; it checks direct routing, scope decisions, plan parsing, decision summaries, hard-rule rejection and flexible preferences. A real API smoke test still requires a configured OpenAI key and account model access.

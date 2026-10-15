@@ -446,7 +446,7 @@ export function repairLinkedNapReliefHandoffs(
   staff: SchedulerStaff[],
   clients: SchedulerClient[],
   callOutStaffIds: string[],
-  rules: SchedulerRules
+  _rules: SchedulerRules
 ): SchedulerAssignment[] {
   const result = initial.map(a => ({ ...a }));
   const byClient = new Map(clients.map(c => [c.id, c]));
