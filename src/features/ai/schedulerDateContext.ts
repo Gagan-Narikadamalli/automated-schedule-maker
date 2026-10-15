@@ -132,7 +132,7 @@ export async function buildSchedulerDateContextSnapshot(context: SchedulerAiCont
   const coveredKeys = new Set<string>();
   for (const assignment of enrichedAssignments) {
     if (
-      assignment.assignmentType === "CLIENT_1_TO_1" &&
+      ["CLIENT_1_TO_1","BREAK_NAP","BREAK_SPEECH","NAP","SPEECH"].includes(assignment.assignmentType) &&
       assignment.clientId
     ) {
       coveredKeys.add(`${assignment.clientId}:${assignment.startTime}`);

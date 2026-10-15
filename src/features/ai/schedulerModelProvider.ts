@@ -19,6 +19,11 @@ export function getSchedulerModel(vision = false) {
     const response=await globalThis.fetch(url,options);
     // Operational metadata only: never log prompts, aliases or credentials.
     console.info("Scheduler Gemini response",{model:modelId,status:response.status,elapsedMs:Date.now()-started});
+    if(!response.ok){
+      const body=await response.clone().json().catch(()=>null) as {error?:{message?:string}}|null;
+      const detail=body?.error?.message?.replaceAll(apiKey,"[redacted]").slice(0,800);
+      console.warn("Scheduler Gemini rejection",{status:response.status,detail});
+    }
     return response;
   }})(modelId.replace(/^(?:google|models)\//,""));
 }

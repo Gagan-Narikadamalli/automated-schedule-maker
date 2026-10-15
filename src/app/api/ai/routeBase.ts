@@ -509,11 +509,14 @@ export async function POST(request: Request) {
       const tradeoffs=Array.isArray(output?.tradeoffs)?output.tradeoffs.filter((item:unknown)=>typeof item==="string"):[];
       const metrics=output?.metrics;
       const reply=saved
-        ? `AI schedule saved for ${resolvedDate.date}. ${metrics?.coveredClientSlots??0} of ${metrics?.requiredClientSlots??0} required 30-minute client blocks are covered.${output.partialBuild?` ${output.unplacedCount??0} uncovered blocks need review in Unplaced Assignments.`:""}\n\n${String(output.explanation??"")}${decisions.length?"\n\nDecision summary:\n"+decisions.slice(0,6).map((item:string)=>`• ${item}`).join("\n"):""}${tradeoffs.length?"\n\nTradeoffs:\n"+tradeoffs.slice(0,4).map((item:string)=>`• ${item}`).join("\n"):""}`
+        ? `AI schedule saved for ${resolvedDate.date}. ${metrics?.coveredClientSlots??0} of ${metrics?.requiredClientSlots??0} required 30-minute client/event blocks are covered.${output.partialBuild?` ${output.unplacedCount??0} uncovered blocks need review in Unplaced Assignments.`:""}\n\n${String(output.explanation??"")}${decisions.length?"\n\nDecision summary:\n"+decisions.slice(0,6).map((item:string)=>`• ${item}`).join("\n"):""}${tradeoffs.length?"\n\nTradeoffs:\n"+tradeoffs.slice(0,4).map((item:string)=>`• ${item}`).join("\n"):""}`
         : output?.requiresConfirmation
           ? `The saved schedule for ${resolvedDate.date} contains ${output.protectedCount} protected assignments. Rebuilding the day will replace them. Do you allow me to override these protected assignments and proceed?`
           : `I could not save the AI schedule for ${resolvedDate.date}. ${String(output?.error??"The plan could not be independently validated.")} No successful schedule change was confirmed.`;
       return NextResponse.json({reply,changed:saved,mode:"AUTONOMOUS",provider:aiProvider,thinkingLevel,
+        generation:{saved,metrics:output?.metrics,status:output?.status,
+          violations:Array.isArray(output?.violations)?output.violations.map((item:unknown)=>typeof item==="string"?privacy.decodeText(privacy.encodeText(item)):item):[],
+          unplacedCount:output?.unplacedCount},
         toolsUsed:["generate_schedule"],writeToolsUsed:["generate_schedule"],trainingExampleId:null,effectiveDate:resolvedDate.date});
     }
 
