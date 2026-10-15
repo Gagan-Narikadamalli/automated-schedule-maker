@@ -74,7 +74,7 @@ export async function POST(request: Request) {
       windows.set(id,set);
     }
     dayData.input.clients=dayData.input.clients.map(c=>{
-      const napSlots=[...(windows.get(c.id)??new Set<string>())].sort();
+      const napSlots=[...(windows.get(c.id)??new Set<string>())].filter(t=>c.requiredSlots.includes(t)).sort();
       return {...c,napSlots,
         requiredSlots:[...new Set([...c.requiredSlots,...c.speechSlots,...napSlots])].sort()};
     });
@@ -125,6 +125,7 @@ export async function POST(request: Request) {
       return segments;
     };
     const sanitized = {
+      useFixedCells:true,
       date,
       regenerationPolicy:"The manager requested a new independently designed day; current assignments are reference evidence and may be reallocated. Hard eligibility and event constraints still apply.",
       staff:roster.staff.map(p=>({id:staffAlias.get(p.id),role:p.role,teamId:p.teamId?teamAlias.get(String(p.teamId)):undefined,availableSlots:p.availableSlots,
@@ -176,7 +177,7 @@ export async function POST(request: Request) {
         for(const [id,alias] of clientAlias) text=text.replaceAll(id,alias);
         return text;
       });
-      plan=await designOpenAISchedule({...sanitized,previousProposal:plan},feedback.slice(0,120));
+      plan=await designOpenAISchedule({...sanitized,previousProposal:plan.fixedChoices??plan},feedback.slice(0,120));
       values=expandOpenAIPlan(plan,staffRefs,clientRefs);
       audit=validatePreview(roster,values);
     }
@@ -279,7 +280,7 @@ export async function POST(request: Request) {
       violations: audit.problems,
       uncoveredRequirements: placementIssues,
       explanation: typeof data.explanation === "string" ? data.explanation.slice(0, 4000) : "",
-      error: !valid ? "Unable to generate today's complete schedule: more client coverage is required than available eligible staff can provide. Human scheduling decision needed." : undefined,
+      error: !valid ? "The AI proposal still has scheduling conflicts after correction. It was not saved; manager review or another proposal is needed." : undefined,
       message: saved ? (complete ? "Complete AI schedule validated and saved." : `Partial AI schedule saved. ${placementIssues.length} uncovered client blocks added to Unplaced Assignments for human placement.`) : "Validated AI schedule preview; no schedule was overwritten.",
     }, { status: valid ? 200 : 422 });
   } catch (error) {
