@@ -21,13 +21,13 @@ async function main(){
  const plan={segments:[{staff:"S0",client:"C0",startTime:"11:00",endTime:"12:00",type:"CLIENT_1_TO_1"}],explanation:"One continuous block.",decisions:["Keep the same staff."],tradeoffs:[]};
  const outputs:unknown[]=[{allowed:false},{allowed:true},plan];let calls=0;
  globalThis.fetch=async(url,options)=>{
-  assert.equal(String(url),"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent");
+  assert.equal(String(url),"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent");
   const body=JSON.parse(String(options?.body));requests.push(body);assert.ok(!("openai" in body));
   const item=outputs.shift();let parts:unknown[];
   if(item)parts=[{text:JSON.stringify(item)}];
   else if(!calls++)parts=[{functionCall:{name:"check_coverage",args:{date:"2026-10-16"}},thoughtSignature:"test-signature"}];
   else parts=[{text:"Coverage checked for October 16."}];
-  return new Response(JSON.stringify({candidates:[{content:{role:"model",parts},finishReason:"STOP",index:0}],usageMetadata:{promptTokenCount:10,candidatesTokenCount:10,totalTokenCount:20},modelVersion:"gemini-3.8-flash"}),{headers:{"Content-Type":"application/json"}});
+  return new Response(JSON.stringify({candidates:[{content:{role:"model",parts},finishReason:"STOP",index:0}],usageMetadata:{promptTokenCount:10,candidatesTokenCount:10,totalTokenCount:20},modelVersion:"gemini-3.6-flash"}),{headers:{"Content-Type":"application/json"}});
  };
  try{
   assert.equal(await isWebsiteRequest("Write an unrelated movie review",[],false),false);

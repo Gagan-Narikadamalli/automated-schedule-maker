@@ -39,7 +39,7 @@ export async function POST(request: Request) {
   if (auth.error) return auth.error;
   if (!sessionHasAnyRole(auth.session, SCHEDULE_WRITE_ROLES)) return forbiddenResponse();
   try {
-    const body = await request.json() as { locationId?: string; date?: string; save?: boolean };
+    const body = await request.json() as { locationId?: string; date?: string; save?: boolean; allowProtectedReplacement?: boolean };
     const locationId = body.locationId?.trim();
     const date = body.date?.trim();
     if (!locationId || !date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -49,6 +49,14 @@ export async function POST(request: Request) {
     getSchedulerModel(); // Fail clearly before reading data if no server key.
     const dayData = await buildDaySchedulerInput(locationId, date);
     const availabilitySnapshot=JSON.stringify({staff:dayData.input.staff,clients:dayData.input.clients,callOuts:dayData.input.callOutStaffIds,rules:dayData.extendedRules});
+    const scheduleFingerprint=(items:typeof dayData.input.existingAssignments)=>JSON.stringify([...items].sort((a,b)=>a.id.localeCompare(b.id)));
+    const scheduleSnapshot=scheduleFingerprint(dayData.input.existingAssignments);
+    const protectedCount=dayData.input.existingAssignments.filter(a=>a.locked||a.source==="MANUAL"||a.source==="TEMPLATE").length;
+    if(body.save===true&&protectedCount>0&&body.allowProtectedReplacement!==true){
+      return NextResponse.json({success:false,saved:false,requiresConfirmation:true,
+        confirmationType:"PROTECTED_REGENERATION",protectedCount,
+        error:`This date contains ${protectedCount} protected/manual/template assignments. Rebuilding the whole day will replace them. Ask the manager for explicit permission, then retry with allowProtectedReplacement=true. No assignments were changed.`},{status:409});
+    }
     // The normal scheduler excludes fixed speech cells from requiredSlots and
     // leaves napSlots empty until its separate event processing runs.
     // AI Generate needs a complete, independent snapshot before planning.
@@ -118,6 +126,7 @@ export async function POST(request: Request) {
     };
     const sanitized = {
       date,
+      regenerationPolicy:"The manager requested a new independently designed day; current assignments are reference evidence and may be reallocated. Hard eligibility and event constraints still apply.",
       staff:roster.staff.map(p=>({id:staffAlias.get(p.id),role:p.role,teamId:p.teamId?teamAlias.get(String(p.teamId)):undefined,availableSlots:p.availableSlots,
         serviceSetting:p.serviceSetting,maximumDailyHours:p.maximumDailyHours,remainingWeeklyHours:p.maximumWeeklyHours===undefined?undefined:Math.max(0,p.maximumWeeklyHours-(p.scheduledWeeklyClientHoursBeforeDate??0))})),
       clients:roster.clients.map(p=>({id:clientAlias.get(p.id),requiredSlots:p.requiredSlots,
@@ -148,7 +157,7 @@ export async function POST(request: Request) {
       // Large literal workbook grids can overwhelm a cloud-model request.
       // Include the applied template first and representative assignment cells.
       templates:[...templates].sort((a,b)=>Number(b.isApplied)-Number(a.isApplied))
-        .slice(0,4).map(t=>({...t,assignments:compactHistory(t.assignments).slice(0,180)})),
+        .slice(0,2).map(t=>({...t,assignments:compactHistory(t.assignments).slice(0,140)})),
       currentAssignments:compactHistory(deidentifiedAssignments(roster.existingAssignments)).slice(0,240),
       referenceAssignments:compactHistory(deidentifiedAssignments(roster.referenceAssignments)).slice(0,180),
       learnedPairingPreferences:roster.clients.map(client=>({client:clientAlias.get(client.id),staff:roster.staff.map(staff=>({staff:staffAlias.get(staff.id),score:roster.historicalPatterns?.pairingScores[staff.id+"|"+client.id]??0})).filter(item=>item.score>0).sort((a,b)=>b.score-a.score).slice(0,3)})),
@@ -199,11 +208,11 @@ export async function POST(request: Request) {
       const latestAvailability=JSON.stringify({staff:latestDay.input.staff,clients:latestDay.input.clients,callOuts:latestDay.input.callOutStaffIds,rules:latestDay.extendedRules});
       const latestNaps=await NapSession.find({locationId,date}).select("clientId startTime endTime").lean();
       if(latestAvailability!==availabilitySnapshot||JSON.stringify(latestNaps)!==JSON.stringify(napDocuments))return invalid("Availability, rules or nap events changed while AI was planning. Please generate again; the saved day was preserved.",409);
+      if(scheduleFingerprint(latestDay.input.existingAssignments)!==scheduleSnapshot)return invalid("The saved schedule changed while AI was planning. Generate again to avoid overwriting another edit.",409);
       await connectToDatabase();
-      // AI Generate currently rebuilds the whole day rather than pinning
-      // protected rows inside its optimizer. Until pinning is supported,
-      // refuse to overwrite any manual, template-locked or overridden cell.
-      const protectedCount = await ScheduleAssignment.countDocuments({
+      // Recheck protected rows immediately before the save. The ordinary
+      // button cannot replace them without a manager-authorized retry.
+      const latestProtectedCount = await ScheduleAssignment.countDocuments({
         locationId, date,
         $or: [
           { locked: true },
@@ -212,10 +221,10 @@ export async function POST(request: Request) {
           { source: "TEMPLATE" }
         ]
       });
-      if (protectedCount > 0) {
+      if (latestProtectedCount > 0 && body.allowProtectedReplacement !== true) {
         return NextResponse.json({
           success: false, saved: false,
-          error: `AI Generate cannot replace this date because ${protectedCount} manual/template/protected assignments exist. They remain unchanged. Use Auto Generate's protected-assignment workflow or remove the protected assignments explicitly.`
+          error: `AI Generate requires explicit permission to replace ${latestProtectedCount} protected assignments. They remain unchanged.`
         }, { status: 409 });
       }
       const replacements = data.assignments.map((assignment) => ({

@@ -222,7 +222,7 @@ Native AI is **text-only**. It intentionally rejects image uploads instead of de
 
 ### Paid Scheduler AI
 
-The cloud assistant uses Gemini directly by default (gemini-3.8-flash, configurable with GEMINI_SCHEDULER_MODEL). AI Generate shares the same assistant thread and cloud generation endpoint, with independent model-designed placements and a decision summary. OpenAI remains optional with SCHEDULER_AI_PROVIDER=openai. It has the same authoritative scheduler tools/validations, but it can perform richer multi-step natural-language planning and returns names locally while sending numbered aliases to the cloud model.
+The cloud assistant uses Gemini directly by default (gemini-3.6-flash, configurable with GEMINI_SCHEDULER_MODEL). AI Generate shares the same assistant thread and cloud generation endpoint, with independent model-designed placements and a decision summary. OpenAI remains optional with SCHEDULER_AI_PROVIDER=openai. It has the same authoritative scheduler tools/validations, but it can perform richer multi-step natural-language planning and returns names locally while sending numbered aliases to the cloud model.
 
 A new screenshot upload is deliberately preview-only: the Paid AI extracts and compares the visible source data but cannot write on that upload turn. The manager must confirm the proposed import/change in a later turn.
 
@@ -324,7 +324,7 @@ Relevant variables include:
 SCHEDULER_AI_AUTONOMOUS_WRITES=true|false
 SCHEDULER_AI_PROVIDER=gemini
 GOOGLE_GENERATIVE_AI_API_KEY=<server-only Gemini key>
-GEMINI_SCHEDULER_MODEL=gemini-3.8-flash
+GEMINI_SCHEDULER_MODEL=gemini-3.6-flash
 OPENAI_API_KEY=<optional server-only OpenAI key>
 OPENAI_SCHEDULER_MODEL=gpt-6.1-sol
 OPENAI_SCHEDULER_VISION_MODEL=gpt-6.1-sol
@@ -347,3 +347,5 @@ https://github.com/Gagan-Narikadamalli/automated-schedule-maker
 AI Generate sends Staff1/Client1/Team1 aliases, numeric preferences and compressed historical segments. It excludes names, MongoDB IDs and template notes. The cloud assistant uses a request-local alias map for existing roster names/codes, location/team/template names, IDs, context, scope classification and all tool results. Tools resolve aliases only on the server; replies restore website names locally. Free-text notes, contact fields, insurance details and source file names are omitted. Screenshot uploads are disabled for cloud AI until local image redaction is available. Numbered scheduling data still contains times, roles and dates; this is pseudonymization, not a guarantee against re-identification. History provides inference-time context, not model fine-tuning.
 
 For non-mutating cloud checks, `/api/ai/paid` accepts `readOnly: true`: the server omits every action tool and skips training-log writes, even when autonomous writes are enabled. AI generation accepts `save: false` for a validated preview.
+
+The verified default is Gemini 3.6 Flash. Assistant turns use high reasoning; full-day structured planning uses medium reasoning with a bounded 120-second call and one validation repair. Protected-day regeneration returns a confirmation before model planning; only an explicitly authorized `allowProtectedReplacement: true` retry can replace protected rows. The route rechecks the saved schedule and availability to reject stale plans.

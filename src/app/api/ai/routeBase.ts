@@ -17,6 +17,7 @@ import { analyzeNaturalTimeRange, naturalTimeConfirmationQuestion } from "@/feat
 import { buildSchedulerAiInstructions } from "@/features/ai/schedulerPrompt";
 import { buildSchedulerReplyFallback } from "@/features/ai/schedulerReplyFallback";
 import { buildSchedulerPrivacy } from "@/features/ai/buildSchedulerPrivacy";
+import { isSchedulerActionRequest } from "@/features/ai/schedulerActionIntent";
 import { adaptSchedulerToolsForPaid } from "@/features/ai/schedulerPaidToolAdapter";
 import { createPaidTemplateTools } from "@/features/ai/schedulerPaidTemplateTools";
 import { ensureSchedulerConversationClosing } from "@/features/ai/schedulerConversationLifecycle";
@@ -650,7 +651,7 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
       const agent = new ToolLoopAgent({
         model,
         providerOptions: schedulerModelOptions(),
-        instructions: privacy.encodeText(sharedInstructions) + "\n\nANONYMOUS IDENTIFIERS\nThe server replaces private records with Staff1, Staff2, Client1, Client2, Team1 and other numbered aliases. Use these aliases exactly in tool inputs, including ID fields. Never ask for real names or reconstruct identities. The server resolves aliases locally and restores names in the website response.",
+        instructions: privacy.encodeText(sharedInstructions) + "\n\nCURRENT CLOUD CAPABILITIES\nIndependent AI generation supports one DAY at a time. The website's ordinary Auto Generate can handle a week; do not claim the cloud generation tool supports a week. Cloud screenshot uploads are currently unavailable because visible names have not been redacted.\n\nANONYMOUS IDENTIFIERS\nThe server replaces private records with Staff1, Staff2, Client1, Client2, Team1 and other numbered aliases. Use these aliases exactly in tool inputs, including ID fields. Never ask for real names or reconstruct identities. The server resolves aliases locally and restores names in the website response.",
         tools,
         toolChoice: "auto",
         stopWhen: stepCountIs(20),
@@ -742,8 +743,8 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
             ? (entry.output as Record<string, unknown>)
             : null;
         if (!output) return true;
-        if (output.changed === true || output.success === true) return true;
         if (output.changed === false) return false;
+        if (output.changed === true || output.success === true) return true;
         if (
           output.ok === false ||
           output.requiresConfirmation === true ||
@@ -769,8 +770,7 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
         typeof result.message === "string" ? result.message : "The scheduling operation was rejected.";
       return [{toolName: entry.toolName, error: detail}];
     });
-    const actionIntent = /\b(?:generate|regenerate|create|make|build|save|update|change|edit|delete|remove|archive|apply|replace|move|swap|repair|fix|add|assign|schedule|copy|import)\b/i.test(message) &&
-      !/\b(?:how|why|what does|explain|can you|is it possible|recommend|suggest|what if)\b/i.test(message);
+    const actionIntent = isSchedulerActionRequest(message);
     const noActionExecuted = actionIntent && writeToolsEnabled && writeToolsUsed.length === 0 && !attachmentPreviewOnly;
 
     let reply = resultText.trim();

@@ -1,13 +1,14 @@
 import { generateText, Output, jsonSchema } from "ai";
-import { getSchedulerModel, schedulerModelOptions } from "./schedulerModelProvider";
+import { getSchedulerModel, schedulerModelOptions, getSchedulerCloudProvider } from "./schedulerModelProvider";
 import { getSlotsInsideTimeRange, getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
 
 export type OpenAIPlanSegment = {staff:string;client:string|null;startTime:string;endTime:string;type:"CLIENT_1_TO_1"|"SPEECH"|"BREAK"|"BREAK_NAP"|"BREAK_SPEECH"};
 export type OpenAISchedulePlan = {segments:OpenAIPlanSegment[];explanation:string;decisions:string[];tradeoffs:string[]};
 export async function designOpenAISchedule(snapshot:unknown, corrections?:string[]) {
+  const effort=getSchedulerCloudProvider()==="gemini" ? "medium" : "high";
   const result=await generateText({
-    model:getSchedulerModel(),providerOptions:schedulerModelOptions(true),
-    reasoning:"high",maxOutputTokens:24000,timeout:{totalMs:90000},
+    model:getSchedulerModel(),providerOptions:schedulerModelOptions(true,effort),
+    reasoning:effort,maxOutputTokens:24000,maxRetries:0,timeout:{totalMs:120000},
     instructions:`You independently design a clinic schedule from this website's anonymized data. Use your own reasoning to choose all assignments; no deterministic scheduler supplies the placements. Output continuous segments, not one row per half hour. Use only supplied staff/client aliases and full 30-minute grid cells.
 HARD CONSTRAINTS: staff availableSlots and call-outs; client attendance; HARD_RESTRICTION/excludedStaff; service-setting compatibility; no duplicate client or staff at a time; clinical rotation maxConsecutiveBlocksWithSameStaff when configured; staff maximumDailyHours and remainingWeeklyHours; fixed speech periods; one 30-minute nap within each eligible client's napSlots; exactly one 30-minute break per available staff within the configured break window. A nap must be one BREAK_NAP cell linked to an available eligible staff, counts as both that client's nap and that person's only break, and replaces 1:1 coverage only in that cell. Other potential nap-window cells still need 1:1 coverage. SPEECH replaces 1:1 only in supplied speechSlots. Never invent a nap or event. No standalone nap cells. Preserve mandatory restrictions even if coverage is impossible.
 GUIDELINES: use your own judgment for continuity, same-team preferences, historical pairings, targets for clients/staff, assignment length and general consecutive-hours preferences. Prefer BT/RBT, then intern, manager/other, BCBA last. Choose natural handoffs, preserve long continuous blocks through a linked break/nap where feasible, avoid gratuitous switches. History/templates are evidence, not mandatory placements. Explain departures from soft preferences. Maximize safe coverage; do not fabricate staff when infeasible.

@@ -7,8 +7,13 @@ import { Team } from "../src/models/Team";
 import { Location } from "../src/models/Location";
 import { ScheduleTemplate } from "../src/models/ScheduleTemplate";
 import { AITrainingExample } from "../src/models/AITrainingExample";
+import { isSchedulerActionRequest } from "../src/features/ai/schedulerActionIntent";
 
 async function main() {
+  for(const message of ["Review the saved schedule and report gaps.","Check which breaks need to change.","How do I generate a schedule?","Who is working on the schedule?"])
+    assert.equal(isSchedulerActionRequest(message),false,message);
+  for(const message of ["Generate tomorrow's schedule.","Can you move this client to the afternoon?","Please schedule a break at noon.","Replace all blocks for this staff."])
+    assert.equal(isSchedulerActionRequest(message),true,message);
   const previousFetch=globalThis.fetch;
   const previousEnvironment={provider:process.env.SCHEDULER_AI_PROVIDER,key:process.env.GOOGLE_GENERATIVE_AI_API_KEY,writes:process.env.SCHEDULER_AI_AUTONOMOUS_WRITES};
   const previousConnection=global.mongooseCache!.connection;
