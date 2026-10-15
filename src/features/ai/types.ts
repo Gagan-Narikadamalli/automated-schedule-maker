@@ -43,6 +43,8 @@ export type SchedulerAiHistoryMessage = {
 };
 
 export type SchedulerAiRequest = {
+  intent?: "GENERATE_DAY";
+  allowProtectedReplacement?: boolean;
   /** Omit all action tools and training-log writes for a read-only request. */
   readOnly?: boolean;
   message?: string;

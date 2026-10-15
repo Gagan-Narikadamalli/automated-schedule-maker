@@ -292,7 +292,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     if (!pendingGeneration || provider === "native" || working) return;
     const request = pendingGeneration;
     setPendingGeneration(null);
-    void askScheduler(undefined, request);
+    void askScheduler(undefined, request, "GENERATE_DAY");
   }, [pendingGeneration, provider, working]);
 
   useEffect(() => {
@@ -527,7 +527,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     }
   }
 
-  async function askScheduler(event?: FormEvent, requestedMessage?: string) {
+  async function askScheduler(event?: FormEvent, requestedMessage?: string, requestIntent?: "GENERATE_DAY") {
     event?.preventDefault();
     const selectedAttachments = attachments;
     const message =
@@ -603,6 +603,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          intent: requestIntent,
           message,
           locationId: requestContext.locationId,
           locationName: requestContext.locationName,

@@ -45,6 +45,8 @@ async function main() {
     const response=await POST(new Request("http://localhost/api/ai/paid",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({readOnly:true,message:"Which features do you support in this scheduling website?",locationId:"000000000000000000000004",date:"2026-10-16"})}));
     const result=await response.json();
     assert.equal(response.status,200);assert.equal(result.mode,"READ_ONLY");assert.equal(result.changed,false);assert.equal(result.trainingExampleId,null);assert.equal(trainingWrites,0);assert.deepEqual(result.writeToolsUsed,[]);assert.equal(calls,2);
+    const direct=await POST(new Request("http://localhost/api/ai/paid",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({readOnly:true,intent:"GENERATE_DAY",message:"Generate the schedule",locationId:"000000000000000000000004",date:"2026-10-16"})}));
+    assert.equal(direct.status,403);assert.equal(calls,2);assert.equal(trainingWrites,0);
     console.log("PASS paid route enforces readOnly=true with autonomous writes enabled: no action tools, no training writes, and no changed calendar claim (mocked).");
   } finally {
     globalThis.fetch=previousFetch;global.mongooseCache!.connection=previousConnection;

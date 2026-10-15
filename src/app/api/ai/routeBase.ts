@@ -464,7 +464,7 @@ export async function POST(request: Request) {
     }
     const privacy = await buildSchedulerPrivacy(locationId, locationName);
     const privateHistory = privacy.encode(history) as SchedulerAiHistoryMessage[];
-    if (!(await isWebsiteRequest(privacy.encodeText(message), privateHistory, false))) {
+    if (body.intent !== "GENERATE_DAY" && !(await isWebsiteRequest(privacy.encodeText(message), privateHistory, false))) {
       return NextResponse.json({reply:WEBSITE_SCOPE_REPLY,provider:aiProvider,thinkingLevel,changed:false,mode:"READ_ONLY",toolsUsed:[],writeToolsUsed:[],trainingExampleId:null});
     }
     const autonomousWrites =
@@ -496,6 +496,26 @@ export async function POST(request: Request) {
       dateSelectionExplicit,
       userId: auth.session.userId,
     };
+
+    // The Generate button already declares its action. Dispatch that action
+    // directly; the independent planner still makes every placement decision.
+    // This avoids asking another model to rediscover the button's intent.
+    if (body.intent === "GENERATE_DAY") {
+      if (!writeToolsEnabled) return NextResponse.json({error:"This request cannot save a schedule because AI writes are disabled or the request is read-only."},{status:403});
+      const generationTool=createOpenAIGenerationTools(context).generate_schedule;
+      const output=await generationTool.execute?.({scope:"DAY",save:true,allowProtectedReplacement:body.allowProtectedReplacement===true}) as Record<string,any>;
+      const saved=output?.saved===true;
+      const decisions=Array.isArray(output?.decisionSummary)?output.decisionSummary.filter((item:unknown)=>typeof item==="string"):[];
+      const tradeoffs=Array.isArray(output?.tradeoffs)?output.tradeoffs.filter((item:unknown)=>typeof item==="string"):[];
+      const metrics=output?.metrics;
+      const reply=saved
+        ? `AI schedule saved for ${resolvedDate.date}. ${metrics?.coveredClientSlots??0} of ${metrics?.requiredClientSlots??0} required 30-minute client blocks are covered.${output.partialBuild?` ${output.unplacedCount??0} uncovered blocks need review in Unplaced Assignments.`:""}\n\n${String(output.explanation??"")}${decisions.length?"\n\nDecision summary:\n"+decisions.slice(0,6).map((item:string)=>`• ${item}`).join("\n"):""}${tradeoffs.length?"\n\nTradeoffs:\n"+tradeoffs.slice(0,4).map((item:string)=>`• ${item}`).join("\n"):""}`
+        : output?.requiresConfirmation
+          ? `The saved schedule for ${resolvedDate.date} contains ${output.protectedCount} protected assignments. Rebuilding the day will replace them. Do you allow me to override these protected assignments and proceed?`
+          : `I could not save the AI schedule for ${resolvedDate.date}. ${String(output?.error??"The plan could not be independently validated.")} No successful schedule change was confirmed.`;
+      return NextResponse.json({reply,changed:saved,mode:"AUTONOMOUS",provider:aiProvider,thinkingLevel,
+        toolsUsed:["generate_schedule"],writeToolsUsed:["generate_schedule"],trainingExampleId:null,effectiveDate:resolvedDate.date});
+    }
 
     const attachmentAnalysis = "";
 
@@ -890,15 +910,19 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
     if (error instanceof Error && [OPENAI_SETUP_MESSAGE,GEMINI_SETUP_MESSAGE].includes(error.message)) return NextResponse.json({error:error.message},{status:503});
     console.error("Scheduler AI request failed:", error);
     const message = error instanceof Error ? error.message : "";
+    const providerStatus = error && typeof error === "object" && "statusCode" in error ? Number(error.statusCode) : undefined;
     const creditOrAccessProblem =
+      !(providerStatus && providerStatus >= 500) && (
+      providerStatus === 429 || providerStatus === 402 ||
       /credit|free tier|restricted model|paid credits|no providers available|quota|billing|insufficient/i.test(
         message
-      );
+      ));
     const configurationProblem =
       /gateway|api.?key|oidc|unauthorized|authentication|model.*not found/i.test(
         message
       );
     const temporaryServiceProblem =
+      (providerStatus !== undefined && providerStatus >= 500) ||
       /service temporarily unavailable|service unavailable|retry|503|overloaded|capacity/i.test(
         message
       );
