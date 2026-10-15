@@ -468,7 +468,9 @@ export async function POST(request: Request) {
     }
     const autonomousWrites =
       process.env.SCHEDULER_AI_AUTONOMOUS_WRITES?.trim().toLowerCase() === "true";
-    const writeToolsEnabled = autonomousWrites && !attachmentPreviewOnly;
+    // A read-only request never exposes a calendar/profile/template action tool.
+    // Enforced by the server, independently of the user's/model's wording.
+    const writeToolsEnabled = autonomousWrites && body.readOnly !== true && !attachmentPreviewOnly;
     const todayDate = dateInNewYork();
     const resolvedDate = resolveSchedulerDateContext({
       message,
@@ -498,7 +500,7 @@ export async function POST(request: Request) {
 
     const naturalTime = analyzeNaturalTimeRange(message);
     if (naturalTime.status === "CONFIRM" && !attachmentPreviewOnly) {
-      const mode = autonomousWrites ? "AUTONOMOUS" : "READ_ONLY";
+      const mode = writeToolsEnabled ? "AUTONOMOUS" : "READ_ONLY";
       const response: SchedulerAiResponse = {
         reply: naturalTimeConfirmationQuestion(naturalTime),
         trainingExampleId: null,
@@ -709,7 +711,7 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
         )
       ),
     ];
-    const mode = autonomousWrites ? "AUTONOMOUS" : "READ_ONLY";
+    const mode = writeToolsEnabled ? "AUTONOMOUS" : "READ_ONLY";
     const toolEvidence = [
       ...(dateContext
         ? [
@@ -830,7 +832,9 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
     } else if (noActionExecuted) {
       reply = "Sorry, I could not reliably determine and execute the requested scheduling action. I have not changed your schedule. Please clarify the date and the exact action you want, or ask me to try again.";
     } else if (!writeToolsEnabled && actionIntent && !attachmentPreviewOnly) {
-      reply = "I understand that you want me to change the schedule, but Paid AI write actions are disabled in this deployment. I have not changed anything. An administrator must enable autonomous scheduling writes before I can execute it.";
+      reply = body.readOnly === true
+        ? "This request is read-only, so I have not changed the schedule. I can review the information and suggest changes."
+        : "I understand that you want me to change the schedule, but Paid AI write actions are disabled in this deployment. I have not changed anything. An administrator must enable autonomous scheduling writes before I can execute it.";
     }
 
     const generationEvidence = [...toolEvidence].reverse().find(entry => entry.toolName === "generate_schedule")?.output as Record<string, unknown> | undefined;
@@ -843,7 +847,7 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
     reply = ensureSchedulerConversationClosing(reply);
 
     let trainingExampleId: string | null = null;
-    try {
+    if (body.readOnly !== true) try {
       await connectToDatabase();
       const example = await AITrainingExample.create({
         locationId,

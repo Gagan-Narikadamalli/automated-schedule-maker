@@ -345,3 +345,5 @@ https://github.com/Gagan-Narikadamalli/automated-schedule-maker
 ### Anonymous cloud requests
 
 AI Generate sends Staff1/Client1/Team1 aliases, numeric preferences and compressed historical segments. It excludes names, MongoDB IDs and template notes. The cloud assistant uses a request-local alias map for existing roster names/codes, location/team/template names, IDs, context, scope classification and all tool results. Tools resolve aliases only on the server; replies restore website names locally. Free-text notes, contact fields, insurance details and source file names are omitted. Screenshot uploads are disabled for cloud AI until local image redaction is available. Numbered scheduling data still contains times, roles and dates; this is pseudonymization, not a guarantee against re-identification. History provides inference-time context, not model fine-tuning.
+
+For non-mutating cloud checks, `/api/ai/paid` accepts `readOnly: true`: the server omits every action tool and skips training-log writes, even when autonomous writes are enabled. AI generation accepts `save: false` for a validated preview.
