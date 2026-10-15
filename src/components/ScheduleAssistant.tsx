@@ -819,15 +819,15 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
             <span className={styles.providerNote}>
               {provider === "native"
                 ? "Runs the built-in Scheduler AI without paid model tokens. Text scheduling only."
-                : "Uses Gemini with high reasoning and your Google API quota. Screenshot analysis is available in this mode."}
+                : "Uses Gemini with high reasoning and your Google API quota. People are sent as numbered labels."}
             </span>
           </div>
 
           <div className={styles.promptHint}>
             <span>
               Ask naturally — capitalization and normal typos are okay. {provider !== "native"
-                ? "Gemini can also analyze schedule screenshots before you confirm changes."
-                : "Free AI handles text scheduling locally; switch to Gemini for screenshots."} Use Saved prompts for more examples.
+                ? "Gemini uses numbered staff and client labels for scheduling."
+                : "Free AI handles text scheduling locally."} Use Saved prompts for more examples.
             </span>
             <button
               type="button"
@@ -998,27 +998,15 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
                 type="file"
                 accept="image/png,image/jpeg,image/webp"
                 multiple
-                disabled={
-                  working ||
-                  provider === "native" ||
-                  !locationId ||
-                  attachments.length >= MAX_SCREENSHOT_ATTACHMENTS
-                }
+                disabled={true}
                 onChange={(event) => void handleAttachmentSelection(event)}
               />
               <label
                 className={styles.attachButton}
                 htmlFor="scheduler-ai-screenshot-input"
-                title={
-                  provider === "native"
-                    ? "Switch to Gemini to analyze screenshots"
-                    : "Attach schedule screenshot"
-                }
-                aria-label={
-                  provider === "native"
-                    ? "Screenshot analysis requires Gemini"
-                    : "Attach schedule screenshot"
-                }
+                title="Screenshot uploads are unavailable while AI uses numbered labels."
+                aria-label="Screenshot uploads unavailable"
+                aria-disabled="true"
               >
                 +
               </label>
@@ -1040,7 +1028,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
                 placeholder={
                   provider === "native"
                     ? "Ask the Free AI about the schedule..."
-                    : "Ask the Gemini, or attach a screenshot to analyze..."
+                    : "Ask Gemini about your schedule..."
                 }
                 aria-keyshortcuts="Enter"
               />
@@ -1058,8 +1046,8 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
             </div>
             <small className={styles.attachmentHint}>
               {provider === "native"
-                ? "Free AI: text-only, no paid model tokens. Switch to Gemini for screenshots."
-                : "Gemini: high reasoning. Screenshots support PNG/JPG/WebP, up to 3 images and 3 MB total; uploads stay preview-only until you confirm."}
+                ? "Free AI: text only, no paid model tokens."
+                : "Gemini: numbered staff and client labels. Text only; screenshots may reveal names."}
             </small>
           </form>
 

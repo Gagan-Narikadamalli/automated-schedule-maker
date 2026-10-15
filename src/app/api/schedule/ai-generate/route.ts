@@ -76,20 +76,20 @@ export async function POST(request: Request) {
     // Never use future schedules or the target date as historical examples.
     const historicalTraining=await applyHistoricalTraining(locationId,date,dayData.input);
     const roster=historicalTraining.input;
-    const staffRefs = new Map(roster.staff.map((p,i)=>["S"+i,p.id]));
-    const clientRefs = new Map(roster.clients.map((p,i)=>["C"+i,p.id]));
+    const staffRefs = new Map(roster.staff.map((p,i)=>["Staff"+(i+1),p.id]));
+    const clientRefs = new Map(roster.clients.map((p,i)=>["Client"+(i+1),p.id]));
     const staffAlias = new Map([...staffRefs].map(([alias,id])=>[id,alias]));
     const clientAlias = new Map([...clientRefs].map(([alias,id])=>[id,alias]));
+    const teamAlias = new Map([...new Set([...roster.staff,...roster.clients].map(p=>p.teamId?String(p.teamId):"").filter(Boolean))].map((id,i)=>[id,"Team"+(i+1)]));
     const weekday=["SUNDAY","MONDAY","TUESDAY","WEDNESDAY","THURSDAY","FRIDAY","SATURDAY"][new Date(date+"T12:00:00Z").getUTCDay()];
     const [savedTemplates,appliedTemplate]=await Promise.all([
       ScheduleTemplate.find({locationId,dayOfWeek:weekday,active:true})
-        .select("_id sourceType learningOnly assignments clientNapSlots learningProfile styleNotes").lean(),
+        .select("_id sourceType learningOnly assignments clientNapSlots").lean(),
       AppliedScheduleTemplate.findOne({locationId,date}).select("templateId").lean(),
     ]);
     type TemplateRow={_id:unknown;sourceType?:string;learningOnly?:boolean;
       assignments?:Array<{staffId:unknown;clientId?:unknown;startTime:string;assignmentType:string}>;
-      clientNapSlots?:Array<{clientId:unknown;startTime:string}>;
-      learningProfile?:unknown;styleNotes?:string[]};
+      clientNapSlots?:Array<{clientId:unknown;startTime:string}>};
     const templates=(savedTemplates as unknown as TemplateRow[]).map(t=>({
       isApplied:String(t._id)===String((appliedTemplate as {templateId?:unknown}|null)?.templateId??""),
       sourceType:t.sourceType,learningOnly:t.learningOnly,
@@ -101,8 +101,6 @@ export async function POST(request: Request) {
       napChoices:(t.clientNapSlots??[]).map(n=>({
         client:clientAlias.get(String(n.clientId)),time:n.startTime,
       })).filter(n=>n.client),
-      learningProfile:t.learningProfile,
-      styleNotes:(t.styleNotes??[]).slice(0,6).map(note=>note.slice(0,160)),
     }));
     const deidentifiedAssignments=(items:typeof roster.existingAssignments)=>items.map(a=>({
       staff:staffAlias.get(a.staffId),client:a.clientId?clientAlias.get(a.clientId):undefined,
@@ -120,11 +118,11 @@ export async function POST(request: Request) {
     };
     const sanitized = {
       date,
-      staff:roster.staff.map(p=>({id:staffAlias.get(p.id),role:p.role,teamId:p.teamId?String(p.teamId):undefined,availableSlots:p.availableSlots,
+      staff:roster.staff.map(p=>({id:staffAlias.get(p.id),role:p.role,teamId:p.teamId?teamAlias.get(String(p.teamId)):undefined,availableSlots:p.availableSlots,
         serviceSetting:p.serviceSetting,maximumDailyHours:p.maximumDailyHours,remainingWeeklyHours:p.maximumWeeklyHours===undefined?undefined:Math.max(0,p.maximumWeeklyHours-(p.scheduledWeeklyClientHoursBeforeDate??0))})),
       clients:roster.clients.map(p=>({id:clientAlias.get(p.id),requiredSlots:p.requiredSlots,
         napSlots:p.napSlots,speechSlots:p.speechSlots,serviceSetting:p.serviceSetting,
-        maxConsecutiveBlocksWithSameStaff:p.maxConsecutiveBlocksWithSameStaff,supportLevel:p.supportLevel,teamId:p.teamId?String(p.teamId):undefined,
+        maxConsecutiveBlocksWithSameStaff:p.maxConsecutiveBlocksWithSameStaff,supportLevel:p.supportLevel,teamId:p.teamId?teamAlias.get(String(p.teamId)):undefined,
         excludedStaff:Object.entries(p.staffRelationships).filter(([,kind])=>kind==="HARD_RESTRICTION")
           .map(([id])=>staffAlias.get(id)).filter(Boolean),
         preferredStaff:Object.entries(p.staffRelationships).filter(([,kind])=>kind==="PREFERRED")
@@ -173,7 +171,7 @@ export async function POST(request: Request) {
       values=expandOpenAIPlan(plan,staffRefs,clientRefs);
       audit=validatePreview(roster,values);
     }
-    const describe=(text:string)=>text.replace(/\b[SC]\d+\b/g,alias=>{
+    const describe=(text:string)=>text.replace(/\b(?:Staff|Client)\d+\b/g,alias=>{
       const staffId=staffRefs.get(alias),clientId=clientRefs.get(alias);
       return staffId?roster.staff.find(s=>s.id===staffId)?.name??alias:clientId?roster.clients.find(c=>c.id===clientId)?.displayCode??alias:alias;
     });
