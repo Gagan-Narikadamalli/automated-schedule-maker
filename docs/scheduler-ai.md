@@ -79,3 +79,12 @@ Team matching, continuity, historical pairings, target staff/client counts and g
 A website-scope classification runs before paid website tools or database reads. Unrelated and mixed unrelated requests are declined. The assistant has only the website's controlled tools; no external web-search or general-purpose execution tools. OpenAI calls use `store:false`; conversation history is supplied by the application. This setting is not a claim of zero retention.
 
 Validation: `npm run test:openai` uses a mocked OpenAI Responses endpoint and synthetic roster data; it checks direct routing, scope decisions, plan parsing, decision summaries, hard-rule rejection and flexible preferences. A real API smoke test still requires a configured OpenAI key and account model access.
+
+
+## Gemini configuration and history guidance
+
+The default cloud provider is now Gemini through @ai-sdk/google, using gemini-3.8-flash. Set GOOGLE_GENERATIVE_AI_API_KEY (GEMINI_API_KEY is also accepted) for both Preview and Production, then redeploy. GEMINI_SCHEDULER_MODEL and GEMINI_SCHEDULER_VISION_MODEL are optional. SCHEDULER_AI_PROVIDER=openai explicitly selects the previously documented OpenAI path. Providers never silently fall back to one another.
+
+Gemini shares the assistant thread, website-only scope gate, independent schedule designer and server validator. It receives compressed template/history segments and learned pairing summaries so afternoon and nap-handoff patterns are not lost by truncating raw grids. Instructions distinguish hard constraints from preferences and request concise decision summaries; no underlying Gemini model is fine-tuned. Synthetic mocked tests cover direct Google routing, structured plans, function-call result round trips and missing-key protection. A live validation preview is required before production activation.
+
+Google free-tier availability and quotas depend on the project. Google lists free-tier content as usable to improve products; use synthetic examples for free-tier evaluation and review the paid service data terms before sending sensitive clinic data. References: https://ai.google.dev/gemini-api/docs/pricing and https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash.

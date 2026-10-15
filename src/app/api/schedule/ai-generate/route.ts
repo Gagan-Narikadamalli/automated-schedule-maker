@@ -1,3 +1,4 @@
+import { getSchedulerModel, getSchedulerCloudProvider, GEMINI_SETUP_MESSAGE } from "@/features/ai/schedulerModelProvider";
 import { NextResponse } from "next/server";
 import {
   forbiddenResponse,
@@ -18,7 +19,7 @@ import { ScheduleTemplate } from "@/models/ScheduleTemplate";
 import { AppliedScheduleTemplate } from "@/models/AppliedScheduleTemplate";
 import { getSlotsInsideTimeRange } from "@/features/scheduler/engine/dateUtils";
 import { designOpenAISchedule, expandOpenAIPlan } from "@/features/ai/openaiSchedulePlan";
-import { getSchedulerOpenAIModel, OPENAI_SETUP_MESSAGE } from "@/features/ai/openaiProvider";
+import { OPENAI_SETUP_MESSAGE } from "@/features/ai/openaiProvider";
 
 import { validateOpenAIPlan as validatePreview } from "@/features/ai/validateOpenAIPlan";
 function invalid(message: string, status = 422) {
@@ -45,7 +46,7 @@ export async function POST(request: Request) {
       return invalid("A locationId and date (YYYY-MM-DD) are required.", 400);
     }
     if (!sessionCanAccessLocation(auth.session, locationId)) return forbiddenResponse();
-    getSchedulerOpenAIModel(); // Fail clearly before reading data if no server key.
+    getSchedulerModel(); // Fail clearly before reading data if no server key.
     const dayData = await buildDaySchedulerInput(locationId, date);
     const availabilitySnapshot=JSON.stringify({staff:dayData.input.staff,clients:dayData.input.clients,callOuts:dayData.input.callOutStaffIds,rules:dayData.extendedRules});
     // The normal scheduler excludes fixed speech cells from requiredSlots and
@@ -107,6 +108,16 @@ export async function POST(request: Request) {
       staff:staffAlias.get(a.staffId),client:a.clientId?clientAlias.get(a.clientId):undefined,
       time:a.startTime,type:a.assignmentType,locked:a.locked,source:a.source,
     })).filter(a=>a.staff);
+    const compactHistory=(items:Array<{staff?:string;client?:string;time:string;type:string;locked?:boolean;source?:string}>)=>{
+      const segments:Array<{staff:string;client?:string;startTime:string;endTime:string;type:string;locked?:boolean;source?:string}>=[];
+      for(const item of [...items].sort((a,b)=>(a.staff??"").localeCompare(b.staff??"")||a.time.localeCompare(b.time))){
+        if(!item.staff)continue;
+        const last=segments[segments.length-1];
+        if(last&&last.staff===item.staff&&last.client===item.client&&last.type===item.type&&last.endTime===item.time&&last.locked===item.locked){last.endTime=getEndTimeForSlot(item.time);}
+        else segments.push({staff:item.staff,client:item.client,startTime:item.time,endTime:getEndTimeForSlot(item.time),type:item.type,locked:item.locked,source:item.source});
+      }
+      return segments;
+    };
     const sanitized = {
       date,
       staff:roster.staff.map(p=>({id:staffAlias.get(p.id),role:p.role,teamId:p.teamId?String(p.teamId):undefined,availableSlots:p.availableSlots,
@@ -139,9 +150,10 @@ export async function POST(request: Request) {
       // Large literal workbook grids can overwhelm a cloud-model request.
       // Include the applied template first and representative assignment cells.
       templates:[...templates].sort((a,b)=>Number(b.isApplied)-Number(a.isApplied))
-        .slice(0,4).map(t=>({...t,assignments:t.assignments.slice(0,120)})),
-      currentAssignments:deidentifiedAssignments(roster.existingAssignments).slice(0,80),
-      referenceAssignments:deidentifiedAssignments(roster.referenceAssignments.slice(0,48)),
+        .slice(0,4).map(t=>({...t,assignments:compactHistory(t.assignments).slice(0,180)})),
+      currentAssignments:compactHistory(deidentifiedAssignments(roster.existingAssignments)).slice(0,240),
+      referenceAssignments:compactHistory(deidentifiedAssignments(roster.referenceAssignments)).slice(0,180),
+      learnedPairingPreferences:roster.clients.map(client=>({client:clientAlias.get(client.id),staff:roster.staff.map(staff=>({staff:staffAlias.get(staff.id),score:roster.historicalPatterns?.pairingScores[staff.id+"|"+client.id]??0})).filter(item=>item.score>0).sort((a,b)=>b.score-a.score).slice(0,3)})),
       calledOutStaff:roster.callOutStaffIds.map(id=>staffAlias.get(id)).filter(Boolean),
       importedWorkbookTraining:{matchedScheduleDays:historicalTraining.matchedScheduleDayCount,
         matchedAssignments:historicalTraining.matchedRecordCount},
@@ -169,7 +181,7 @@ export async function POST(request: Request) {
     const data={assignments:values,explanation:plan.explanation};
     const complete=audit.missing.length===0;
     const valid=audit.problems.length===0;
-    const placementIssues=audit.missing.map(gap=>({...gap,reason:"OpenAI could not place this required client block safely; manager review needed."}));
+    const placementIssues=audit.missing.map(gap=>({...gap,reason:"AI could not place this required client block safely; manager review needed."}));
     const breakIssues:string[]=[];
     let saved = false;
     let unplacedCount = 0;
@@ -188,7 +200,7 @@ export async function POST(request: Request) {
       const latestDay=await buildDaySchedulerInput(locationId,date);
       const latestAvailability=JSON.stringify({staff:latestDay.input.staff,clients:latestDay.input.clients,callOuts:latestDay.input.callOutStaffIds,rules:latestDay.extendedRules});
       const latestNaps=await NapSession.find({locationId,date}).select("clientId startTime endTime").lean();
-      if(latestAvailability!==availabilitySnapshot||JSON.stringify(latestNaps)!==JSON.stringify(napDocuments))return invalid("Availability, rules or nap events changed while OpenAI was planning. Please generate again; the saved day was preserved.",409);
+      if(latestAvailability!==availabilitySnapshot||JSON.stringify(latestNaps)!==JSON.stringify(napDocuments))return invalid("Availability, rules or nap events changed while AI was planning. Please generate again; the saved day was preserved.",409);
       await connectToDatabase();
       // AI Generate currently rebuilds the whole day rather than pinning
       // protected rows inside its optimizer. Until pinning is supported,
@@ -246,8 +258,8 @@ export async function POST(request: Request) {
       previewOnly: !saved,
       saved,
       regenerationSummary,
-      provider:"openai",
-      openaiUsed:true,
+      provider:getSchedulerCloudProvider(),
+      modelUsed:true,
       decisionSummary:plan.decisions,
       tradeoffs:plan.tradeoffs,
       historicalTraining:{matchedScheduleDays:historicalTraining.matchedScheduleDayCount,matchedAssignments:historicalTraining.matchedRecordCount},
@@ -264,7 +276,7 @@ export async function POST(request: Request) {
       message: saved ? (complete ? "Complete AI schedule validated and saved." : `Partial AI schedule saved. ${placementIssues.length} uncovered client blocks added to Unplaced Assignments for human placement.`) : "Validated AI schedule preview; no schedule was overwritten.",
     }, { status: valid ? 200 : 422 });
   } catch (error) {
-    if (error instanceof Error && error.message === OPENAI_SETUP_MESSAGE) return invalid(OPENAI_SETUP_MESSAGE,503);
+    if (error instanceof Error && [OPENAI_SETUP_MESSAGE,GEMINI_SETUP_MESSAGE].includes(error.message)) return invalid(error.message,503);
     console.error("AI Schedule preview error:", error);
     return invalid("AI Generate preview failed. The existing schedule was not changed.", 500);
   }

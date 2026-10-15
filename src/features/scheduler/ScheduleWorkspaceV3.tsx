@@ -965,10 +965,10 @@ export function ScheduleWorkspaceV3() {
       setStatusMessage("AI Generate requires a real location.");
       return;
     }
-    window.dispatchEvent(new CustomEvent("scheduler:openai-generate", {
+    window.dispatchEvent(new CustomEvent("scheduler:ai-generate", {
       detail: { locationId, date: selectedDate },
     }));
-    setStatusMessage("OpenAI Generate started in the linked assistant. Results and decision summaries appear in that conversation.");
+    setStatusMessage("Gemini Generate started in the linked assistant. Results and decision summaries appear in that conversation.");
   }
 
   async function requestGenerateWeek() {
@@ -1140,7 +1140,7 @@ export function ScheduleWorkspaceV3() {
           <button type="button" className="button button-warning" disabled={working || loading || demoMode} onClick={() => void requestDeleteSchedule()} title="Delete all scheduled blocks for this date only, after confirmation.">Delete Schedule</button>
           <button type="button" className="button button-secondary" disabled={working || loading || staff.length === 0} onClick={() => void requestGenerateWeek()}>Auto Generate Week</button>
           <button type="button" className="button button-primary" disabled={working || loading || staff.length === 0} onClick={() => void requestAutoGenerate()}>{working ? "Working..." : "Auto Generate Day"}</button>
-          <button type="button" className="button button-secondary" disabled={working || loading || staff.length === 0} onClick={() => void requestAiGenerate()} title="Open OpenAI schedule generation in the linked assistant conversation.">AI Generate</button>
+          <button type="button" className="button button-secondary" disabled={working || loading || staff.length === 0} onClick={() => void requestAiGenerate()} title="Open Gemini schedule generation in the linked assistant conversation.">AI Generate</button>
         </div>
       </section>
 

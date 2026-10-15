@@ -1,7 +1,8 @@
 import { ToolLoopAgent, generateText, stepCountIs } from "ai";
-import { getSchedulerOpenAIModel, schedulerOpenAIOptions, OPENAI_SETUP_MESSAGE } from "@/features/ai/openaiProvider";
+import { OPENAI_SETUP_MESSAGE } from "@/features/ai/openaiProvider";
 import { isWebsiteRequest, WEBSITE_SCOPE_REPLY } from "@/features/ai/websiteScope";
 import { createOpenAIGenerationTools } from "@/features/ai/openaiGenerationTools";
+import { getSchedulerModel, schedulerModelOptions, getSchedulerCloudProvider, GEMINI_SETUP_MESSAGE } from "@/features/ai/schedulerModelProvider";
 import { NextResponse } from "next/server";
 
 import {
@@ -363,11 +364,11 @@ async function analyzeSchedulerAttachments(args: {
   locationName?: string;
   selectedDate: string;
 }): Promise<string> {
-  const visionModel = getSchedulerOpenAIModel(true);
+  const visionModel = getSchedulerModel(true);
 
   const result = await generateText({
     model: visionModel,
-    providerOptions: schedulerOpenAIOptions,
+    providerOptions: schedulerModelOptions(),
     instructions: `You are the screenshot-reading layer for an Automatic Schedule Maker.
 Your only job is to extract scheduling facts from the attached screenshots accurately.
 
@@ -529,9 +530,9 @@ export async function POST(request: Request) {
       return forbiddenResponse("You do not have access to this scheduler location.");
     }
 
-    const aiProvider = "openai" as const;
+    const aiProvider = getSchedulerCloudProvider();
     const thinkingLevel = "high" as const;
-    const model = getSchedulerOpenAIModel();
+    const model = getSchedulerModel();
     if (!(await isWebsiteRequest(message, history, attachmentPreviewOnly))) {
       return NextResponse.json({reply:WEBSITE_SCOPE_REPLY,provider:aiProvider,thinkingLevel,changed:false,mode:"READ_ONLY",toolsUsed:[],writeToolsUsed:[],trainingExampleId:null});
     }
@@ -744,7 +745,7 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
     } else {
       const agent = new ToolLoopAgent({
         model,
-        providerOptions: schedulerOpenAIOptions,
+        providerOptions: schedulerModelOptions(),
         instructions: sharedInstructions,
         tools,
         toolChoice: "auto",
@@ -874,7 +875,7 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
       try {
         const synthesis = await generateText({
           model,
-          providerOptions: schedulerOpenAIOptions,
+          providerOptions: schedulerModelOptions(),
           instructions: `You are the final-response writer for the Automatic Schedule Maker assistant. Answer the user's actual scheduler question using ONLY the supplied date context and scheduler tool evidence. You may discuss staff availability, client attendance/requirements, assignments, who is taking care of whom, time ranges, breaks, nap/speech, call-outs, uncovered work, unplaced work, schedule health, replacement-analysis results, bulk replacement results, advisory suggestions, override conflicts, and completed changes. Do not invent anything. Keep the effective date exact and never label it with the wrong weekday. If scheduleAvailable=false for a live-calendar question, state that the schedule has not been generated and ask whether the user wants it generated. For replace_schedule_blocks evidence, report what was replaced/swapped and explicitly list any unplacedCreated leftovers; if leftovers exist, offer to move them to a staff/time the user specifies. If replace_schedule_blocks reports confirmationType=OCCUPIED_TARGET or requiresOccupiedReplacementConfirmation=true, do NOT call it an override: say the replacement staff already has the listed clashing blocks, explain that those existing client blocks will go to Unplaced if the user proceeds, and ask whether they still want to proceed. For place_unplaced_assignment evidence, state the exact placed client/staff/time and any different client newly displaced to Unplaced. For analyze_client_replacement evidence, describe only what that analysis supports. For advisory suggestions, clearly label them as recommendations rather than completed changes. If a write result requires confirmation or override, explain the exact conflict and ask whether the user allows the override. If the evidence cannot support a reliable answer, say that you couldn't generate a reliable answer and ask for a different date/person/client/time or more detail. If no write tool was used, do not imply anything changed.`,
           prompt: `Clinic: ${locationName || "Clinic"}\nEffective date: ${resolvedDate.date}\nOriginal user request: ${message}\nWrite tools used: ${writeToolsUsed.join(", ") || "none"}\n\nScheduler evidence:\n${stringifyLimited(
             toolEvidence,
@@ -980,7 +981,7 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
 
     return NextResponse.json(response);
   } catch (error) {
-    if (error instanceof Error && error.message === OPENAI_SETUP_MESSAGE) return NextResponse.json({error:OPENAI_SETUP_MESSAGE},{status:503});
+    if (error instanceof Error && [OPENAI_SETUP_MESSAGE,GEMINI_SETUP_MESSAGE].includes(error.message)) return NextResponse.json({error:error.message},{status:503});
     console.error("Scheduler AI request failed:", error);
     const message = error instanceof Error ? error.message : "";
     const creditOrAccessProblem =

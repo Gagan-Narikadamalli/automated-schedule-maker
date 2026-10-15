@@ -222,7 +222,7 @@ Native AI is **text-only**. It intentionally rejects image uploads instead of de
 
 ### Paid Scheduler AI
 
-Paid AI uses OpenAI directly (default: GPT-6.1 Sol, configurable with OPENAI_SCHEDULER_MODEL). AI Generate shares the same assistant thread and OpenAI generation endpoint, with independent model-designed placements and a decision summary. It has the same authoritative scheduler tools/validations, but it can perform richer multi-step natural-language planning and can analyze screenshots with the configured vision model.
+The cloud assistant uses Gemini directly by default (gemini-3.8-flash, configurable with GEMINI_SCHEDULER_MODEL). AI Generate shares the same assistant thread and cloud generation endpoint, with independent model-designed placements and a decision summary. OpenAI remains optional with SCHEDULER_AI_PROVIDER=openai. It has the same authoritative scheduler tools/validations, but it can perform richer multi-step natural-language planning and can analyze screenshots with the configured vision model.
 
 A new screenshot upload is deliberately preview-only: the Paid AI extracts and compares the visible source data but cannot write on that upload turn. The manager must confirm the proposed import/change in a later turn.
 
@@ -322,7 +322,10 @@ Relevant variables include:
 
 ```text
 SCHEDULER_AI_AUTONOMOUS_WRITES=true|false
-OPENAI_API_KEY=<server-only OpenAI key>
+SCHEDULER_AI_PROVIDER=gemini
+GOOGLE_GENERATIVE_AI_API_KEY=<server-only Gemini key>
+GEMINI_SCHEDULER_MODEL=gemini-3.8-flash
+OPENAI_API_KEY=<optional server-only OpenAI key>
 OPENAI_SCHEDULER_MODEL=gpt-6.1-sol
 OPENAI_SCHEDULER_VISION_MODEL=gpt-6.1-sol
 ```

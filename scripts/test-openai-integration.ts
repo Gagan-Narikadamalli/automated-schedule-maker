@@ -8,6 +8,7 @@ import { POST as generateRoute } from "../src/app/api/schedule/ai-generate/route
 import { POST as paidRoute } from "../src/app/api/ai/paid/route";
 
 async function main() {
+ const previousProvider=process.env.SCHEDULER_AI_PROVIDER;process.env.SCHEDULER_AI_PROVIDER="openai";
  const key=process.env.OPENAI_API_KEY;delete process.env.OPENAI_API_KEY;
  assert.throws(()=>getSchedulerOpenAIModel(),new RegExp(OPENAI_SETUP_MESSAGE.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")));
  for(const handler of [generateRoute,paidRoute]){
@@ -51,6 +52,6 @@ async function main() {
   assert.throws(()=>expandOpenAIPlan({...plan,segments:[{...plan.segments[0],staff:"UNKNOWN"}]},new Map(),new Map()),/unknown/);
   assert.throws(()=>expandOpenAIPlan({...plan,segments:[{...plan.segments[0],startTime:"11:15"}]},new Map([["S0","s0"]]),new Map([["C0","c0"]])),/non-grid/);
   console.log("PASS OpenAI Responses routing, website scope, independent plan, decision summary, segment expansion, hard validation and soft-guideline flexibility (mocked provider; no real API calls).");
- }finally{globalThis.fetch=fetchOriginal;if(key)process.env.OPENAI_API_KEY=key;else delete process.env.OPENAI_API_KEY;}
+ }finally{globalThis.fetch=fetchOriginal;if(previousProvider)process.env.SCHEDULER_AI_PROVIDER=previousProvider;else delete process.env.SCHEDULER_AI_PROVIDER;if(key)process.env.OPENAI_API_KEY=key;else delete process.env.OPENAI_API_KEY;}
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});
