@@ -20,6 +20,7 @@ import { AppliedScheduleTemplate } from "@/models/AppliedScheduleTemplate";
 import { getSlotsInsideTimeRange } from "@/features/scheduler/engine/dateUtils";
 import { designOpenAISchedule, expandOpenAIPlan } from "@/features/ai/openaiSchedulePlan";
 import { OPENAI_SETUP_MESSAGE } from "@/features/ai/openaiProvider";
+import { schedulerProviderStatus } from "@/features/ai/schedulerProviderErrors";
 
 import { validateOpenAIPlan as validatePreview } from "@/features/ai/validateOpenAIPlan";
 function invalid(message: string, status = 422) {
@@ -286,7 +287,7 @@ export async function POST(request: Request) {
   } catch (error) {
     if (error instanceof Error && [OPENAI_SETUP_MESSAGE,GEMINI_SETUP_MESSAGE].includes(error.message)) return invalid(error.message,503);
     console.error("AI Schedule preview error:", error);
-    const status=error&&typeof error==="object"&&"statusCode" in error?Number(error.statusCode):undefined;
+    const status=schedulerProviderStatus(error);
     if(status===429||status!==undefined&&status>=500)return invalid("The AI provider is currently busy or rate-limited. Please try again shortly. The saved schedule was not changed.",503);
     if(error instanceof Error&&/timeout|abort/i.test(error.name))return invalid("AI planning took too long. Please try again; the saved schedule was not changed.",504);
     return invalid("AI Generate preview failed. The existing schedule was not changed.", 500);

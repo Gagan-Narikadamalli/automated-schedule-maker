@@ -3,6 +3,7 @@ import { buildFixedScheduleChoices,decodeFixedScheduleChoices,type FixedSchedule
 import { designOpenAISchedule,expandOpenAIPlan } from "../src/features/ai/openaiSchedulePlan";
 import { validateOpenAIPlan } from "../src/features/ai/validateOpenAIPlan";
 import type { SchedulerInput } from "../src/features/scheduler/engine/types";
+import { schedulerProviderStatus } from "../src/features/ai/schedulerProviderErrors";
 
 async function main(){
   const times=["11:00","11:30","12:00","12:30"];
@@ -30,12 +31,20 @@ async function main(){
   assert.equal(validateOpenAIPlan(input,expandOpenAIPlan(decodeFixedScheduleChoices(snapshot,partial),staffRefs,clientRefs)).missing.length,1);
   const fetchBefore=globalThis.fetch,envBefore={provider:process.env.SCHEDULER_AI_PROVIDER,key:process.env.GOOGLE_GENERATIVE_AI_API_KEY,model:process.env.GEMINI_SCHEDULER_MODEL};
   process.env.SCHEDULER_AI_PROVIDER="gemini";process.env.GOOGLE_GENERATIVE_AI_API_KEY="dummy-not-real";process.env.GEMINI_SCHEDULER_MODEL="gemini-3.5-flash-lite";
+  let attempts=0;
   globalThis.fetch=async(_url,options)=>{
     const body=JSON.parse(String(options?.body));assert.match(JSON.stringify(body.systemInstruction),/one TIME COLUMN at a time/);
     assert.equal(body.generationConfig.responseJsonSchema.properties.staffByTime.properties["11:00"].minItems,2);
+    if(attempts++===0)return new Response(JSON.stringify({error:{code:503,message:"Temporary high demand",status:"UNAVAILABLE"}}),{status:503,headers:{"Content-Type":"application/json","retry-after-ms":"1"}});
     return new Response(JSON.stringify({candidates:[{content:{role:"model",parts:[{text:JSON.stringify(choices)}]},finishReason:"STOP",index:0}],usageMetadata:{promptTokenCount:10,candidatesTokenCount:10,totalTokenCount:20}}),{headers:{"Content-Type":"application/json"}});
   };
-  try{assert.deepEqual(await designOpenAISchedule(snapshot),plan);}finally{globalThis.fetch=fetchBefore;for(const [key,value] of [["SCHEDULER_AI_PROVIDER",envBefore.provider],["GOOGLE_GENERATIVE_AI_API_KEY",envBefore.key],["GEMINI_SCHEDULER_MODEL",envBefore.model]]){if(value===undefined)delete process.env[key!];else process.env[key!]=value;}}
+  try{
+    assert.deepEqual(await designOpenAISchedule(snapshot),plan);assert.equal(attempts,2);
+    let failures=0;
+    globalThis.fetch=async()=>{failures++;return new Response(JSON.stringify({error:{code:503,message:"Temporary high demand",status:"UNAVAILABLE"}}),{status:503,headers:{"Content-Type":"application/json","retry-after-ms":"1"}});};
+    await assert.rejects(designOpenAISchedule(snapshot),error=>schedulerProviderStatus(error)===503);
+    assert.equal(failures,2,"Stop after one retry; preserve the provider status when exhausted.");
+  }finally{globalThis.fetch=fetchBefore;for(const [key,value] of [["SCHEDULER_AI_PROVIDER",envBefore.provider],["GOOGLE_GENERATIVE_AI_API_KEY",envBefore.key],["GEMINI_SCHEDULER_MODEL",envBefore.model]]){if(value===undefined)delete process.env[key!];else process.env[key!]=value;}}
   console.log("PASS fixed client/time cells, model-selected staff and event times, candidate eligibility, linked nap breaks, no fabricated attendance, conflict rejection and explicit uncovered cells (mocked).");
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});

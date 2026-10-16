@@ -1,5 +1,6 @@
 import { ToolLoopAgent, generateText, stepCountIs } from "ai";
 import { OPENAI_SETUP_MESSAGE } from "@/features/ai/openaiProvider";
+import { schedulerProviderStatus } from "@/features/ai/schedulerProviderErrors";
 import { isWebsiteRequest, WEBSITE_SCOPE_REPLY } from "@/features/ai/websiteScope";
 import { createOpenAIGenerationTools } from "@/features/ai/openaiGenerationTools";
 import { getSchedulerModel, schedulerModelOptions, getSchedulerCloudProvider, GEMINI_SETUP_MESSAGE } from "@/features/ai/schedulerModelProvider";
@@ -913,7 +914,7 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
     if (error instanceof Error && [OPENAI_SETUP_MESSAGE,GEMINI_SETUP_MESSAGE].includes(error.message)) return NextResponse.json({error:error.message},{status:503});
     console.error("Scheduler AI request failed:", error);
     const message = error instanceof Error ? error.message : "";
-    const providerStatus = error && typeof error === "object" && "statusCode" in error ? Number(error.statusCode) : undefined;
+    const providerStatus = schedulerProviderStatus(error);
     const creditOrAccessProblem =
       !(providerStatus && providerStatus >= 500) && (
       providerStatus === 429 || providerStatus === 402 ||

@@ -11,7 +11,7 @@ export async function isWebsiteRequest(message: string, history: Array<{role: st
     prompt: JSON.stringify({message, recentConversation:history.slice(-6),hasAttachment}),
     output: Output.object({schema:jsonSchema<{allowed:boolean}>({type:"object",properties:{allowed:{type:"boolean"}},required:["allowed"],additionalProperties:false})}),
     maxOutputTokens:1000,
-    maxRetries:0,
+    maxRetries:1,
     timeout:{totalMs:45000},
   });
   return result.output.allowed;
