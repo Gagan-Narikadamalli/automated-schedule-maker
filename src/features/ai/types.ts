@@ -13,6 +13,8 @@ export type SchedulerAiDateSource =
   | "PASSIVE_SELECTION";
 
 export type SchedulerAiContext = {
+  /** Server-only request deadline; never included in model prompts. */
+  abortSignal?: AbortSignal;
   locationId: string;
   locationName?: string;
   date: string;
@@ -69,6 +71,8 @@ export type SchedulerAiResponse = {
   attachmentAnalysis?: string;
   attachmentNames?: string[];
   attachmentPreviewOnly?: boolean;
+  interrupted?: boolean;
+  responseSource?: "website";
 };
 
 export type SchedulerAiFeedbackRequest = {

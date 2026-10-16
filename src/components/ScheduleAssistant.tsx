@@ -385,7 +385,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     setStatus(
       provider === "native"
         ? "New Free AI conversation ready."
-        : "New Gemini conversation ready with high reasoning."
+        : "New Gemini conversation ready. Questions stay read-only; ask explicitly for changes."
     );
   }
 
@@ -443,7 +443,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     setStatus(
       nextProvider === "native"
         ? "Free AI selected — Native Scheduler AI uses local deterministic reasoning and no paid model tokens."
-        : "Gemini selected — Gemini uses high reasoning and uses your Gemini API quota."
+        : "Gemini selected — ask questions or request changes. Uses your Google API quota."
     );
   }
 
@@ -593,7 +593,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
         ? "Gemini is reading the screenshot, comparing it with the live scheduler, and preparing a preview. No changes will be made on this upload turn."
         : provider === "native"
           ? "Free AI is resolving the date and analyzing scheduler rules, staff, clients, coverage, breaks, events, and Unplaced work..."
-          : "Gemini is using high reasoning with the live scheduler context..."
+          : "Gemini is reading your request and the relevant scheduler context..."
     );
 
     try {
@@ -767,7 +767,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
               {mode === "AUTONOMOUS"
                 ? "Can answer schedule questions, ask follow-ups, inspect date-specific context, and make scheduler changes through the existing rules and APIs."
                 : mode === "READ_ONLY"
-                  ? "Can inspect the scheduler website and answer schedule questions, but write actions are disabled."
+                  ? "This turn can answer questions and inspect the scheduler. Ask explicitly when you want a change."
                   : "Ask any scheduler-related question naturally. The assistant will ask for a day/date when one is required instead of guessing."}
             </span>
           </div>
@@ -814,13 +814,13 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
                 onClick={() => void changeProvider("gemini")}
               >
                 <strong>{provider === "openai" ? "OpenAI" : "Gemini"}</strong>
-                <small>Gemini · High reasoning</small>
+                <small>Gemini · Chat + actions</small>
               </button>
             </div>
             <span className={styles.providerNote}>
               {provider === "native"
                 ? "Runs the built-in Scheduler AI without paid model tokens. Text scheduling only."
-                : "Uses Gemini with high reasoning and your Google API quota. People are sent as numbered labels."}
+                : "Questions use a lighter read-only mode. Edits require a request. Uses your Google API quota and numbered labels."}
             </span>
           </div>
 
@@ -962,7 +962,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
               <div className={styles.thinking}>
                 {provider === "native"
                   ? "Free AI is working through the scheduler…"
-                  : "Gemini is using high reasoning on the scheduler context…"}
+                  : "Gemini is reviewing the scheduler context…"}
               </div>
             )}
           </div>

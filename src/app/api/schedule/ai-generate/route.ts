@@ -36,6 +36,7 @@ function invalid(message: string, status = 422) {
 export const maxDuration = 300;
 
 export async function POST(request: Request) {
+  const planningSignal=AbortSignal.any([request.signal,AbortSignal.timeout(260_000)]);
   const auth = await requireApiSession();
   if (auth.error) return auth.error;
   if (!sessionHasAnyRole(auth.session, SCHEDULE_WRITE_ROLES)) return forbiddenResponse();
@@ -167,7 +168,7 @@ export async function POST(request: Request) {
       importedWorkbookTraining:{matchedScheduleDays:historicalTraining.matchedScheduleDayCount,
         matchedAssignments:historicalTraining.matchedRecordCount},
     };
-    let plan = await designOpenAISchedule(sanitized);
+    let plan = await designOpenAISchedule(sanitized,undefined,planningSignal);
     let values = expandOpenAIPlan(plan, staffRefs, clientRefs);
     let audit = validatePreview(roster, values);
     if (audit.problems.length || audit.missing.length) {
@@ -178,7 +179,7 @@ export async function POST(request: Request) {
         for(const [id,alias] of clientAlias) text=text.replaceAll(id,alias);
         return text;
       });
-      plan=await designOpenAISchedule({...sanitized,previousProposal:plan.fixedChoices??plan},feedback.slice(0,120));
+      plan=await designOpenAISchedule({...sanitized,previousProposal:plan.fixedChoices??plan},feedback.slice(0,120),planningSignal);
       values=expandOpenAIPlan(plan,staffRefs,clientRefs);
       audit=validatePreview(roster,values);
     }
@@ -239,6 +240,7 @@ export async function POST(request: Request) {
         source:"AUTO",locked:false,manuallyOverridden:false,
         note:"AI Generate",
       }));
+      planningSignal.throwIfAborted();
       const outcome = await persistScheduleReplacementSafely({
         locationId,date,replacements,replaceableFilter:{}
       });

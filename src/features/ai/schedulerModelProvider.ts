@@ -9,11 +9,11 @@ export function getSchedulerCloudProvider(): "gemini" | "openai" {
   return process.env.SCHEDULER_AI_PROVIDER?.trim().toLowerCase() === "openai" ? "openai" : "gemini";
 }
 
-export function getSchedulerModel(vision = false) {
+export function getSchedulerModel(vision = false, purpose:"chat"|"planning"="chat") {
   if (getSchedulerCloudProvider() === "openai") return getSchedulerOpenAIModel(vision);
   const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim();
   if (!apiKey) throw new Error(GEMINI_SETUP_MESSAGE);
-  const modelId = (vision ? process.env.GEMINI_SCHEDULER_VISION_MODEL : undefined)?.trim() || process.env.GEMINI_SCHEDULER_MODEL?.trim() || DEFAULT_GEMINI_SCHEDULER_MODEL;
+  const modelId = (purpose==="planning"?process.env.GEMINI_SCHEDULER_PLANNING_MODEL:undefined)?.trim() || (vision ? process.env.GEMINI_SCHEDULER_VISION_MODEL : undefined)?.trim() || process.env.GEMINI_SCHEDULER_MODEL?.trim() || DEFAULT_GEMINI_SCHEDULER_MODEL;
   return createGoogle({apiKey,baseURL:"https://generativelanguage.googleapis.com/v1beta",fetch:async(url,options)=>{
     const started=Date.now();
     const response=await globalThis.fetch(url,options);

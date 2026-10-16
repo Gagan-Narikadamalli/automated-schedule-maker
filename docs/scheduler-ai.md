@@ -2,7 +2,7 @@
 
 ## Provider and configuration
 
-AI Generate and the cloud Schedule Assistant use Gemini directly through `@ai-sdk/google`. AI SDK is the application library, not a model provider or AI Gateway route. The default model is `gemini-3.6-flash`; set `GEMINI_SCHEDULER_MODEL` to override it. The development branch can use a branch-specific model without changing production configuration.
+AI Generate and the cloud Schedule Assistant use Gemini directly through `@ai-sdk/google`. AI SDK is the application library, not a model provider or AI Gateway route. The default model is `gemini-3.6-flash`; set `GEMINI_SCHEDULER_MODEL` to override it. The development branch can use a branch-specific model without changing production configuration. `GEMINI_SCHEDULER_PLANNING_MODEL` optionally selects a stronger Gemini model only for full-day design while chat uses a lighter model.
 
 Set server-only `GOOGLE_GENERATIVE_AI_API_KEY` (or `GEMINI_API_KEY`) in each intended Vercel environment and redeploy. Never use a `NEXT_PUBLIC_` key or commit credentials. `SCHEDULER_AI_AUTONOMOUS_WRITES=true` enables the controlled website write tools; false keeps the assistant advisory.
 
@@ -11,6 +11,8 @@ OpenAI is optional: set `SCHEDULER_AI_PROVIDER=openai`, `OPENAI_API_KEY` and opt
 ## Linked generation and conversation
 
 AI Generate opens the Schedule Assistant, selects the cloud provider and submits a date-specific `GENERATE_DAY` intent in the same conversation. The server dispatches the shared `generate_schedule` tool directly. Ordinary natural-language generation uses that same tool. Both paths reach `/api/schedule/ai-generate`; subsequent questions can inspect the saved day through website tools.
+
+Ordinary questions expose only read tools, use low reasoning, a concise website prompt, six recent messages and a summary of the selected day. They do not create feedback-training records. Explicit commands or confirmations of pending commands enable action tools. Greetings and thanks are answered locally without any provider request.
 
 The cloud assistant is limited to this website: schedules, staff, clients, attendance, events, templates, rules, supervision and website help. A scope classifier rejects unrelated or mixed unrelated requests. It has no web-search, shell or generic database tool. The explicit Generate button does not need a separate intent classification call.
 
@@ -39,3 +41,11 @@ History and templates provide inference-time guidance; the Gemini model has not 
 `/api/ai/connection` checks provider access using constant data without roster, calendar or tool access. `/api/ai/paid` accepts `readOnly:true` to omit every action tool and skip training-log writes. `/api/schedule/ai-generate` accepts `save:false` for a validated preview.
 
 Focused tests cover direct Google and OpenAI routing, structured model output, bounded retries, provider error status, website scope, tool-call round trips, alias removal/restoration, read-only enforcement, Native/cloud import isolation and independent schedule validation. Run TypeScript and the production build after changes. Mocked provider tests establish application behavior; a real provider response and database read-back are required to claim a successful live generation/save.
+
+## Interrupted requests and provider quotas
+
+Google controls project-level quotas and service availability; the application cannot promise unlimited Gemini requests. It limits model steps and output, uses a smaller read-only prompt and retries transient requests once. A quota/availability interruption returns a usable chat reply, not an unhandled limit error. During an outage, narrow staff/client lookups can still answer directly from authenticated website data and are labeled as website responses.
+
+The tool adapter records completed tool outputs before returning them to the model. If the next model call fails, the response reports the confirmed completed actions, rejected actions and unfinished steps; a confirmed write still sets `changed:true` so the calendar refreshes. Completed mutations are never automatically replayed. This does not make a sequence of independent tools one database transaction: an interrupted multi-step request can have completed steps, which are explicitly reported rather than hidden or claimed as rolled back.
+
+Full-day generation finishes model planning and independent validation before starting replacement writes. A provider failure or invalid proposal at that stage leaves the saved day unchanged. `test:ai-chat-continuity` simulates quota exhaustion before work, after a successful write and after a rejected write, and verifies no duplicate mutation or extra synthesis call.
