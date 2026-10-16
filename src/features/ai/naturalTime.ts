@@ -225,3 +225,15 @@ export function naturalTimeConfirmationQuestion(
 export function displayNaturalTimeRange(startTime: string, endTime: string): string {
   return `${displayTime(startTime)}–${displayTime(endTime)}`;
 }
+
+/** Read-only lookups can filter either a range or the cell at one clock time. */
+export function schedulerLookupTimeWindow(message:string):{startTime?:string;endTime?:string} {
+  const range=analyzeNaturalTimeRange(message);
+  if(range.status==="PARSED")return {startTime:range.startTime,endTime:range.endTime};
+  const point=stripDates(message).match(/\bat\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\b/i);
+  const parsed=point?parseToken(point[1]):null;
+  if(!parsed)return {};
+  const [hour,minute]=parsed.time.split(":").map(Number);
+  const end=hour*60+minute+1;
+  return {startTime:parsed.time,endTime:`${String(Math.floor(end/60)).padStart(2,"0")}:${String(end%60).padStart(2,"0")}`};
+}

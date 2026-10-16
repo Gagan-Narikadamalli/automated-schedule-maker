@@ -126,7 +126,7 @@ for (const sharedToolFile of [
 const paidBase = source("src/app/api/ai/routeBase.ts");
 assert.match(
   paidBase,
-  /DEFAULT_SCHEDULER_AI_PAID_MODEL = "openai\/gpt-5\.6-sol"/
+  /getSchedulerModel\(\)/
 );
 assert.match(paidBase, /reasoning: "high"/);
 assert.match(paidBase, /adaptSchedulerToolsForPaid/);
@@ -167,9 +167,9 @@ assert.match(
   /provider === "native" \? "\/api\/ai\/native" : "\/api\/ai\/paid"/
 );
 assert.match(assistant, /changeProvider\("native"\)/);
-assert.match(assistant, /changeProvider\("gateway"\)/);
+assert.match(assistant, /changeProvider\("gemini"\)/);
 assert.match(assistant, /Free AI/);
-assert.match(assistant, /Paid AI/);
+assert.match(assistant, /Gemini/);
 assert.match(
   assistant,
   /provider === "native" && messages\.length === 0/,

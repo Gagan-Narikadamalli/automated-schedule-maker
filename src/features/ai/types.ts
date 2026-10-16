@@ -1,5 +1,5 @@
 export type SchedulerAiMode = "READ_ONLY" | "AUTONOMOUS";
-export type SchedulerAiProviderMode = "native" | "gateway";
+export type SchedulerAiProviderMode = "native" | "openai" | "gemini";
 export type SchedulerAiThinkingLevel = "low" | "high";
 
 export type SchedulerAiDateSource =
@@ -13,6 +13,8 @@ export type SchedulerAiDateSource =
   | "PASSIVE_SELECTION";
 
 export type SchedulerAiContext = {
+  /** Server-only request deadline; never included in model prompts. */
+  abortSignal?: AbortSignal;
   locationId: string;
   locationName?: string;
   date: string;
@@ -43,6 +45,10 @@ export type SchedulerAiHistoryMessage = {
 };
 
 export type SchedulerAiRequest = {
+  intent?: "GENERATE_DAY";
+  allowProtectedReplacement?: boolean;
+  /** Omit all action tools and training-log writes for a read-only request. */
+  readOnly?: boolean;
   message?: string;
   locationId?: string;
   locationName?: string;
@@ -65,6 +71,8 @@ export type SchedulerAiResponse = {
   attachmentAnalysis?: string;
   attachmentNames?: string[];
   attachmentPreviewOnly?: boolean;
+  interrupted?: boolean;
+  responseSource?: "website";
 };
 
 export type SchedulerAiFeedbackRequest = {

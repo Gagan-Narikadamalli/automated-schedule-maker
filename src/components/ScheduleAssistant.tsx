@@ -27,7 +27,7 @@ type LocationsResponse = {
 };
 
 type SchedulerAiMode = "READ_ONLY" | "AUTONOMOUS";
-type SchedulerAiProviderMode = "native" | "gateway";
+type SchedulerAiProviderMode = "native" | "openai" | "gemini";
 type SchedulerAiThinkingLevel = "low" | "high";
 
 type SchedulerAiResponse = {
@@ -248,6 +248,7 @@ function readWorkspaceContext(): WorkspaceContext | null {
 }
 
 export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps) {
+  const [pendingGeneration, setPendingGeneration] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [locations, setLocations] = useState<LocationOption[]>([]);
@@ -260,7 +261,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
   const [working, setWorking] = useState(false);
   const [status, setStatus] = useState("Connected to the Automatic Scheduler website");
   const [mode, setMode] = useState<SchedulerAiMode | null>(null);
-  const [provider, setProvider] = useState<SchedulerAiProviderMode>("native");
+  const [provider, setProvider] = useState<SchedulerAiProviderMode>("gemini");
   const [correctionFor, setCorrectionFor] = useState<string | null>(null);
   const [correction, setCorrection] = useState("");
 
@@ -270,8 +271,33 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
   );
 
   useEffect(() => {
+    function openGeneration(event: Event) {
+      const detail = (event as CustomEvent<{locationId:string;date:string}>).detail;
+      if (working || !detail?.locationId || !detail.date) return;
+      setProvider("gemini");
+      window.localStorage.setItem("scheduler-ai-provider", "gemini");
+      setLocationId(detail.locationId);
+      setDate(detail.date);
+      setDateSelectionExplicit(true);
+      setAttachments([]);
+      setOpen(true);
+      setPendingGeneration(`Generate the schedule for ${detail.date} using your own reasoning and the current website data. Explain the main decisions and tradeoffs after validation.`);
+      setStatus("Gemini Generate is starting in this linked conversation.");
+    }
+    window.addEventListener("scheduler:ai-generate", openGeneration);
+    return () => window.removeEventListener("scheduler:ai-generate", openGeneration);
+  }, [working]);
+
+  useEffect(() => {
+    if (!pendingGeneration || provider === "native" || working) return;
+    const request = pendingGeneration;
+    setPendingGeneration(null);
+    void askScheduler(undefined, request, "GENERATE_DAY");
+  }, [pendingGeneration, provider, working]);
+
+  useEffect(() => {
     const savedProvider = window.localStorage.getItem("scheduler-ai-provider");
-    if (savedProvider === "native" || savedProvider === "gateway") {
+    if (savedProvider === "native" || savedProvider === "gemini") {
       setProvider(savedProvider);
     }
   }, []);
@@ -359,7 +385,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     setStatus(
       provider === "native"
         ? "New Free AI conversation ready."
-        : "New Paid AI conversation ready with high reasoning."
+        : "New Gemini conversation ready. Questions stay read-only; ask explicitly for changes."
     );
   }
 
@@ -417,7 +443,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     setStatus(
       nextProvider === "native"
         ? "Free AI selected — Native Scheduler AI uses local deterministic reasoning and no paid model tokens."
-        : "Paid AI selected — Gateway AI uses high reasoning and may consume paid AI credits."
+        : "Gemini selected — ask questions or request changes. Uses your Google API quota."
     );
   }
 
@@ -459,7 +485,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
 
     if (provider === "native") {
       setStatus(
-        "Free AI does not send screenshots to an external model. Switch to Paid AI to analyze screenshots."
+        "Free AI does not send screenshots to an external model. Switch to Gemini to analyze screenshots."
       );
       return;
     }
@@ -501,11 +527,11 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     }
   }
 
-  async function askScheduler(event?: FormEvent) {
+  async function askScheduler(event?: FormEvent, requestedMessage?: string, requestIntent?: "GENERATE_DAY") {
     event?.preventDefault();
     const selectedAttachments = attachments;
     const message =
-      input.trim() ||
+      requestedMessage || input.trim() ||
       (selectedAttachments.length > 0
         ? "Analyze the attached scheduler screenshot and tell me what it contains. Do not make changes yet."
         : "");
@@ -564,10 +590,10 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     setWorking(true);
     setStatus(
       selectedAttachments.length > 0
-        ? "Paid AI is reading the screenshot, comparing it with the live scheduler, and preparing a preview. No changes will be made on this upload turn."
+        ? "Gemini is reading the screenshot, comparing it with the live scheduler, and preparing a preview. No changes will be made on this upload turn."
         : provider === "native"
           ? "Free AI is resolving the date and analyzing scheduler rules, staff, clients, coverage, breaks, events, and Unplaced work..."
-          : "Paid AI is using high reasoning with the live scheduler context..."
+          : "Gemini is reading your request and the relevant scheduler context..."
     );
 
     try {
@@ -577,6 +603,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          intent: requestIntent,
           message,
           locationId: requestContext.locationId,
           locationName: requestContext.locationName,
@@ -636,8 +663,8 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
           data.attachmentPreviewOnly
             ? "Screenshot analysis complete. Review the proposed import and confirm it in chat before Scheduler AI makes any changes."
             : data.toolsUsed?.length
-              ? `${data.provider === "native" ? "Free AI" : "Paid AI"} · ${data.thinkingLevel === "high" ? "high thinking" : "low compute"} · ${data.mode === "AUTONOMOUS" ? "Autonomous" : "Read-only"} · tools: ${data.toolsUsed.join(", ")}`
-              : `${data.provider === "native" ? "Free AI" : "Paid AI"} response complete. Continue naturally if it asked for a date, clarification, or confirmation.`
+              ? `${data.provider === "native" ? "Free AI" : "Gemini"} · ${data.thinkingLevel === "high" ? "high thinking" : "low compute"} · ${data.mode === "AUTONOMOUS" ? "Autonomous" : "Read-only"} · tools: ${data.toolsUsed.join(", ")}`
+              : `${data.provider === "native" ? "Free AI" : "Gemini"} response complete. Continue naturally if it asked for a date, clarification, or confirmation.`
         );
       }
     } catch (error) {
@@ -740,7 +767,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
               {mode === "AUTONOMOUS"
                 ? "Can answer schedule questions, ask follow-ups, inspect date-specific context, and make scheduler changes through the existing rules and APIs."
                 : mode === "READ_ONLY"
-                  ? "Can inspect the scheduler website and answer schedule questions, but write actions are disabled."
+                  ? "This turn can answer questions and inspect the scheduler. Ask explicitly when you want a change."
                   : "Ask any scheduler-related question naturally. The assistant will ask for a day/date when one is required instead of guessing."}
             </span>
           </div>
@@ -781,27 +808,27 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
               </button>
               <button
                 type="button"
-                className={provider === "gateway" ? styles.providerActive : ""}
-                aria-pressed={provider === "gateway"}
+                className={provider !== "native" ? styles.providerActive : ""}
+                aria-pressed={provider !== "native"}
                 disabled={working}
-                onClick={() => void changeProvider("gateway")}
+                onClick={() => void changeProvider("gemini")}
               >
-                <strong>Paid AI</strong>
-                <small>Gateway · High thinking</small>
+                <strong>{provider === "openai" ? "OpenAI" : "Gemini"}</strong>
+                <small>Gemini · Chat + actions</small>
               </button>
             </div>
             <span className={styles.providerNote}>
               {provider === "native"
                 ? "Runs the built-in Scheduler AI without paid model tokens. Text scheduling only."
-                : "Uses the paid AI Gateway with high reasoning. Screenshot analysis is available in this mode."}
+                : "Questions use a lighter read-only mode. Edits require a request. Uses your Google API quota and numbered labels."}
             </span>
           </div>
 
           <div className={styles.promptHint}>
             <span>
-              Ask naturally — capitalization and normal typos are okay. {provider === "gateway"
-                ? "Paid AI can also analyze schedule screenshots before you confirm changes."
-                : "Free AI handles text scheduling locally; switch to Paid AI for screenshots."} Use Saved prompts for more examples.
+              Ask naturally — capitalization and normal typos are okay. {provider !== "native"
+                ? "Gemini uses numbered staff and client labels for scheduling."
+                : "Free AI handles text scheduling locally."} Use Saved prompts for more examples.
             </span>
             <button
               type="button"
@@ -841,7 +868,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
           <div className={styles.messages} aria-live="polite">
             {messages.length === 0 ? (
               <div className={styles.emptyState}>
-                {provider === "native" ? "Free AI" : "Paid AI"} is ready. Ask a question or request a change in normal language. You can create or update staff, clients, teams, templates, attendance, events, rules, and supervision through conversation. The assistant resolves the exact date before acting and asks for clarification instead of guessing.
+                {provider === "native" ? "Free AI" : "Gemini"} is ready. Ask a question or request a change in normal language. You can create or update staff, clients, teams, templates, attendance, events, rules, and supervision through conversation. The assistant resolves the exact date before acting and asks for clarification instead of guessing.
               </div>
             ) : (
               messages.map((message) => (
@@ -935,7 +962,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
               <div className={styles.thinking}>
                 {provider === "native"
                   ? "Free AI is working through the scheduler…"
-                  : "Paid AI is using high reasoning on the scheduler context…"}
+                  : "Gemini is reviewing the scheduler context…"}
               </div>
             )}
           </div>
@@ -972,27 +999,15 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
                 type="file"
                 accept="image/png,image/jpeg,image/webp"
                 multiple
-                disabled={
-                  working ||
-                  provider === "native" ||
-                  !locationId ||
-                  attachments.length >= MAX_SCREENSHOT_ATTACHMENTS
-                }
+                disabled={true}
                 onChange={(event) => void handleAttachmentSelection(event)}
               />
               <label
                 className={styles.attachButton}
                 htmlFor="scheduler-ai-screenshot-input"
-                title={
-                  provider === "native"
-                    ? "Switch to Paid AI to analyze screenshots"
-                    : "Attach schedule screenshot"
-                }
-                aria-label={
-                  provider === "native"
-                    ? "Screenshot analysis requires Paid AI"
-                    : "Attach schedule screenshot"
-                }
+                title="Screenshot uploads are unavailable while AI uses numbered labels."
+                aria-label="Screenshot uploads unavailable"
+                aria-disabled="true"
               >
                 +
               </label>
@@ -1014,7 +1029,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
                 placeholder={
                   provider === "native"
                     ? "Ask the Free AI about the schedule..."
-                    : "Ask the Paid AI, or attach a screenshot to analyze..."
+                    : "Ask Gemini about your schedule..."
                 }
                 aria-keyshortcuts="Enter"
               />
@@ -1032,8 +1047,8 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
             </div>
             <small className={styles.attachmentHint}>
               {provider === "native"
-                ? "Free AI: text-only, no paid model tokens. Switch to Paid AI for screenshots."
-                : "Paid AI: high reasoning. Screenshots support PNG/JPG/WebP, up to 3 images and 3 MB total; uploads stay preview-only until you confirm."}
+                ? "Free AI: text only, no paid model tokens."
+                : "Gemini: numbered staff and client labels. Text only; screenshots may reveal names."}
             </small>
           </form>
 

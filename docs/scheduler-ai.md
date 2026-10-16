@@ -1,68 +1,51 @@
 # Automatic Scheduler AI
 
-This AI is intentionally limited to the Automatic Schedule Maker. It does not receive database credentials, Vercel tokens, GitHub access, shell access, or generic database tools.
+## Provider and configuration
 
-## Current phase: read-only foundation
+AI Generate and the cloud Schedule Assistant use Gemini directly through `@ai-sdk/google`. AI SDK is the application library, not a model provider or AI Gateway route. The default model is `gemini-3.6-flash`; set `GEMINI_SCHEDULER_MODEL` to override it. The development branch can use a branch-specific model without changing production configuration. `GEMINI_SCHEDULER_PLANNING_MODEL` optionally selects a stronger Gemini model only for full-day design while chat uses a lighter model.
 
-The Schedule Assistant can inspect only the currently selected live clinic/date through controlled scheduler tools:
+Set server-only `GOOGLE_GENERATIVE_AI_API_KEY` (or `GEMINI_API_KEY`) in each intended Vercel environment and redeploy. Never use a `NEXT_PUBLIC_` key or commit credentials. `SCHEDULER_AI_AUTONOMOUS_WRITES=true` enables the controlled website write tools; false keeps the assistant advisory.
 
-- `get_day_schedule`
-- `get_staff`
-- `get_clients`
-- `get_unplaced_assignments`
-- `check_schedule`
+OpenAI is optional: set `SCHEDULER_AI_PROVIDER=openai`, `OPENAI_API_KEY` and optionally `OPENAI_SCHEDULER_MODEL` (default `gpt-6.1-sol`). This calls the Responses API directly with `store:false`; this setting is not a claim of zero retention. Providers never silently fall back to one another. Free/Native AI has its own endpoint and does not import the cloud model stack.
 
-It cannot generate, repair, move, delete, create call-outs, or otherwise modify a schedule yet. When asked to make a change, it should explain the appropriate scheduler action without executing it.
+## Linked generation and conversation
 
-## Runtime setup
+AI Generate opens the Schedule Assistant, selects the cloud provider and submits a date-specific `GENERATE_DAY` intent in the same conversation. The server dispatches the shared `generate_schedule` tool directly. Ordinary natural-language generation uses that same tool. Both paths reach `/api/schedule/ai-generate`; subsequent questions can inspect the saved day through website tools.
 
-Paid AI uses Vercel AI SDK and AI Gateway through the independent `/api/ai/paid` endpoint. Its default model is `openai/gpt-5.6-sol`, configurable with `SCHEDULER_AI_PAID_MODEL`. Free/Native AI uses the separate `/api/ai/native` endpoint and does not import or call the paid model stack.
+Ordinary questions expose only read tools, use low reasoning, a concise website prompt, six recent messages and a summary of the selected day. They do not create feedback-training records. Explicit commands or confirmations of pending commands enable action tools. Greetings and thanks are answered locally without any provider request.
 
-Production on Vercel should use the project's AI Gateway/OIDC configuration. For local development, use Vercel OIDC or set `AI_GATEWAY_API_KEY` in `.env.local`. Never commit the real key.
+The cloud assistant is limited to this website: schedules, staff, clients, attendance, events, templates, rules, supervision and website help. A scope classifier rejects unrelated or mixed unrelated requests. It has no web-search, shell or generic database tool. The explicit Generate button does not need a separate intent classification call.
 
-## Training data already collected
+## Independent scheduling and validation
 
-Every successful Scheduler AI interaction attempts to create an `AITrainingExample` containing:
+The model receives required client/time cells, eligible staff candidate groups, availability, restrictions, nap and speech windows, compressed same-weekday templates and historical pairing summaries. It chooses every staff assignment, nap and break. The deterministic auto-generation engine does not supply its placements.
 
-- clinic/location ID and date
-- manager request
-- assistant answer
-- model used
-- scheduler tools selected
-- read-only mode marker
-- manager acceptance or correction when feedback is submitted
+The structured response contains nap times, break times and one ordered staff array per time column. Local conversion translates those choices to website rows without filling missing placements. A separate validator checks availability, call-outs, attendance, eligibility, overlaps, fixed events, exactly one nap per eligible client, one break per available staff, clinical rotation limits and daily/weekly hour limits.
 
-The UI exposes `Helpful` and `Needs correction` feedback. Corrections are more useful than raw conversations because they show the desired scheduler behavior.
+Team preferences, continuity, historical pairings and target staff/client counts guide the model's judgment. The assistant returns concise decision reasons and tradeoffs, not private internal chain-of-thought. These are explanations; independent validation determines whether a proposal can be saved.
 
-## What to collect before custom-model training
+A proposal receives at most one full validation repair. Gemini structured planning uses medium reasoning and a 120-second limit per call. Planning and scope classification retry a transient provider failure once within their existing deadlines. Exhausted retries retain the provider status, so a busy service is reported accurately.
 
-1. Use the assistant on real scheduling questions covering breaks, coverage, naps, speech, call-outs already reflected in the day, locked/manual blocks, unplaced assignments, and incomplete schedules.
-2. Mark correct answers as Helpful.
-3. For incorrect answers, save a specific correction describing what the AI should have checked or said.
-4. Keep examples that represent edge cases, not only easy days.
-5. Build a separate evaluation set that is never included in training. It should test coverage, duplicate/missing breaks, locked/manual preservation, naps, speech, unplaced work, ambiguous requests, and attempts to operate outside the scheduler.
-6. Review the stored examples before exporting them. Remove unnecessary identifying text and never include credentials or secrets.
+Only valid proposals can be saved. Missing coverage is disclosed and added to Unplaced when an otherwise valid partial schedule is saved. Protected manual/template/locked rows require explicit manager permission via `allowProtectedReplacement:true` before a full-day rebuild. Availability, rules, events and saved assignments are checked again before saving to reject stale plans. Replacement writes preserve the old day if an empty or invalid proposal is returned.
 
-## Recommended next phases
+## Numbered identities and data handling
 
-### Phase 2: preview actions
+Cloud requests use request-local numbered aliases such as Staff1, Client1, Team1 and Location1. The server retains the mapping and resolves tool identifiers locally. Replies restore website names locally. Names, database IDs, contact details, notes, insurance details and source file names are excluded or replaced before prompts and tool results reach the provider.
 
-Add write-capable scheduler tools behind a preview/confirmation boundary. The AI may propose a call-out, repair, generation, move, or deletion, but the manager must see the planned changes and choose Apply or Cancel.
+Cloud screenshot uploads are disabled until local image redaction is available. Numbered scheduling data still contains times, dates and roles: this is pseudonymization, not a guarantee against re-identification.
 
-Record whether the manager accepted the proposed plan and any correction they made.
+History and templates provide inference-time guidance; the Gemini model has not been fine-tuned. Ordinary assistant interactions can be recorded locally as `AITrainingExample` feedback. Helpful/correction feedback does not automatically retrain a provider model. Direct Generate responses do not create a training example.
 
-### Phase 3: controlled execution
+## Verification
 
-Only after preview behavior has been evaluated should approved scheduler tools execute changes. Every write should reuse the existing scheduler business logic, preserve locked/manual assignments and fixed events, run validation afterward, update the Unplaced tray, and write an audit record.
+`/api/ai/connection` checks provider access using constant data without roster, calendar or tool access. `/api/ai/paid` accepts `readOnly:true` to omit every action tool and skip training-log writes. `/api/schedule/ai-generate` accepts `save:false` for a validated preview.
 
-### Phase 4: training dataset
+Focused tests cover direct Google and OpenAI routing, structured model output, bounded retries, provider error status, website scope, tool-call round trips, alias removal/restoration, read-only enforcement, Native/cloud import isolation and independent schedule validation. Run TypeScript and the production build after changes. Mocked provider tests establish application behavior; a real provider response and database read-back are required to claim a successful live generation/save.
 
-Export high-quality accepted/corrected examples into a versioned dataset. Keep training and evaluation datasets separate. Track the scheduler version/rules version used for each export so old examples can be identified when scheduling policy changes.
+## Interrupted requests and provider quotas
 
-### Phase 5: specialized model
+Google controls project-level quotas and service availability; the application cannot promise unlimited Gemini requests. It limits model steps and output, uses a smaller read-only prompt and retries transient requests once. A quota/availability interruption returns a usable chat reply, not an unhandled limit error. During an outage, narrow staff/client lookups can still answer directly from authenticated website data and are labeled as website responses.
 
-Fine-tune or otherwise specialize a model only after the tool-based assistant is reliable and the dataset has enough manager-reviewed examples. The custom model should replace only the language-model layer; the scheduler tools and deterministic scheduling engine remain the authority.
+The tool adapter records completed tool outputs before returning them to the model. If the next model call fails, the response reports the confirmed completed actions, rejected actions and unfinished steps; a confirmed write still sets `changed:true` so the calendar refreshes. Completed mutations are never automatically replayed. This does not make a sequence of independent tools one database transaction: an interrupted multi-step request can have completed steps, which are explicitly reported rather than hidden or claimed as rolled back.
 
-## Important boundary
-
-The AI should learn how to understand manager intent, select scheduler operations, and explain results. It should not replace deterministic constraints, coverage calculations, break rules, repair logic, or database validation with learned behavior.
+Full-day generation finishes model planning and independent validation before starting replacement writes. A provider failure or invalid proposal at that stage leaves the saved day unchanged. `test:ai-chat-continuity` simulates quota exhaustion before work, after a successful write and after a rejected write, and verifies no duplicate mutation or extra synthesis call.

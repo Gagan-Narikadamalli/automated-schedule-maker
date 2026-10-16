@@ -132,7 +132,7 @@ export async function buildSchedulerDateContextSnapshot(context: SchedulerAiCont
   const coveredKeys = new Set<string>();
   for (const assignment of enrichedAssignments) {
     if (
-      assignment.assignmentType === "CLIENT_1_TO_1" &&
+      ["CLIENT_1_TO_1","BREAK_NAP","BREAK_SPEECH","NAP","SPEECH"].includes(assignment.assignmentType) &&
       assignment.clientId
     ) {
       coveredKeys.add(`${assignment.clientId}:${assignment.startTime}`);
@@ -142,7 +142,8 @@ export async function buildSchedulerDateContextSnapshot(context: SchedulerAiCont
   const uncoveredRequirements: Array<{ clientCode: string; startTime: string }> = [];
   for (const key of requiredKeys) {
     if (coveredKeys.has(key)) continue;
-    const separator = key.lastIndexOf(":");
+    // The time itself contains a colon; split after the client ID.
+    const separator = key.indexOf(":");
     const clientId = key.slice(0, separator);
     const startTime = key.slice(separator + 1);
     uncoveredRequirements.push({

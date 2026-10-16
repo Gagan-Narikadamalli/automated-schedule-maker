@@ -222,7 +222,7 @@ Native AI is **text-only**. It intentionally rejects image uploads instead of de
 
 ### Paid Scheduler AI
 
-Paid AI uses an external reasoning model through the AI gateway (the current default in code is GPT-5.6 Sol, configurable with environment variables). It has the same authoritative scheduler tools/validations, but it can perform richer multi-step natural-language planning and can analyze screenshots with the configured vision model.
+The cloud assistant uses Gemini directly by default (gemini-3.6-flash, configurable with GEMINI_SCHEDULER_MODEL). AI Generate shares the same assistant thread and cloud generation endpoint, with independent model-designed placements and a decision summary. OpenAI remains optional with SCHEDULER_AI_PROVIDER=openai. It has the same authoritative scheduler tools/validations, but it can perform richer multi-step natural-language planning and returns names locally while sending numbered aliases to the cloud model.
 
 A new screenshot upload is deliberately preview-only: the Paid AI extracts and compares the visible source data but cannot write on that upload turn. The manager must confirm the proposed import/change in a later turn.
 
@@ -322,9 +322,12 @@ Relevant variables include:
 
 ```text
 SCHEDULER_AI_AUTONOMOUS_WRITES=true|false
-SCHEDULER_AI_PAID_MODEL=<AI Gateway model>
-SCHEDULER_AI_MODEL=<fallback paid model>
-SCHEDULER_AI_VISION_MODEL=<vision-capable model>
+SCHEDULER_AI_PROVIDER=gemini
+GOOGLE_GENERATIVE_AI_API_KEY=<server-only Gemini key>
+GEMINI_SCHEDULER_MODEL=gemini-3.6-flash
+OPENAI_API_KEY=<optional server-only OpenAI key>
+OPENAI_SCHEDULER_MODEL=gpt-6.1-sol
+OPENAI_SCHEDULER_VISION_MODEL=gpt-6.1-sol
 ```
 
 When autonomous writes are disabled, AI operations remain read/advisory only. Native and Paid AI provider graphs are tested independently so the Native path does not import the Paid AI implementation.
@@ -338,3 +341,15 @@ https://automated-schedule-maker.vercel.app
 GitHub repository:
 
 https://github.com/Gagan-Narikadamalli/automated-schedule-maker
+
+### Anonymous cloud requests
+
+AI Generate sends Staff1/Client1/Team1 aliases, numeric preferences and compressed historical segments. It excludes names, MongoDB IDs and template notes. The cloud assistant uses a request-local alias map for existing roster names/codes, location/team/template names, IDs, context, scope classification and all tool results. Tools resolve aliases only on the server; replies restore website names locally. Free-text notes, contact fields, insurance details and source file names are omitted. Screenshot uploads are disabled for cloud AI until local image redaction is available. Numbered scheduling data still contains times, roles and dates; this is pseudonymization, not a guarantee against re-identification. History provides inference-time context, not model fine-tuning.
+
+For non-mutating cloud checks, `/api/ai/paid` accepts `readOnly: true`: the server omits every action tool and skips training-log writes, even when autonomous writes are enabled. AI generation accepts `save: false` for a validated preview.
+
+The default is Gemini 3.6 Flash; `GEMINI_SCHEDULER_MODEL` can select another available Gemini model. Assistant turns use high reasoning; full-day structured planning uses medium reasoning with a bounded 120-second call and one validation repair. Planning and scope classification retry a transient provider failure once within their existing time limits, and exhausted retries retain the provider's status. Protected-day regeneration returns a confirmation before model planning; only an explicitly authorized `allowProtectedReplacement: true` retry can replace protected rows. The route rechecks the saved schedule and availability to reject stale plans.
+
+The AI Generate button declares `intent: GENERATE_DAY` to the paid assistant route. That route dispatches the shared generation tool directly and returns its decision summary into the same conversation; it does not spend another model call deciding which action the button requested. Ordinary free-text conversations still use scope classification and the tool-calling agent. Provider 503 errors are surfaced as temporary unavailability rather than a credit problem.
+
+Full-day planning uses a fixed time-column response schema. The website supplies each required client/time cell once and computes eligible candidate groups; the model chooses every staff assignment plus break/nap times. Local conversion only translates those choices into rows. Independent validation still rejects staff clashes, unavailable staff, hours/rotation violations and inconsistent linked breaks. The model never invents attendance cells or duplicate client cells in this format.
