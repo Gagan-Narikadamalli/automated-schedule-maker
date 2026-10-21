@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 
 import { auditFinalCoverage } from "@/features/scheduler/engine/auditFinalCoverage";
 import { getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
-import { repairCoverageMinimally } from "@/features/scheduler/engine/generateSchedule";
+import { planMinimalSafeRepair } from "@/features/scheduler/engine/planMinimalSafeRepair";
 import type { SchedulerAssignment } from "@/features/scheduler/engine/types";
 import { applyFixedNapSessions } from "@/features/scheduler/server/applyFixedNapSessions";
 import { applyHistoricalTraining } from "@/features/scheduler/server/applyHistoricalTraining";
@@ -43,18 +43,6 @@ function isBreakAssignment(
     assignment.assignmentType === "BREAK" ||
     assignment.assignmentType === "BREAK_NAP" ||
     assignment.assignmentType === "BREAK_SPEECH"
-  );
-}
-
-function assignmentOverlapsCallOut(
-  assignment: SchedulerAssignment,
-  callOuts: CallOutRecord[]
-): boolean {
-  return callOuts.some(
-    (callOut) =>
-      callOut.staffId === assignment.staffId &&
-      assignment.startTime >= callOut.startTime &&
-      assignment.startTime < callOut.endTime
   );
 }
 
@@ -138,29 +126,10 @@ export async function POST(request: Request) {
     );
 
     const originalSchedulerInput = historicalTraining.input;
-    // Repair differs from Auto Generate: keep every still-valid saved cell.
-    // Drop only appointments made invalid by staff/client attendance or
-    // call-outs, and fill uncovered client requirements in remaining cells.
-    const staffById = new Map(originalSchedulerInput.staff.map(person => [person.id, person]));
-    const clientsById = new Map(originalSchedulerInput.clients.map(client => [client.id, client]));
-    const invalidOriginals = originalSchedulerInput.existingAssignments.filter(assignment => {
-      const member = staffById.get(assignment.staffId);
-      if (!member || !member.availableSlots.includes(assignment.startTime) ||
-          assignmentOverlapsCallOut(assignment, callOuts)) return true;
-      if (assignment.assignmentType === "CLIENT_1_TO_1") {
-        const client = assignment.clientId ? clientsById.get(assignment.clientId) : null;
-        return !client || !client.requiredSlots.includes(assignment.startTime) ||
-          client.staffRelationships[assignment.staffId] === "HARD_RESTRICTION";
-      }
-      return false;
-    });
-    const invalidIds = new Set(invalidOriginals.map(item => item.id));
-    const schedulerInput = {
-      ...originalSchedulerInput,
-      existingAssignments: originalSchedulerInput.existingAssignments
-        .filter(item => !invalidIds.has(item.id))
-        .map(item => ({...item, locked:true})),
-    };
+    // The same hard rules and fixed-event/break allocator as Auto Generate
+    // are used here, but valid persisted assignments stay in their own cells.
+    // A call-out invalidates ALL overlapping cells, including MANUAL/locked
+    // breaks; neither calendar may show a called-out therapist covering a child.
     const priorityUnplaced = (await UnplacedAssignment.find({
       locationId, date, status: "UNPLACED", clientId: { $ne: null },
     }).select("_id clientId originalStartTime createdAt").sort({ createdAt: 1 }).lean()) as unknown as
@@ -172,36 +141,30 @@ export async function POST(request: Request) {
       }))
       .filter(record => Boolean(record.clientId) && /^\\d{2}:\\d{2}$/.test(record.startTime));
 
-    const coverageResult = repairCoverageMinimally(
-      schedulerInput,
-      priorityRequirements,
-      // Never move an existing valid template/manual cell to win a last
-      // assignment. Uncovered demand belongs in the manager tray.
-      {allowAutomaticOverrides:false, allowProtectedRelocation:false, allowBreakRelocation:false}
-    );
-    const result = coverageResult;
-    const affectedSlots = invalidOriginals.map(item => ({staffId:item.staffId,startTime:item.startTime}));
-
-    const originalAssignmentIds = new Set(
-      originalSchedulerInput.existingAssignments.map(
-        (assignment) => assignment.id
-      )
-    );
-    const resultAssignmentIds = new Set(
-      result.assignments.map((assignment) => assignment.id)
-    );
-
-    const removedOriginalIds =
-      originalSchedulerInput.existingAssignments
-        .filter(
-          (assignment) => !resultAssignmentIds.has(assignment.id)
-        )
-        .map((assignment) => assignment.id);
-
-    const newAssignments = result.assignments.filter(
-      (assignment) => !originalAssignmentIds.has(assignment.id)
-    );
-
+    const safePlan=planMinimalSafeRepair({
+      input:originalSchedulerInput,
+      rules:{
+        ...dayData.extendedRules,
+        historicalBreakPriority:originalSchedulerInput.rules.historicalBreakPriority
+      },
+      disruptions:callOuts,
+      priorityRequirements
+    });
+    if(safePlan.validationErrors.length){
+      return NextResponse.json({
+        error:"Repair could not satisfy mandatory staff breaks, naps, speech, or hard coverage restrictions. The saved schedule was not changed.",
+        violations:safePlan.validationErrors.slice(0,40),
+        uncoveredRequirements:safePlan.result.uncoveredRequirements,
+        unplacedBreakStaffIds:safePlan.unplacedBreakStaffIds,
+        date
+      },{status:422});
+    }
+    const result=safePlan.result;
+    const affectedSlots=safePlan.removedOriginals.map(item=>({
+      staffId:item.staffId,startTime:item.startTime
+    }));
+    const removedOriginalIds=safePlan.removedOriginals.map(item=>item.id);
+    const newAssignments=safePlan.addedOrUpdated;
     const removalFilter = {
       _id: { $in: removedOriginalIds },
       locationId,
@@ -222,9 +185,9 @@ export async function POST(request: Request) {
       staffId: assignment.staffId,
       clientId: assignment.clientId || null,
       assignmentType: assignment.assignmentType,
-      source: "AUTO",
-      locked: false,
-      manuallyOverridden: false,
+      source: assignment.source,
+      locked: assignment.locked,
+      manuallyOverridden: assignment.source === "MANUAL",
       note:
         assignment.note ||
         (repairMode === "COVERAGE"
@@ -232,11 +195,10 @@ export async function POST(request: Request) {
           : "Added by targeted call-out schedule repair."),
     }));
 
-    if (removedOriginalIds.length > 0) {
-      await ScheduleAssignment.deleteMany(removalFilter);
-    }
-
     try {
+      if (removedOriginalIds.length > 0) {
+        await ScheduleAssignment.deleteMany(removalFilter);
+      }
       if (preparedNewAssignments.length > 0) {
         await ScheduleAssignment.insertMany(preparedNewAssignments);
       }
@@ -271,7 +233,7 @@ export async function POST(request: Request) {
     }
 
     const finalCoverage = auditFinalCoverage(
-      schedulerInput.clients,
+      originalSchedulerInput.clients,
       result.assignments,
       result.metrics,
       dayData.extendedRules.slotLengthMinutes,
@@ -341,7 +303,7 @@ export async function POST(request: Request) {
       entityId: date,
       summary:
         repairMode === "COVERAGE"
-          ? `Applied automatic Minimal Fix on ${date}: Unplaced/client coverage first, minimum necessary schedule overrides, then break repair.`
+          ? `Applied Minimal Fix on ${date}: retained valid schedule cells, filled safe gaps, and validated all mandatory Break/Nap/Speech events before saving.`
           : `Repaired only the schedule cells affected by ${affectedStaffIds.length} staff call-out(s) on ${date}.`,
       after: {
         repairMode,
@@ -353,10 +315,12 @@ export async function POST(request: Request) {
         removedAssignmentCount: removedOriginalIds.length,
         addedAssignmentCount: newAssignments.length,
         managerGapCount,
-        automaticOverrideMode: repairMode === "COVERAGE",
-        reservedBreakCount: 0,
-        breakReliefSwapCount: 0,
-        unplacedBreakStaffIds: [],
+        automaticOverrideMode: false,
+        reservedBreakCount:safePlan.breakCount,
+        breakReliefSwapCount:safePlan.reliefSwapCount,
+        unplacedBreakStaffIds:safePlan.unplacedBreakStaffIds,
+        breakRecalculated:safePlan.breakRecalculated,
+        preservedOriginalCount:safePlan.preservedOriginalCount,
         totalBreakCount,
         metrics: finalMetrics,
         uncoveredRequirements: finalCoverage.uncoveredRequirements,
@@ -382,10 +346,12 @@ export async function POST(request: Request) {
       removedAssignmentCount: removedOriginalIds.length,
       addedAssignmentCount: newAssignments.length,
       managerGapCount,
-      automaticOverrideMode: repairMode === "COVERAGE",
-      reservedBreakCount: 0,
-      breakReliefSwapCount: 0,
-      unplacedBreakStaffIds: [],
+      automaticOverrideMode:false,
+      reservedBreakCount:safePlan.breakCount,
+      breakReliefSwapCount:safePlan.reliefSwapCount,
+      unplacedBreakStaffIds:safePlan.unplacedBreakStaffIds,
+      breakRecalculated:safePlan.breakRecalculated,
+      preservedOriginalCount:safePlan.preservedOriginalCount,
       totalBreakCount,
       fixedNapSessionsApplied: fixedNapApplication.sessionCount,
       fixedNapClientsApplied: fixedNapApplication.clientCount,

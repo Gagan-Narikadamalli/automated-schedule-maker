@@ -1,4 +1,5 @@
 import { ToolLoopAgent, generateText, stepCountIs } from "ai";
+import { POST as repairScheduleDay } from "@/app/api/schedule/repair/route";
 import { OPENAI_SETUP_MESSAGE } from "@/features/ai/openaiProvider";
 import { isWebsiteRequest, WEBSITE_SCOPE_REPLY } from "@/features/ai/websiteScope";
 import { createOpenAIGenerationTools } from "@/features/ai/openaiGenerationTools";
@@ -18,7 +19,7 @@ import { buildSchedulerAiInstructions } from "@/features/ai/schedulerPrompt";
 import { buildSchedulerReplyFallback } from "@/features/ai/schedulerReplyFallback";
 import { buildSchedulerPrivacy } from "@/features/ai/buildSchedulerPrivacy";
 import { encodeSafeSchedulerHistory } from "@/features/ai/schedulerPrivacy";
-import { isSchedulerActionRequest, isExplicitDayGenerationCommand, isProtectedDayGenerationApproval } from "@/features/ai/schedulerActionIntent";
+import { isSchedulerActionRequest, isExplicitDayGenerationCommand, isProtectedDayGenerationApproval, isExplicitDayRepairCommand } from "@/features/ai/schedulerActionIntent";
 import { adaptSchedulerToolsForPaid } from "@/features/ai/schedulerPaidToolAdapter";
 import { createPaidTemplateTools } from "@/features/ai/schedulerPaidTemplateTools";
 import { ensureSchedulerConversationClosing } from "@/features/ai/schedulerConversationLifecycle";
@@ -457,6 +458,7 @@ export async function POST(request: Request) {
       return forbiddenResponse("You do not have access to this scheduler location.");
     }
 
+    const repairCommand = isExplicitDayRepairCommand(message);
     const aiProvider = getSchedulerCloudProvider();
     const thinkingLevel = "high" as const;
     const model = getSchedulerModel();
@@ -465,7 +467,7 @@ export async function POST(request: Request) {
     }
     const privacy = await buildSchedulerPrivacy(locationId, locationName);
     const privateHistory = encodeSafeSchedulerHistory(history, privacy.encodeText);
-    if (body.intent !== "GENERATE_DAY" && !(await isWebsiteRequest(privacy.encodeText(message), privateHistory, false))) {
+    if (body.intent !== "GENERATE_DAY" && !repairCommand && !(await isWebsiteRequest(privacy.encodeText(message), privateHistory, false))) {
       return NextResponse.json({reply:WEBSITE_SCOPE_REPLY,provider:aiProvider,thinkingLevel,changed:false,mode:"READ_ONLY",toolsUsed:[],writeToolsUsed:[],trainingExampleId:null});
     }
     const autonomousWrites =
@@ -497,6 +499,49 @@ export async function POST(request: Request) {
       dateSelectionExplicit,
       userId: auth.session.userId,
     };
+
+    // "repair today" uses the same deterministic, validated, minimum-change
+    // server route as Repair / Minimal Fix. Do NOT generate a new AI schedule.
+    if (repairCommand) {
+      if(!writeToolsEnabled)
+        return NextResponse.json({error:"Repair requires manager write permission; no schedule was changed."},{status:403});
+      const response=await repairScheduleDay(new Request(
+        "http://scheduler-ai.internal/api/schedule/repair",{
+          method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({locationId,date:resolvedDate.date,mode:"COVERAGE"})
+        }));
+      const data=await response.json() as Record<string,any>;
+      const success=response.ok&&data.success===true;
+      const changed=success&&(
+        (data.removedAssignmentCount??0)>0 ||
+        (data.addedAssignmentCount??0)>0 ||
+        (data.resolvedUnplacedCount??0)>0
+      );
+      const reply=success
+        ? "Minimum-change repair finished for "+resolvedDate.date+". "+
+          (data.preservedOriginalCount??0)+" saved assignment(s) preserved, "+
+          (data.removedAssignmentCount??0)+" invalid or adjusted block(s) replaced, and "+
+          (data.addedAssignmentCount??0)+" replacement block(s) created. "+
+          (data.metrics?.coveredClientSlots??0)+"/"+(data.metrics?.requiredClientSlots??0)+
+          " client blocks covered; "+(data.unplacedRemainingCount??0)+
+          " unresolved block(s) remain in the Unplaced Assignments tray. Mandatory events were checked. I did not regenerate the entire schedule. This direct repair did not use model generation tokens."
+        : "I could not safely repair "+resolvedDate.date+". "+
+          String(data.error??"Validation failed.")+" "+
+          (Array.isArray(data.violations)?data.violations.slice(0,5).join("; "):"")+
+          " No successful schedule change was confirmed.";
+      return NextResponse.json({
+        reply,changed,mode:"AUTONOMOUS",provider:aiProvider,thinkingLevel,
+        repair:{success,coveredClientSlots:data.metrics?.coveredClientSlots,
+          requiredClientSlots:data.metrics?.requiredClientSlots,
+          removedAssignmentCount:data.removedAssignmentCount,
+          addedAssignmentCount:data.addedAssignmentCount,
+          preservedOriginalCount:data.preservedOriginalCount,
+          remainingUnplaced:data.unplacedRemainingCount,
+          violations:data.violations??[]},
+        toolsUsed:["repair_schedule"],writeToolsUsed:["repair_schedule"],
+        generationModelCalls:0,trainingExampleId:null,effectiveDate:resolvedDate.date
+      },{status:response.ok?200:422});
+    }
 
     // The Generate button already declares its action. Dispatch that action
     // directly; the independent planner still makes every placement decision.

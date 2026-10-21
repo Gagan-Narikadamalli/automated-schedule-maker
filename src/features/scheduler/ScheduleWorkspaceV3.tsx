@@ -117,6 +117,8 @@ type GenerateResponse = {
   unplacedRemainingCount?: number;
   addedAssignmentCount?: number;
   removedAssignmentCount?: number;
+  preservedOriginalCount?: number;
+  breakRecalculated?: boolean;
   reservedBreakCount?: number;
   breakReliefSwapCount?: number;
   unplacedBreakStaffIds?: string[];
@@ -784,14 +786,15 @@ export function ScheduleWorkspaceV3() {
       const data = await readJson<{ error?: string }>(response);
       if (!response.ok) throw new Error(data.error || "Attendance could not be saved.");
       setShowCallOutPanel(false);
-      const generated = await fetch("/api/schedule/generate", {
+      const repaired = await fetch("/api/schedule/repair", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ locationId, date: selectedDate }),
+        body: JSON.stringify({ locationId, date: selectedDate, mode: "COVERAGE" }),
       });
-      const result = await readJson<GenerateResponse>(generated);
+      const result = await readJson<GenerateResponse>(repaired);
       await loadSchedule();
-      setStatusMessage(generated.ok ? "Attendance saved and the day was regenerated using new availability."
-        : `Attendance saved, but schedule regeneration needs review: ${result.error || "Unknown error"}`);
+      setStatusMessage(repaired.ok
+        ? `Attendance saved. Valid existing assignments were kept; ${formatMetrics(result.metrics)} Uncovered blocks are in the Unplaced tray.`
+        : `Attendance saved, but repair could not safely meet all mandatory rules: ${result.error || "Unknown error"} ${(result.violations ?? []).slice(0,3).join("; ")}`);
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "Saving attendance failed.");
     } finally { setWorking(false); }
@@ -822,10 +825,12 @@ export function ScheduleWorkspaceV3() {
       setCallOutClientIds(ids);
       setSavedCallOutClientIds(ids);
       setShowCallOutPanel(false);
-      const regenerate = await fetch("/api/schedule/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ locationId, date: selectedDate }) });
-      const generated = await readJson<GenerateResponse>(regenerate);
+      const repaired = await fetch("/api/schedule/repair", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ locationId, date: selectedDate, mode: "COVERAGE" }) });
+      const result = await readJson<GenerateResponse>(repaired);
       await loadSchedule();
-      setStatusMessage(regenerate.ok ? `${ids.length} client call-out(s) saved. The remaining active client coverage was regenerated.` : `Client call-outs saved, but schedule regeneration needs review: ${generated.error || "Unknown error"}`);
+      setStatusMessage(repaired.ok
+        ? `${ids.length} client call-out(s) saved. Valid staff/client blocks were preserved; ${formatMetrics(result.metrics)}`
+        : `Client call-outs saved, but safe repair needs review: ${result.error || "Unknown error"} ${(result.violations ?? []).slice(0,3).join("; ")}`);
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "Failed to save client call-outs.");
     } finally { setWorking(false); }
@@ -871,32 +876,15 @@ export function ScheduleWorkspaceV3() {
       const removed = data.removedCount ?? 0;
       let scheduleSyncMessage = "";
 
-      if (removed > 0) {
-        const regenerateResponse = await fetch("/api/schedule/generate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ locationId, date: selectedDate }),
-        });
-        const regenerateData = await readJson<GenerateResponse>(
-          regenerateResponse
-        );
-        scheduleSyncMessage = regenerateResponse.ok
-          ? " Returning staff were restored to the visible grid and the day was regenerated."
-          : ` The call-out was removed, but schedule regeneration needs review: ${regenerateData.error || "unknown regeneration error"}`;
-      } else if (added > 0) {
+      if (removed > 0 || added > 0) {
         const repairResponse = await fetch("/api/schedule/repair", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            locationId,
-            date: selectedDate,
-            mode: "CALL_OUT",
-          }),
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({locationId,date:selectedDate,mode:"CALL_OUT"})
         });
-        const repairData = await readJson<GenerateResponse>(repairResponse);
+        const repaired = await readJson<GenerateResponse>(repairResponse);
         scheduleSyncMessage = repairResponse.ok
-          ? " Coverage was repaired around the new call-out."
-          : ` The call-out was saved, but automatic repair needs review: ${repairData.error || "unknown repair error"}`;
+          ? ` Only invalidated coverage was replaced; ${formatMetrics(repaired.metrics)} Remaining uncovered client slots are in the Unplaced tray.`
+          : ` Call-outs were saved, but safe repair needs review: ${repaired.error || "unknown error"} ${(repaired.violations ?? []).slice(0,3).join("; ")}`;
       }
 
       await loadSchedule();
@@ -1033,16 +1021,16 @@ export function ScheduleWorkspaceV3() {
     }
     try {
       setWorking(true);
-      setStatusMessage("Repairing only schedule areas affected by recorded staff call-outs, including removing automatic break blocks inside those call-out windows...");
+      setStatusMessage("Repairing disrupted coverage and checking all mandatory Break/Nap/Speech events before saving...");
       const response = await fetch("/api/schedule/repair", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ locationId, date: selectedDate }),
       });
       const data = await readJson<GenerateResponse>(response);
-      if (!response.ok) throw new Error(data.error || "The schedule could not be repaired.");
+      if (!response.ok) throw new Error((data.error || "The schedule could not be repaired.") + " " + (data.violations ?? []).slice(0,5).join("; "));
       await loadSchedule();
-      setStatusMessage(`Repair finished for ${data.affectedStaffIds?.length ?? 0} affected staff member(s). ${formatMetrics(data.metrics)}`);
+      setStatusMessage(`Repair finished. ${data.preservedOriginalCount ?? 0} valid cells preserved; ${data.removedAssignmentCount ?? 0} invalid/changed cells replaced; ${formatMetrics(data.metrics)} Unplaced client coverage remains in the manager tray.`);
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "The schedule could not be repaired.");
     } finally {
@@ -1059,7 +1047,7 @@ export function ScheduleWorkspaceV3() {
     try {
       setWorking(true);
       setStatusMessage(
-        "Running Minimal Fix: Unplaced assignments first, then uncovered clients, automatic minimum-change overrides when needed, and final break repair..."
+        "Running Minimal Fix: preserving valid cells, filling Unplaced coverage, then validating staff breaks, naps and speech before saving..."
       );
       const response = await fetch("/api/schedule/repair", {
         method: "POST",
@@ -1074,7 +1062,7 @@ export function ScheduleWorkspaceV3() {
 
       if (!response.ok) {
         throw new Error(
-          data.error || "Minimal Fix could not repair the schedule."
+          (data.error || "Minimal Fix could not repair the schedule.") + " " + (data.violations ?? []).slice(0,5).join("; ")
         );
       }
 
@@ -1157,7 +1145,7 @@ export function ScheduleWorkspaceV3() {
             className="button button-secondary"
             disabled={working || loading || staff.length === 0}
             onClick={() => void requestMinimalFix()}
-            title="Fix Unplaced and uncovered client blocks with the fewest schedule changes. This repair may automatically move/override existing blocks and then repairs staff breaks."
+            title="Fill unresolved coverage while keeping valid cells fixed. Validate naps, speech and breaks before saving; never silently override protected assignments."
           >
             Minimal Fix
           </button>
@@ -1168,7 +1156,7 @@ export function ScheduleWorkspaceV3() {
           <button type="button" className="button button-warning" disabled={working || loading || demoMode} onClick={() => void requestDeleteSchedule()} title="Delete all scheduled blocks for this date only, after confirmation.">Delete Schedule</button>
           <button type="button" className="button button-secondary" disabled={working || loading || staff.length === 0} onClick={() => void requestGenerateWeek()}>Auto Generate Week</button>
           <button type="button" className="button button-primary" disabled={working || loading || staff.length === 0} onClick={() => void requestAutoGenerate()}>{working ? "Working..." : "Auto Generate Day"}</button>
-          <button type="button" className="button button-secondary" disabled={working || loading || staff.length === 0} onClick={() => void requestAiGenerate()} title="Open Gemini schedule generation in the linked assistant conversation.">AI Generate</button>
+          <button type="button" className="button button-secondary" disabled={working || loading || staff.length === 0} onClick={() => void requestAiGenerate()} title="Ask OpenAI to independently plan a day, then validate proposed assignments.">AI Generate</button>
         </div>
       </section>
 

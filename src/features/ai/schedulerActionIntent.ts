@@ -32,3 +32,12 @@ export function isProtectedDayGenerationApproval(
     /do you allow me to override/i.test(previous.text) &&
     /rebuild/i.test(previous.text);
 }
+
+/** Explicit single-day repair, never full regeneration or a question. */
+export function isExplicitDayRepairCommand(message:string):boolean {
+  if(!isSchedulerActionRequest(message))return false;
+  if(/\b(?:week|weekly|month|monthly|all days)\b/i.test(message))return false;
+  if(/^\s*(?:should\s+i|do\s+i|is\s+it|would\s+it|what|why|how|when|which|explain)\b/i.test(message))return false;
+  return /\b(?:repair|minimal\s+fix)\b/i.test(message) ||
+    /\bfix\b.{0,80}\b(?:schedule|coverage|unplaced|today|tomorrow|day)\b/i.test(message);
+}
