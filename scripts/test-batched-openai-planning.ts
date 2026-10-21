@@ -85,7 +85,7 @@ async function mockPlan(invalid=false){
         {id:"c2",displayCode:"c2",requiredSlots:times,napSlots:[],speechSlots:[],staffRelationships:{},serviceSetting:"IN_CENTER"}],
       callOutStaffIds:[],existingAssignments:[],referenceAssignments:[],
       rules:{slotLengthMinutes:30}
-    } as SchedulerInput;
+    } as unknown as SchedulerInput;
     const result=validateOpenAIPlan(input,rows);
     assert.deepEqual(result.problems,[],"No duplicate staff/client and mandatory nap/break violations.");
     assert.equal(result.required,20);
