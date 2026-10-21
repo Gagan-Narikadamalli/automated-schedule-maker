@@ -28,14 +28,22 @@ async function main(){
   assert.throws(()=>decodeFixedScheduleChoices(snapshot,{...choices,staffByTime:{...choices.staffByTime,"14:00":["Staff1"]}}),/extra client\/time/);
   const partial=structuredClone(choices);partial.staffByTime["11:00"][1]="UNPLACED";
   assert.equal(validateOpenAIPlan(input,expandOpenAIPlan(decodeFixedScheduleChoices(snapshot,partial),staffRefs,clientRefs)).missing.length,1);
-  const fetchBefore=globalThis.fetch,envBefore={provider:process.env.SCHEDULER_AI_PROVIDER,key:process.env.GOOGLE_GENERATIVE_AI_API_KEY,model:process.env.GEMINI_SCHEDULER_MODEL};
-  process.env.SCHEDULER_AI_PROVIDER="gemini";process.env.GOOGLE_GENERATIVE_AI_API_KEY="dummy-not-real";process.env.GEMINI_SCHEDULER_MODEL="gemini-3.5-flash-lite";
-  globalThis.fetch=async(_url,options)=>{
-    const body=JSON.parse(String(options?.body));assert.match(JSON.stringify(body.systemInstruction),/one TIME COLUMN at a time/);
-    assert.equal(body.generationConfig.responseJsonSchema.properties.staffByTime.properties["11:00"].minItems,2);
-    return new Response(JSON.stringify({candidates:[{content:{role:"model",parts:[{text:JSON.stringify(choices)}]},finishReason:"STOP",index:0}],usageMetadata:{promptTokenCount:10,candidatesTokenCount:10,totalTokenCount:20}}),{headers:{"Content-Type":"application/json"}});
+  const oldFetch=globalThis.fetch,oldKey=process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY="mock-test-key";
+  globalThis.fetch=async(url,options)=>{
+    assert.equal(String(url),"https://api.openai.com/v1/responses");
+    const body=JSON.parse(String(options?.body));
+    assert.match(JSON.stringify(body),/one TIME COLUMN at a time/);
+    return new Response(JSON.stringify({id:"resp_fixed",object:"response",created_at:1,status:"completed",model:body.model,
+      output:[{type:"message",id:"msg_fixed",role:"assistant",status:"completed",content:[{type:"output_text",text:JSON.stringify(choices),annotations:[]}]}],
+      usage:{input_tokens:10,output_tokens:10,total_tokens:20}}),{headers:{"Content-Type":"application/json"}});
   };
-  try{assert.deepEqual(await designOpenAISchedule(snapshot),plan);}finally{globalThis.fetch=fetchBefore;for(const [key,value] of [["SCHEDULER_AI_PROVIDER",envBefore.provider],["GOOGLE_GENERATIVE_AI_API_KEY",envBefore.key],["GEMINI_SCHEDULER_MODEL",envBefore.model]]){if(value===undefined)delete process.env[key!];else process.env[key!]=value;}}
+  try { assert.deepEqual(await designOpenAISchedule(snapshot),plan); }
+  finally {
+    globalThis.fetch=oldFetch;
+    if(oldKey===undefined)delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY=oldKey;
+  }
   console.log("PASS fixed client/time cells, model-selected staff and event times, candidate eligibility, linked nap breaks, no fabricated attendance, conflict rejection and explicit uncovered cells (mocked).");
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});

@@ -842,6 +842,64 @@ function alignPlainBreaksWithAdjacentNaps(
   return result;
 }
 
+
+/**
+ * An explicit client nap has priority over ordinary staff lunches.
+ * Each nap receives exactly one eligible, free caregiver and a single BREAK_NAP.
+ * Impossible naps remain absent and are rejected by the final event audit.
+ */
+function reserveRequiredNapBreaks(
+  assignments: SchedulerAssignment[],
+  staff: SchedulerStaff[],
+  clients: SchedulerClient[],
+  callOutStaffIds: Set<string>,
+  rules: PostCoverageBreakRules
+): void {
+  if (rules.defaultBreakMinutes !== rules.slotLengthMinutes) return;
+  const linked = new Set(assignments
+    .filter(a => a.assignmentType === "BREAK_NAP" && a.clientId)
+    .map(a => `${a.clientId}|${a.startTime}`));
+  for (const client of [...clients].sort((a,b)=>
+    Number(a.napPriorityCategory !== "YOUNGER")-Number(b.napPriorityCategory !== "YOUNGER") ||
+    a.displayCode.localeCompare(b.displayCode)
+  )) {
+    for (const time of [...new Set(client.napSlots)].sort()) {
+      const key = `${client.id}|${time}`;
+      if (linked.has(key)) continue;
+      if (time < rules.breakWindowStart || time >= rules.breakWindowEnd) continue;
+      if (assignments.some(a => a.clientId === client.id && a.startTime === time)) continue;
+      const previous = shiftTime(time,-rules.slotLengthMinutes);
+      const next = shiftTime(time,rules.slotLengthMinutes);
+      const eligible = staff.filter(person =>
+        !callOutStaffIds.has(person.id) &&
+        person.availableSlots.includes(time) &&
+        !staffAlreadyHasBreak(person.id,assignments) &&
+        !assignments.some(a=>a.staffId===person.id && a.startTime===time) &&
+        client.staffRelationships[person.id] !== "HARD_RESTRICTION" &&
+        (!person.serviceSetting || !client.serviceSetting ||
+          person.serviceSetting === "BOTH" || client.serviceSetting === "BOTH" ||
+          person.serviceSetting === client.serviceSetting)
+      );
+      const continuity = (person:SchedulerStaff) =>
+        assignments.some(a => a.staffId===person.id && a.clientId===client.id &&
+          a.assignmentType==="CLIENT_1_TO_1" &&
+          (a.startTime===previous || a.startTime===next)) ? 0 : 1;
+      eligible.sort((a,b)=>
+        continuity(a)-continuity(b) ||
+        Number(!a.teamId || a.teamId!==client.teamId)-Number(!b.teamId || b.teamId!==client.teamId) ||
+        coverageRoleTier(a.role)-coverageRoleTier(b.role) ||
+        a.name.localeCompare(b.name));
+      const caregiver=eligible[0];
+      if(!caregiver) continue;
+      assignments.push(createBreakAssignment(caregiver,time,{
+        client,assignmentType:"BREAK_NAP",
+        priority:client.napPriorityCategory==="YOUNGER"?10:20
+      }));
+      linked.add(key);
+    }
+  }
+}
+
 export function placeStaffBreaksAfterCoverage({
   staff,
   clients,
@@ -873,6 +931,9 @@ export function placeStaffBreaksAfterCoverage({
   const reservedBreaks: SchedulerAssignment[] = [];
   const unplacedBreakStaffIds: string[] = [];
   let reliefSwapCount = 0;
+
+  // Required Nap sessions are always allocated before ordinary staff breaks.
+  reserveRequiredNapBreaks(assignments,staff,clients,callOutSet,rules);
 
   const orderedStaff = [...staff].sort((left, right) => {
     const roleDifference = roleBreakOrder(left.role) - roleBreakOrder(right.role);
@@ -988,7 +1049,7 @@ export function placeStaffBreaksAfterCoverage({
   );
   return {
     assignments: napAlignedAssignments,
-    reservedBreaks,
+    reservedBreaks: napAlignedAssignments.filter(isBreakAssignment),
     reliefSwapCount,
     humanStyleBlockSwapCount: humanBalance.blockSwapCount,
     humanStylePenaltyBefore: humanBalance.penaltyBefore,

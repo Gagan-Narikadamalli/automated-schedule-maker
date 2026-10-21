@@ -1,12 +1,12 @@
 import { generateText, Output, jsonSchema } from "ai";
-import { getSchedulerModel, schedulerModelOptions, getSchedulerCloudProvider } from "./schedulerModelProvider";
+import { getSchedulerModel, schedulerModelOptions } from "./schedulerModelProvider";
 import { getSlotsInsideTimeRange, getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
 import { buildFixedScheduleChoices,decodeFixedScheduleChoices,type FixedScheduleSnapshot,type FixedScheduleChoices } from "./fixedScheduleChoices";
 
 export type OpenAIPlanSegment = {staff:string;client:string|null;startTime:string;endTime:string;type:"CLIENT_1_TO_1"|"SPEECH"|"BREAK"|"BREAK_NAP"|"BREAK_SPEECH"};
 export type OpenAISchedulePlan = {segments:OpenAIPlanSegment[];explanation:string;decisions:string[];tradeoffs:string[];fixedChoices?:FixedScheduleChoices};
 export async function designOpenAISchedule(snapshot:unknown, corrections?:string[]) {
-  const effort=getSchedulerCloudProvider()==="gemini" ? "medium" : "high";
+  const effort = "high" as const;
   const fixed=snapshot&&typeof snapshot==="object"&&"useFixedCells" in snapshot&&snapshot.useFixedCells===true
     ? buildFixedScheduleChoices(snapshot as unknown as FixedScheduleSnapshot):null;
   const result=await generateText({

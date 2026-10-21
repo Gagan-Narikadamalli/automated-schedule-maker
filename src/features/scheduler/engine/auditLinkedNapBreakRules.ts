@@ -1,4 +1,4 @@
-import type { SchedulerAssignment, SchedulerClient } from "./types";
+import type { SchedulerAssignment, SchedulerClient, SchedulerStaff } from "./types";
 
 /** Post-generation safety check shared by Auto Day and Auto Week.
  * Every BREAK_NAP represents one staff break and one client nap.
@@ -6,7 +6,10 @@ import type { SchedulerAssignment, SchedulerClient } from "./types";
  */
 export function auditLinkedNapBreakRules(
   assignments: SchedulerAssignment[],
-  clients: SchedulerClient[]
+  clients: SchedulerClient[],
+  activeStaff: SchedulerStaff[] = [],
+  breakWindowStart = "11:00",
+  breakWindowEnd = "14:00"
 ): string[] {
   const problems: string[] = [];
   const breaks=new Map<string,number>();
@@ -47,6 +50,16 @@ export function auditLinkedNapBreakRules(
     const n=(naps.get(a.clientId)??0)+1;
     naps.set(a.clientId,n);
     if(n>1)problems.push(`Client ${a.clientId} has multiple naps`);
+  }
+  // Never report completion while a saved client Nap event is missing.
+  for(const client of clients)
+    for(const time of new Set(client.napSlots))
+      if(!occupied.has(`${client.id}|${time}`))
+        problems.push(`Client ${client.id} missing scheduled Break/Nap at ${time}`);
+  for(const person of activeStaff) {
+    if(!person.availableSlots.some(t=>t>=breakWindowStart&&t<breakWindowEnd))continue;
+    if(!breaks.has(person.id))
+      problems.push(`Staff ${person.id} missing required 30-minute break`);
   }
   for(const [key,count] of staffAssignments)if(count>1)problems.push(`Staff double-booked: ${key}`);
   for(const [key,count] of clientAssignments)if(count>1)problems.push(`Client double-booked: ${key}`);

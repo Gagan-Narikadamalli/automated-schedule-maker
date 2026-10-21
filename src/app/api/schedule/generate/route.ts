@@ -187,7 +187,9 @@ export async function POST(request: Request) {
       schedulerInput.clients,
       dayData.extendedRules.slotLengthMinutes
     );
-    const linkedEventProblems = auditLinkedNapBreakRules(eventEnrichedAssignments,schedulerInput.clients);
+    const linkedEventProblems = auditLinkedNapBreakRules(eventEnrichedAssignments,schedulerInput.clients,
+      schedulerInput.staff.filter(s=>!schedulerInput.callOutStaffIds.includes(s.id)),
+      dayData.extendedRules.breakWindowStart,dayData.extendedRules.breakWindowEnd);
     if(linkedEventProblems.length) {
       return NextResponse.json({
         error:"Generated schedule contains inconsistent nap/break assignments; no schedules were overwritten.",

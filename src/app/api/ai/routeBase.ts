@@ -2,7 +2,7 @@ import { ToolLoopAgent, generateText, stepCountIs } from "ai";
 import { OPENAI_SETUP_MESSAGE } from "@/features/ai/openaiProvider";
 import { isWebsiteRequest, WEBSITE_SCOPE_REPLY } from "@/features/ai/websiteScope";
 import { createOpenAIGenerationTools } from "@/features/ai/openaiGenerationTools";
-import { getSchedulerModel, schedulerModelOptions, getSchedulerCloudProvider, GEMINI_SETUP_MESSAGE } from "@/features/ai/schedulerModelProvider";
+import { getSchedulerModel, schedulerModelOptions, getSchedulerCloudProvider } from "@/features/ai/schedulerModelProvider";
 import { NextResponse } from "next/server";
 
 import {
@@ -910,7 +910,7 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
 
     return NextResponse.json(response);
   } catch (error) {
-    if (error instanceof Error && [OPENAI_SETUP_MESSAGE,GEMINI_SETUP_MESSAGE].includes(error.message)) return NextResponse.json({error:error.message},{status:503});
+    if (error instanceof Error && [OPENAI_SETUP_MESSAGE].includes(error.message)) return NextResponse.json({error:error.message},{status:503});
     console.error("Scheduler AI request failed:", error);
     const message = error instanceof Error ? error.message : "";
     const providerStatus = error && typeof error === "object" && "statusCode" in error ? Number(error.statusCode) : undefined;

@@ -3,6 +3,7 @@ import { constructAiSchedule } from "../src/features/scheduler/engine/constructA
 import { scoreCandidate } from "../src/features/scheduler/engine/scoring";
 import { enrichBreakAssignmentsWithFixedEvents } from "../src/features/scheduler/engine/reserveBreaks";
 import { auditLinkedNapBreakRules } from "../src/features/scheduler/engine/auditLinkedNapBreakRules";
+import { placeStaffBreaksAfterCoverage } from "../src/features/scheduler/engine/placeStaffBreaks";
 import { pinWorkbookTemplates } from "../src/features/scheduler/engine/pinWorkbookTemplates";
 import { repairLinkedNapReliefHandoffs } from "../src/features/scheduler/engine/humanStyleBlockBalance";
 import type { SchedulerAssignment } from "../src/features/scheduler/engine/types";
@@ -84,6 +85,20 @@ check("insufficient staffing",Array.from({length:8},(_,i)=>s(i,slots())),
   assert.ok(auditLinkedNapBreakRules([item("a","s1","NAP")],[napClient]).some(x=>x.includes("Standalone")));
   assert.ok(auditLinkedNapBreakRules([item("a","s1","BREAK_NAP"),item("b","s1","BREAK","12:00")],[napClient]).some(x=>x.includes("multiple breaks")));
   assert.ok(auditLinkedNapBreakRules([item("a","s1","BREAK_NAP"),item("b","s2","BREAK_NAP")],[napClient]).some(x=>x.includes("Duplicate")));
+  {
+    const times=["11:00","11:30","12:00"];
+    const people=[s(1,times),s(2,times)];
+    const child=c(91,["11:00","12:00"],{napSlots:["11:30"]});
+    const result=placeStaffBreaksAfterCoverage({
+      staff:people,clients:[child],assignments:[],callOutStaffIds:[],
+      rules:{breakWindowStart:"11:00",breakWindowEnd:"14:00",defaultBreakMinutes:30,breakEligibilityHours:0,slotLengthMinutes:30},
+      schedulerRules:{slotLengthMinutes:30} as SchedulerInput["rules"]
+    });
+    assert.equal(result.assignments.filter(a=>a.assignmentType==="BREAK_NAP"&&a.clientId===child.id&&a.startTime==="11:30").length,1,
+      "Every saved nap needs a linked break, even without adjacent 1:1 coverage");
+    assert.deepEqual(auditLinkedNapBreakRules(result.assignments,[child],people),[]);
+    assert.ok(auditLinkedNapBreakRules([], [child]).some(p=>p.includes("missing scheduled Break/Nap")));
+  }
   console.log("PASS shared one-nap/one-break rules for Day and Week");
 }
 

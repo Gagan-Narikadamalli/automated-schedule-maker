@@ -968,7 +968,7 @@ export function ScheduleWorkspaceV3() {
     window.dispatchEvent(new CustomEvent("scheduler:ai-generate", {
       detail: { locationId, date: selectedDate },
     }));
-    setStatusMessage("Gemini Generate started in the linked assistant. Results and decision summaries appear in that conversation.");
+    setStatusMessage("AI Generate started in the linked assistant. Results and decision summaries appear in that conversation.");
   }
 
   async function requestGenerateWeek() {

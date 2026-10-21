@@ -167,9 +167,9 @@ assert.match(
   /provider === "native" \? "\/api\/ai\/native" : "\/api\/ai\/paid"/
 );
 assert.match(assistant, /changeProvider\("native"\)/);
-assert.match(assistant, /changeProvider\("gemini"\)/);
+assert.match(assistant, /changeProvider\("openai"\)/);
 assert.match(assistant, /Free AI/);
-assert.match(assistant, /Gemini/);
+assert.match(assistant, /OpenAI/);
 assert.match(
   assistant,
   /provider === "native" && messages\.length === 0/,
