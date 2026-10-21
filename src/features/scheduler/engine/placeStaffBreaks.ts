@@ -943,6 +943,10 @@ function reserveRequiredNapBreaks(
           (decision.movable.length?0:1)+coverageRoleTier(person.role)*3;
       };
       eligible.sort((a,b)=>rank(a)-rank(b)||a.name.localeCompare(b.name));
+      if(process.env.NODE_ENV==="test" || process.env.NAP_DEBUG_TEST==="true")
+        console.log("NAP_CANDIDATES",client.id,time,"BEFORE",before,"AFTER",after,
+          "ELIGIBLE",eligible.map(p=>[p.id,rank(p)]),
+          "ROWS",assignments.map(a=>[a.staffId,a.clientId,a.startTime,a.assignmentType]));
       const caregiver=eligible[0];
       if(!caregiver)continue;
       const decision=linkDecision(caregiver,time);
