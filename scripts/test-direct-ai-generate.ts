@@ -101,7 +101,7 @@ check("insufficient staffing",Array.from({length:8},(_,i)=>s(i,slots())),
     assignmentType:type,source:"AUTO",locked:false
   });
   assert.equal(auditLinkedNapBreakRules([item("a","s1","BREAK_NAP")],[napClient]).length,0);
-  assert.ok(auditLinkedNapBreakRules([item("a","s1","NAP")],[napClient]).some(x=>x.includes("Standalone")));
+  assert.deepEqual(auditLinkedNapBreakRules([item("a","s1","NAP")],[napClient]),[], "Client nap is valid independently of a staff break.");
   assert.ok(auditLinkedNapBreakRules([item("a","s1","BREAK_NAP"),item("b","s1","BREAK","12:00")],[napClient]).some(x=>x.includes("multiple breaks")));
   assert.ok(auditLinkedNapBreakRules([item("a","s1","BREAK_NAP"),item("b","s2","BREAK_NAP")],[napClient]).some(x=>x.includes("Duplicate")));
   {
@@ -116,7 +116,7 @@ check("insufficient staffing",Array.from({length:8},(_,i)=>s(i,slots())),
     assert.equal(result.assignments.filter(a=>a.assignmentType==="BREAK_NAP"&&a.clientId===child.id&&a.startTime==="11:30").length,1,
       "Every saved nap needs a linked break, even without adjacent 1:1 coverage");
     assert.deepEqual(auditLinkedNapBreakRules(result.assignments,[child],people),[]);
-    assert.ok(auditLinkedNapBreakRules([], [child]).some(p=>p.includes("missing scheduled Break/Nap")));
+    assert.ok(auditLinkedNapBreakRules([], [child]).some(p=>p.includes("missing required 30-minute nap")));
   }
   console.log("PASS shared one-nap/one-break rules for Day and Week");
 }
