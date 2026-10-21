@@ -16,7 +16,8 @@ export async function designOpenAISchedule(snapshot:unknown, corrections?:string
   // model timeout. Ask for fixed event choices once, then plan six consecutive
   // half-hour columns at a time, preserving prior model choices and continuity.
   if(fixed&&Object.keys(fixed.grid).length>8&&
-      hasUsefulTemplateEvidence(snapshot as FixedScheduleSnapshot))
+      ((snapshot as {preferFastTemplateGuidedPlanning?:boolean}).preferFastTemplateGuidedPlanning===true||
+        hasUsefulTemplateEvidence(snapshot as FixedScheduleSnapshot)))
     return designTemplateGuidedDay(snapshot as FixedScheduleSnapshot,signal);
   if (fixed && Object.keys(fixed.grid).length > 8)
     return designFixedDayInBatches(snapshot as FixedScheduleSnapshot,corrections,signal);

@@ -66,22 +66,33 @@ export function buildTemplateGuidedChoices(
   }
   const breakStart=snapshot.rules.breakWindowStart??"11:00";
   const breakEnd=snapshot.rules.breakWindowEnd??"14:00";
+  // Stagger plain staff breaks so the proposed schedule does not send every
+  // employee on break together. A linked caregiver nap can count as relief.
+  const breakCount=new Map<string,number>();
   for(const person of staff){
     const allowed=person.availableSlots.filter(t=>t>=breakStart&&t<=breakEnd);
     if(!allowed.length){breakTimes[person.id]="UNPLACED";continue;}
     const proposed=proposal?.breakTimes?.[person.id];
-    // A staff member who covered the child directly before a nap is an
-    // especially useful nap-linked-break candidate.
     const templateNap=Object.entries(napTimes).find(([client,time])=>
       allowed.includes(time)&&refs.some(a=>a.staff===person.id&&a.client===client&&
-        isCoverage(a)&&contains(a,time)));
+        isCoverage(a)&&(contains(a,time)||a.endTime===time)));
     const historical=refs.find(a=>a.staff===person.id&&
       ["BREAK","BREAK_NAP","BREAK_SPEECH"].includes(a.type??"")&&
       allowed.includes(a.startTime??""));
-    breakTimes[person.id]=(proposed&&allowed.includes(proposed)?proposed:
-      templateNap?templateNap[1]:
-      historical?historical.startTime!:
-      [...allowed].sort((a,b)=>Math.abs(minute(a)-750)-Math.abs(minute(b)-750))[0]);
+    const score=(time:string)=>{
+      const active=staff.filter(s=>s.availableSlots.includes(time)).length;
+      const demand=snapshot.clients.filter(c=>c.requiredSlots.includes(time)).length;
+      const slack=Math.max(0,active-demand);
+      const current=breakCount.get(time)??0;
+      const linked=templateNap?.[1]===time;
+      const over=linked?Math.max(0,current-slack):Math.max(0,current-slack+1);
+      return over*500+current*35+Math.abs(minute(time)-750)/8+
+        (proposed===time?-55:0)+(linked?-100:0)+
+        (historical?.startTime===time?-28:0);
+    };
+    const time=[...allowed].sort((a,b)=>score(a)-score(b)||a.localeCompare(b))[0];
+    breakTimes[person.id]=time;
+    breakCount.set(time,(breakCount.get(time)??0)+1);
   }
   let events={napTimes,breakTimes,explanation:"",decisions:[],tradeoffs:[]};
   if(validateFixedEventChoices(snapshot,events).length) {

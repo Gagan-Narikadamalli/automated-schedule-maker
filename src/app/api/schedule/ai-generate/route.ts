@@ -122,6 +122,7 @@ export async function POST(request: Request) {
     };
     const sanitized = {
       useFixedCells:true,
+      preferFastTemplateGuidedPlanning:true,
       date,
       regenerationPolicy:"OPENAI INDEPENDENT PLANNING: generate the best feasible day from current roster/attendance/call-outs. Templates, previous schedules and historical pairings are NOT protected staff placements, and copying a template is NOT the goal. Use them as weak observational evidence. Improve coverage, naps/breaks, continuity and handoffs by departing from history whenever sensible. Relax only SOFT team, typical pairing/day and grouping preferences. Never violate actual availability, a hard client-staff restriction, single-therapist occupancy or non-overridable clinic requirements. The manager separately approves replacement of protected saved rows before save.",
       staff:roster.staff.map(p=>({id:staffAlias.get(p.id),role:p.role,teamId:p.teamId?teamAlias.get(String(p.teamId)):undefined,availableSlots:p.availableSlots,

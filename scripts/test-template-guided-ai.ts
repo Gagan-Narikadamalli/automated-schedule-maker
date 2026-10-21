@@ -89,7 +89,29 @@ async function run(){
     assert.equal(plan.modelUsed,false);
     assert.match(plan.explanation,/too slow/i);
     toRows(plan);
-    console.log("PASS template-guided OpenAI scheduling: one compact model call, independent validated client coverage, two linked naps, three staff breaks, and safe fallback after API timeout.");
+    // Even on days with weak/no workbook history, the deployed website opts
+    // into the same bounded path rather than nine sequential model calls.
+    const noHistory:FixedScheduleSnapshot={...snapshot,
+      templates:[],referenceAssignments:[],preferFastTemplateGuidedPlanning:true};
+    assert.equal(hasUsefulTemplateEvidence(noHistory),false);
+    calls=0;
+    const noHistoryPlan=await designOpenAISchedule(noHistory);
+    assert.equal(calls,1);
+    assert.equal(noHistoryPlan.templateGuided,true);
+    assert.equal(noHistoryPlan.modelUsed,false);
+    const noHistoryRows=expandOpenAIPlan(noHistoryPlan,
+      new Map([["Staff1","s1"],["Staff2","s2"],["Staff3","s3"]]),
+      new Map([["Client1","c1"],["Client2","c2"]]));
+    const noHistoryInput={
+      staff:["s1","s2","s3"].map(id=>({id,name:id,role:"BT",availableSlots:slots,serviceSetting:"IN_CENTER"})),
+      clients:[{id:"c1",displayCode:"c1",requiredSlots:slots,napSlots:["12:00"],speechSlots:[],staffRelationships:{},serviceSetting:"IN_CENTER"},
+        {id:"c2",displayCode:"c2",requiredSlots:slots,napSlots:["12:30"],speechSlots:[],staffRelationships:{},serviceSetting:"IN_CENTER"}],
+      callOutStaffIds:[],existingAssignments:[],referenceAssignments:[],rules:{slotLengthMinutes:30}
+    } as unknown as SchedulerInput;
+    const noHistoryAudit=validateOpenAIPlan(noHistoryInput,noHistoryRows);
+    assert.deepEqual(noHistoryAudit.problems,[],"No-history fallback must still schedule distinct staff breaks and actual client naps.");
+    assert.equal(noHistoryAudit.missing.length,0);
+    console.log("PASS template-guided OpenAI scheduling: one compact model call, independent validated client coverage, two linked naps, three staff breaks, and safe fallback after API timeout, including days without usable templates.");
   }finally{
     globalThis.fetch=prior;
     if(oldKey===undefined)delete process.env.OPENAI_API_KEY;
