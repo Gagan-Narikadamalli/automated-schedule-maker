@@ -14,6 +14,9 @@ import {
 import { writeAuditLog } from "@/lib/api/audit";
 import { connectToDatabase } from "@/lib/db";
 import { Client } from "@/models/Client";
+import { ClientAttendanceException } from "@/models/ClientAttendanceException";
+import { AttendanceOverride } from "@/models/AttendanceOverride";
+import { getEligibleClientNapStarts, type ClientNapAttendanceChange } from "@/features/fixed-events/napAttendanceEligibility";
 import { NapSession } from "@/models/NapSession";
 
 type NapPriorityCategory = "YOUNGER" | "OLDER";
@@ -110,6 +113,34 @@ function enumerateSeriesDates(
   return dates;
 }
 
+function sessionClientId(session: PlainRecord): string {
+  const client=session.clientId;
+  return String(client && typeof client==="object" ? client._id??client.id??"" : client??"");
+}
+
+function attendanceLookup(
+  changes: PlainRecord[],
+  overrides: PlainRecord[]
+) {
+  const changesByKey=new Map<string,ClientNapAttendanceChange[]>();
+  const overridesByKey=new Map<string,{mode:"IN"|"OUT";startTime:string;endTime:string}>();
+  for(const item of changes) {
+    const key=`${String(item.clientId)}|${String(item.date)}`;
+    changesByKey.set(key,[...(changesByKey.get(key)??[]),{
+      changeType:item.changeType==="CALL_IN"?"CALL_IN":"CALL_OUT",
+      startTime:String(item.startTime),endTime:String(item.endTime)
+    }]);
+  }
+  for(const item of overrides) {
+    const key=`${String(item.personId)}|${String(item.date)}`;
+    overridesByKey.set(key,{
+      mode:item.mode==="IN"?"IN":"OUT",
+      startTime:String(item.startTime),endTime:String(item.endTime)
+    });
+  }
+  return {changesByKey,overridesByKey};
+}
+
 function isThirtyMinuteBoundary(time: string): boolean {
   return /^([01]\d|2[0-3]):(00|30)$/.test(time);
 }
@@ -165,10 +196,36 @@ export async function GET(request: Request) {
       .sort({ date: 1, priorityCategory: 1, startTime: 1 })
       .lean();
 
+    // Older bulk-created series may contain dates on which an individual
+    // child never attends. Do not display these as scheduled naps. Re-evaluate
+    // against current attendance to reflect later call-ins/outs safely.
+    const rawSessions=sessions as unknown as PlainRecord[];
+    const ids=[...new Set(rawSessions.map(sessionClientId))].filter(Boolean);
+    if(!ids.length)return NextResponse.json({napSessions:[],attendanceFilteredCount:0});
+    const dateFilter=date?{date}:{date:{$gte:startDate,$lte:endDate}};
+    const [clientDocuments,changes,overrides]=await Promise.all([
+      Client.find({_id:{$in:ids},locationId,active:true})
+        .select("_id attendancePatterns startDate endDate").lean(),
+      ClientAttendanceException.find({locationId,clientId:{$in:ids},...dateFilter}).lean(),
+      AttendanceOverride.find({locationId,personType:"client",personId:{$in:ids},...dateFilter}).lean(),
+    ]);
+    const clientsById=new Map((clientDocuments as unknown as PlainRecord[])
+      .map(client=>[String(client._id),client]));
+    const {changesByKey,overridesByKey}=attendanceLookup(
+      changes as unknown as PlainRecord[],overrides as unknown as PlainRecord[]
+    );
+    const visibleSessions=rawSessions.filter(session=>{
+      const clientId=sessionClientId(session);
+      const client=clientsById.get(clientId);
+      if(!client)return false;
+      const key=`${clientId}|${String(session.date)}`;
+      return getEligibleClientNapStarts(client,String(session.date),
+        String(session.startTime),String(session.endTime),
+        changesByKey.get(key)??[],overridesByKey.get(key)).length>0;
+    });
     return NextResponse.json({
-      napSessions: (sessions as unknown as PlainRecord[]).map(
-        serializeNapSession
-      ),
+      napSessions:visibleSessions.map(serializeNapSession),
+      attendanceFilteredCount:rawSessions.length-visibleSessions.length,
     });
   } catch (error) {
     console.error("Failed to load nap sessions:", error);
@@ -259,7 +316,7 @@ export async function POST(request: Request) {
       locationId,
       active: true,
     })
-      .select("_id displayCode")
+      .select("_id displayCode attendancePatterns startDate endDate")
       .lean();
 
     if (clients.length !== selectedClientIds.length) {
@@ -328,10 +385,48 @@ export async function POST(request: Request) {
       );
     }
 
-    const createdIds: string[] = [];
+    // Shared recurrence weekdays are a maximum set of eligible days, never
+    // a requirement that every child attends on those days.
+    const [attendanceChanges,attendanceOverrides]=await Promise.all([
+      ClientAttendanceException.find({
+        locationId,clientId:{$in:selectedClientIds},date:{$in:dates}
+      }).lean(),
+      AttendanceOverride.find({
+        locationId,personType:"client",personId:{$in:selectedClientIds},
+        date:{$in:dates}
+      }).lean()
+    ]);
+    const {changesByKey,overridesByKey}=attendanceLookup(
+      attendanceChanges as unknown as PlainRecord[],
+      attendanceOverrides as unknown as PlainRecord[]
+    );
+    const clientRecords=new Map((clients as unknown as PlainRecord[])
+      .map(client=>[String(client._id),client]));
+    const eligiblePairs: Array<{clientId:string;sessionDate:string}>=[];
+    const createdPerClient:Record<string,number>={};
+    let skippedCount=0;
+    for(const clientId of selectedClientIds) {
+      const client=clientRecords.get(clientId);
+      if(!client)continue;
+      for(const sessionDate of dates) {
+        const key=`${clientId}|${sessionDate}`;
+        if(getEligibleClientNapStarts(client,sessionDate,startTime,endTime,
+          changesByKey.get(key)??[],overridesByKey.get(key)).length===0) {
+          skippedCount++;
+          continue;
+        }
+        eligiblePairs.push({clientId,sessionDate});
+        createdPerClient[clientId]=(createdPerClient[clientId]??0)+1;
+      }
+    }
+    if(!eligiblePairs.length) {
+      return NextResponse.json({error:
+        "None of the selected children attend for a complete 30-minute slot within this nap window on the chosen date(s). Check individual client attendance, call-ins/outs, and the nap window."
+      },{status:422});
+    }
+    const createdIds:string[]=[];
 
-    for (const clientId of selectedClientIds) {
-      for (const sessionDate of dates) {
+    for (const {clientId,sessionDate} of eligiblePairs) {
         // One nap definition per child/day. Saving another shared Nap event for
         // the same child/day updates the window instead of creating duplicate
         // naps for that child.
@@ -377,13 +472,15 @@ export async function POST(request: Request) {
       entityId: recurringSeriesId || createdIds[0],
       summary:
         selectedClientIds.length > 1
-          ? `Applied ${startTime}-${endTime} nap window to ${selectedClientIds.length} clients across ${dates.length} date(s).`
+          ? `Applied ${startTime}-${endTime} nap window to ${Object.keys(createdPerClient).length} attending clients; skipped ${skippedCount} child/date(s) without eligible attendance.`
           : hasSeriesRequest
-            ? `Added ${dates.length} recurring nap windows for ${displayCodes[0] ?? "client"}.`
+            ? `Added ${createdIds.length} recurring nap windows for ${displayCodes[0] ?? "client"} (skipped ${skippedCount} ineligible date(s)).`
             : `Added nap window for ${displayCodes[0] ?? "client"} on ${dates[0]} at ${startTime}.`,
       after: {
         clientIds: selectedClientIds,
-        dates,
+        createdPerClient,
+        skippedCount,
+        dates:eligiblePairs.map(pair=>pair.sessionDate),
         startTime,
         endTime,
         priorityCategory,
@@ -395,8 +492,11 @@ export async function POST(request: Request) {
       {
         success: true,
         createdCount: createdIds.length,
-        clientCount: selectedClientIds.length,
-        dateCount: dates.length,
+        clientCount:Object.keys(createdPerClient).length,
+        selectedClientCount:selectedClientIds.length,
+        skippedCount,
+        createdPerClient,
+        dateCount:new Set(eligiblePairs.map(item=>item.sessionDate)).size,
         recurringSeriesId,
       },
       { status: 201 }

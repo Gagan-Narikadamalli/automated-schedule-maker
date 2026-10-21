@@ -12,7 +12,7 @@ type NapPriorityCategory = "YOUNGER" | "OLDER";
 type ScheduleMode = "ONE_TIME" | "WEEKLY";
 
 type LocationOption = { id: string; name: string };
-type ClientOption = { id: string; displayCode: string; color: string };
+type ClientOption = { id: string; displayCode: string; color: string; attendancePatterns?: Array<{days:string[];startTime:string;endTime:string}> };
 
 type ClientEvent = {
   id: string;
@@ -30,7 +30,7 @@ type ClientEvent = {
 type LocationsResponse = { locations?: LocationOption[]; error?: string };
 type ClientsResponse = { clients?: ClientOption[]; error?: string };
 type SpeechResponse = { speechSessions?: Omit<ClientEvent, "eventType">[]; createdCount?: number; deletedCount?: number; error?: string };
-type NapResponse = { napSessions?: Omit<ClientEvent, "eventType">[]; createdCount?: number; deletedCount?: number; error?: string };
+type NapResponse = { napSessions?: Omit<ClientEvent, "eventType">[]; createdCount?: number; skippedCount?: number; clientCount?: number; deletedCount?: number; error?: string };
 
 const DAYS = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"];
 const EVENT_COLORS: Record<EventType, string> = {
@@ -348,6 +348,7 @@ export function FixedEventsManager() {
         createdCount?: number;
         updatedCount?: number;
         clientCount?: number;
+        skippedCount?: number;
         error?: string;
       };
       if (!response.ok) throw new Error(data.error || `${formatEventType(eventType)} event could not be saved.`);
@@ -358,7 +359,7 @@ export function FixedEventsManager() {
       setMessage(editingEvent
         ? `${data.updatedCount ?? 1} ${formatEventType(eventType)} event(s) updated. Existing calendar assignments were not overwritten. Review/Repair the affected schedules to apply the new event time.`
         : eventType === "NAP"
-          ? `Nap window saved for ${data.clientCount ?? selectedNapClientIds.length} client(s). Auto Generate will stagger their naps inside the window and use Nap/Break opportunities before ordinary breaks.`
+          ? `Saved ${data.createdCount ?? 0} nap event(s) for ${data.clientCount ?? 0} attending client(s). Skipped ${data.skippedCount ?? 0} child/date(s) without attendance in this nap window. Each child's nap is only scheduled on their eligible dates; Auto Generate will stagger their actual 30-minute naps and coordinate staff breaks.`
           : `${data.createdCount ?? 1} speech event(s) saved. Speech is protected before nap and staff-break placement.`
       );
     } catch (error) {
@@ -640,7 +641,7 @@ export function FixedEventsManager() {
                     <span>Select all</span>
                   </label>
                   {clients.map((client) => (
-                    <label key={client.id} className="checkbox-card">
+                    <label key={client.id} className="checkbox-card" title={`Scheduled days: ${[...new Set((client.attendancePatterns??[]).flatMap(pattern=>pattern.days??[]))].join(", ") || "No recurring attendance configured"}`}>
                       <input
                         type="checkbox"
                         checked={selectedNapClientIds.includes(client.id)}
@@ -651,9 +652,10 @@ export function FixedEventsManager() {
                   ))}
                 </div>
                 <small>
-                  Select every kid who shares this nap placement window. Each
-                  selected kid still receives one nap block per day; Auto
-                  Generate staggers the blocks to create Break/Nap opportunities.
+                  Select any children who may nap in this window. Each child gets
+                  exactly one 30-minute nap only on dates they actually attend
+                  and have a full nap slot available. Call-outs and call-ins
+                  are respected. Hover a child to see recurring attendance days.
                 </small>
               </div>
             )}
@@ -719,7 +721,8 @@ export function FixedEventsManager() {
 
           {!editingEvent && mode === "WEEKLY" && (
             <div className="subsection">
-              <h3>Recurring weekdays</h3>
+              <h3>Recurring weekdays (allowed days)</h3>
+              <p>Select the weekdays to consider. Nap events will only be created for each child on their own attendance days within this selection. You do not need to manually match each child to these weekdays.</p>
               <div className="day-selector">
                 {DAYS.map((day) => (
                   <label key={day} className="checkbox-card"><input type="checkbox" checked={selectedDays.includes(day)} onChange={() => toggleDay(day)} /><span>{day.charAt(0) + day.slice(1).toLowerCase()}</span></label>

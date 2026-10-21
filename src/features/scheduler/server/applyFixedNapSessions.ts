@@ -63,6 +63,32 @@ export async function applyFixedNapSessions(
     ]);
   }
 
+  // Resolve the child's actual date-specific attendance BEFORE selecting a
+  // nap. Otherwise a session could be assigned during a call-out, and
+  // call-ins on an otherwise unscheduled day would be overlooked.
+  const eligibleSlotsByClient = new Map<string,string[]>();
+  for (const client of input.clients) {
+    const attendance=new Set([...client.requiredSlots,...client.napSlots]);
+    for(const change of attendanceChangesByClient.get(client.id)??[]) {
+      const start=String(change.startTime??""),end=String(change.endTime??"");
+      if(!start||!end||end<=start)continue;
+      for(const slot of getSlotsInsideTimeRange(start,end)) {
+        if(String(change.changeType)==="CALL_IN") attendance.add(slot);
+        else attendance.delete(slot);
+      }
+    }
+    const override=clientOverrides.get(client.id);
+    if(override){
+      const slots=getSlotsInsideTimeRange(String(override.startTime),String(override.endTime));
+      for(const slot of slots){
+        if(override.mode==="IN") attendance.add(slot);
+        else attendance.delete(slot);
+      }
+    }
+    for(const slot of client.speechSlots) attendance.delete(slot);
+    eligibleSlotsByClient.set(client.id,[...attendance].sort());
+  }
+
   // Every eligible nap window must originate in a saved Nap event for
   // this exact date. Clients without an event receive no nap slots.
   const napWindows = input.clients.flatMap((client) =>
@@ -77,7 +103,7 @@ export async function applyFixedNapSessions(
         clientId: client.id,
         startTime: String(session.startTime),
         endTime: String(session.endTime),
-        allowedSlots: [...client.requiredSlots],
+        allowedSlots: eligibleSlotsByClient.get(client.id)??[],
         priority: String(session.priorityCategory ?? "OLDER") === "YOUNGER" ? 10 : 20,
       }))
   );
