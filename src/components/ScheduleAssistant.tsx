@@ -259,6 +259,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [working, setWorking] = useState(false);
+  const [testingConnection, setTestingConnection] = useState(false);
   const [status, setStatus] = useState("Connected to the Automatic Scheduler website");
   const [mode, setMode] = useState<SchedulerAiMode | null>(null);
   const [provider, setProvider] = useState<SchedulerAiProviderMode>("openai");
@@ -415,6 +416,29 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     } catch (error) {
       console.error("Scheduler AI session reset warning:", error);
       return false;
+    }
+  }
+
+  async function testOpenAIConnection() {
+    if (working || testingConnection) return;
+    setTestingConnection(true);
+    setStatus("Checking OpenAI with a harmless API test prompt...");
+    try {
+      const response = await fetch("/api/ai/connection", {
+        method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store",
+      });
+      const data = await response.json() as {
+        ok?: boolean; provider?: string; model?: string; reply?: string;
+        elapsedMs?: number; error?: string; providerStatus?: number;
+      };
+      if (!response.ok || !data.ok || data.provider !== "openai") {
+        throw new Error(data.error ?? `OpenAI connection failed (HTTP ${data.providerStatus ?? response.status}).`);
+      }
+      setStatus(`OpenAI connected · ${data.model ?? "model unknown"} · ${data.elapsedMs ?? 0}ms · test: ${data.reply ?? "response received"}`);
+    } catch (error) {
+      setStatus(`OpenAI connection failed: ${error instanceof Error ? error.message : "Unexpected response"}`);
+    } finally {
+      setTestingConnection(false);
     }
   }
 
@@ -822,6 +846,12 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
                 ? "Runs the built-in Scheduler AI without paid model tokens. Text scheduling only."
                 : "Uses OpenAI with your API credits. Staff and clients are represented by numbered aliases."}
             </span>
+            {provider === "openai" && (
+              <button type="button" disabled={working || testingConnection}
+                onClick={() => void testOpenAIConnection()}>
+                {testingConnection ? "Testing OpenAI..." : "Test OpenAI connection"}
+              </button>
+            )}
           </div>
 
           <div className={styles.promptHint}>

@@ -1,6 +1,6 @@
 # Native Scheduler AI
 
-The Native Scheduler AI is a scheduler-specific intelligence layer implemented inside this repository. It does not call OpenAI, Vercel AI Gateway, Ollama, or another model/inference service.
+The Native Scheduler AI is a scheduler-specific intelligence layer implemented inside this repository. It does not call the paid OpenAI API, an AI Gateway, or another external inference service.
 
 ## Architecture
 

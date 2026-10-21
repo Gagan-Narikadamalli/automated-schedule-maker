@@ -508,15 +508,35 @@ export async function POST(request: Request) {
       const decisions=Array.isArray(output?.decisionSummary)?output.decisionSummary.filter((item:unknown)=>typeof item==="string"):[];
       const tradeoffs=Array.isArray(output?.tradeoffs)?output.tradeoffs.filter((item:unknown)=>typeof item==="string"):[];
       const metrics=output?.metrics;
-      const reply=saved
-        ? `AI schedule saved for ${resolvedDate.date}. ${metrics?.coveredClientSlots??0} of ${metrics?.requiredClientSlots??0} required 30-minute client/event blocks are covered.${output.partialBuild?` ${output.unplacedCount??0} uncovered blocks need review in Unplaced Assignments.`:""}\n\n${String(output.explanation??"")}${decisions.length?"\n\nDecision summary:\n"+decisions.slice(0,6).map((item:string)=>`• ${item}`).join("\n"):""}${tradeoffs.length?"\n\nTradeoffs:\n"+tradeoffs.slice(0,4).map((item:string)=>`• ${item}`).join("\n"):""}`
+      const unplaced = Array.isArray(output?.placementIssues)
+        ? output.placementIssues as Array<{clientCode?:string;startTime?:string;reason?:string}> : [];
+      const details=unplaced.length
+        ? "\n\nUnplaced Assignments ("+unplaced.length+" unresolved):\n"+
+          unplaced.slice(0,10).map(item =>
+            "• "+(item.clientCode??"Client")+" at "+(item.startTime??"unknown time")+
+            ": "+(item.reason??"Manager review required")).join("\n")+
+          (unplaced.length>10?"\n• "+(unplaced.length-10)+" additional blocks in the tray.":"")
+        : "";
+      const reply = saved
+        ? (output.partialBuild?"Partial AI schedule saved — manager review required":"Complete AI schedule validated and saved")+
+          " for "+resolvedDate.date+". "+(metrics?.coveredClientSlots??0)+" of "+
+          (metrics?.requiredClientSlots??0)+" required client/event blocks are covered."+
+          (output.partialBuild?" Remaining client blocks are in the Unplaced Assignments tray.":"")+
+          details+"\n\n"+String(output.explanation??"")+
+          (decisions.length?"\n\nDecision summary:\n"+decisions.slice(0,6).map((item:string)=>"• "+item).join("\n"):"")+
+          (tradeoffs.length?"\n\nTradeoffs:\n"+tradeoffs.slice(0,4).map((item:string)=>"• "+item).join("\n"):"")
         : output?.requiresConfirmation
-          ? `The saved schedule for ${resolvedDate.date} contains ${output.protectedCount} protected assignments. Rebuilding the day will replace them. Do you allow me to override these protected assignments and proceed?`
-          : `I could not save the AI schedule for ${resolvedDate.date}. ${String(output?.error??"The plan could not be independently validated.")} No successful schedule change was confirmed.`;
+          ? "The saved schedule for "+resolvedDate.date+" contains "+output.protectedCount+
+            " protected assignments. Rebuilding the day will replace them. Do you allow me to override these protected assignments and proceed?"
+          : "I could not save the AI schedule for "+resolvedDate.date+". "+
+            String(output?.error??"The plan could not be independently validated.")+
+            (Array.isArray(output?.violations)&&output.violations.length
+              ?" Problems: "+output.violations.slice(0,6).join("; "):"")+
+            " No successful schedule change was confirmed.";
       return NextResponse.json({reply,changed:saved,mode:"AUTONOMOUS",provider:aiProvider,thinkingLevel,
         generation:{saved,metrics:output?.metrics,status:output?.status,
           violations:Array.isArray(output?.violations)?output.violations.map((item:unknown)=>typeof item==="string"?privacy.decodeText(privacy.encodeText(item)):item):[],
-          unplacedCount:output?.unplacedCount},
+          unplacedCount:output?.unplacedCount,managerSummary:output?.managerSummary},
         toolsUsed:["generate_schedule"],writeToolsUsed:["generate_schedule"],trainingExampleId:null,effectiveDate:resolvedDate.date});
     }
 

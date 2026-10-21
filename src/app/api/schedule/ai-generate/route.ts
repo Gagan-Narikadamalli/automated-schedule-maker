@@ -22,6 +22,7 @@ import { designOpenAISchedule, expandOpenAIPlan } from "@/features/ai/openaiSche
 import { OPENAI_SETUP_MESSAGE } from "@/features/ai/openaiProvider";
 
 import { validateOpenAIPlan as validatePreview } from "@/features/ai/validateOpenAIPlan";
+import { explainUnplacedCoverage } from "@/features/ai/explainUnplacedCoverage";
 function invalid(message: string, status = 422) {
   return NextResponse.json({ error: message }, { status });
 }
@@ -189,8 +190,9 @@ export async function POST(request: Request) {
     const data={assignments:values,explanation:plan.explanation};
     const complete=audit.missing.length===0;
     const valid=audit.problems.length===0;
-    const placementIssues=audit.missing.map(gap=>({...gap,reason:"AI could not place this required client block safely; manager review needed."}));
-    const breakIssues:string[]=[];
+    const placementIssues=explainUnplacedCoverage(roster,values,audit.missing);
+    const breakIssues=audit.problems.filter(problem=>/break|nap|speech/i.test(problem));
+    const statusLabel=valid ? (complete ? "COMPLETE" : "PARTIAL") : "BLOCKED";
     let saved = false;
     let unplacedCount = 0;
     let regenerationSummary: Record<string, number> | undefined;
@@ -198,8 +200,10 @@ export async function POST(request: Request) {
       if (!valid) {
         return NextResponse.json({
           success:false,saved:false,
-          error:"AI schedule failed independent validation or a required staff break. Existing schedule preserved.",
-          violations:[...audit.problems,...breakIssues],uncoveredRequirements:placementIssues,
+          error:"AI generated hard-rule conflicts or missed a required staff break, nap, or speech session. Existing schedule preserved.",
+          violations:audit.problems,uncoveredRequirements:placementIssues,
+          managerSummary:{status:"BLOCKED",saved:false,requiredClientSlots:audit.required,coveredClientSlots:audit.covered,
+            unplacedClientSlots:placementIssues.length,unplaced:placementIssues.slice(0,30),issues:audit.problems.slice(0,30)},
         },{status:422});
       }
       if (process.env.SCHEDULER_AI_AUTONOMOUS_WRITES !== "true") {
@@ -263,6 +267,13 @@ export async function POST(request: Request) {
       unplacedCount,
       placementIssues,
       breakIssues,
+      managerSummary:{
+        status:statusLabel,saved,requiredClientSlots:audit.required,coveredClientSlots:audit.covered,
+        unplacedClientSlots:placementIssues.length,unplacedCreated:unplacedCount,
+        unplaced:placementIssues.slice(0,40),unresolvedMandatoryEvents:breakIssues,
+        summary:complete?"All required client and event blocks placed and independently validated.":
+          `${placementIssues.length} client/event block(s) need manager review; the remaining assignments passed independent safety validation.`,
+      },
       previewOnly: !saved,
       saved,
       regenerationSummary,
@@ -287,8 +298,14 @@ export async function POST(request: Request) {
     if (error instanceof Error && [OPENAI_SETUP_MESSAGE].includes(error.message)) return invalid(error.message,503);
     console.error("AI Schedule preview error:", error);
     const status=error&&typeof error==="object"&&"statusCode" in error?Number(error.statusCode):undefined;
-    if(status===429||status!==undefined&&status>=500)return invalid("The AI provider is currently busy or rate-limited. Please try again shortly. The saved schedule was not changed.",503);
+    if(status===401||status===403)return invalid("OpenAI rejected the API key or model permission. Check OpenAI project access; saved schedule unchanged.",503);
+    if(status===404)return invalid("OpenAI could not find the configured model. Check OPENAI_SCHEDULER_MODEL; saved schedule unchanged.",503);
+    if(status===429)return invalid("OpenAI quota or rate limit reached. Check usage and retry later; saved schedule unchanged.",503);
+    if(status!==undefined&&status>=500)return invalid("OpenAI service is temporarily unavailable. Saved schedule unchanged.",503);
     if(error instanceof Error&&/timeout|abort/i.test(error.name))return invalid("AI planning took too long. Please try again; the saved schedule was not changed.",504);
-    return invalid("AI Generate preview failed. The existing schedule was not changed.", 500);
+    const issue=error instanceof Error?error.message:"";
+    return invalid(/schema|json|output.*parse|no output|too many segments|unknown staff\/client alias/i.test(issue)
+      ?"OpenAI did not produce a valid structured schedule. No schedule was changed; retry generation."
+      :"OpenAI schedule generation could not complete. No schedule was changed. Run Test OpenAI connection in Schedule Assistant.",500);
   }
 }

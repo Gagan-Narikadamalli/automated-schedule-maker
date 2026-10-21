@@ -222,7 +222,7 @@ Native AI is **text-only**. It intentionally rejects image uploads instead of de
 
 ### Paid Scheduler AI
 
-The cloud assistant uses Gemini directly by default (gemini-3.6-flash, configurable with GEMINI_SCHEDULER_MODEL). AI Generate shares the same assistant thread and cloud generation endpoint, with independent model-designed placements and a decision summary. OpenAI remains optional with SCHEDULER_AI_PROVIDER=openai. It has the same authoritative scheduler tools/validations, but it can perform richer multi-step natural-language planning and returns names locally while sending numbered aliases to the cloud model.
+The paid cloud assistant uses OpenAI directly through the Responses API, configured with OPENAI_API_KEY and optionally OPENAI_SCHEDULER_MODEL. AI Generate shares the same conversation and independently proposes placements that are validated before saving. It has the same authoritative scheduler tools/validations, but it can perform richer multi-step natural-language planning and returns names locally while sending numbered aliases to the cloud model.
 
 A new screenshot upload is deliberately preview-only: the Paid AI extracts and compares the visible source data but cannot write on that upload turn. The manager must confirm the proposed import/change in a later turn.
 
@@ -322,10 +322,7 @@ Relevant variables include:
 
 ```text
 SCHEDULER_AI_AUTONOMOUS_WRITES=true|false
-SCHEDULER_AI_PROVIDER=gemini
-GOOGLE_GENERATIVE_AI_API_KEY=<server-only Gemini key>
-GEMINI_SCHEDULER_MODEL=gemini-3.6-flash
-OPENAI_API_KEY=<optional server-only OpenAI key>
+OPENAI_API_KEY=<server-only OpenAI key>
 OPENAI_SCHEDULER_MODEL=gpt-6.1-sol
 OPENAI_SCHEDULER_VISION_MODEL=gpt-6.1-sol
 ```
@@ -348,7 +345,7 @@ AI Generate sends Staff1/Client1/Team1 aliases, numeric preferences and compress
 
 For non-mutating cloud checks, `/api/ai/paid` accepts `readOnly: true`: the server omits every action tool and skips training-log writes, even when autonomous writes are enabled. AI generation accepts `save: false` for a validated preview.
 
-The verified default is Gemini 3.6 Flash. Assistant turns use high reasoning; full-day structured planning uses medium reasoning with a bounded 120-second call and one validation repair. Protected-day regeneration returns a confirmation before model planning; only an explicitly authorized `allowProtectedReplacement: true` retry can replace protected rows. The route rechecks the saved schedule and availability to reject stale plans.
+The configured default is OpenAI GPT-6.1 Sol. Chat and planning use the OpenAI Responses API. The full-day structured planner uses medium reasoning with a bounded 120-second call and one validation repair. An authenticated Test OpenAI connection button sends a harmless prompt without scheduler records. Protected-day regeneration returns a confirmation before model planning; only an explicitly authorized `allowProtectedReplacement: true` retry can replace protected rows. The route rechecks the saved schedule and availability to reject stale plans.
 
 The AI Generate button declares `intent: GENERATE_DAY` to the paid assistant route. That route dispatches the shared generation tool directly and returns its decision summary into the same conversation; it does not spend another model call deciding which action the button requested. Ordinary free-text conversations still use scope classification and the tool-calling agent. Provider 503 errors are surfaced as temporary unavailability rather than a credit problem.
 
