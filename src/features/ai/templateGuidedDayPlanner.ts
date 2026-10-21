@@ -193,7 +193,10 @@ export async function designTemplateGuidedDay(
   }catch(error){
     if(signal?.aborted)throw error;
     const problem=error instanceof Error?error.name+" "+error.message:String(error);
-    if(!/timeout|abort|no output|noobjectgenerated|parse|schema|429|502|503|504|network/i.test(problem))throw error;
+    // The AI SDK may wrap the underlying timeout/network/JSON error in an
+    // unrelated top-level exception name (e.g. NoObjectGeneratedError).
+    // Regardless of how it is wrapped, NEVER discard a validated template
+    // draft solely because this OPTIONAL strategic suggestion failed.
     timedOut=true;
     console.warn("OpenAI strategic planning unavailable; evaluating template-guided fallback safely:",problem.slice(0,220));
   }
