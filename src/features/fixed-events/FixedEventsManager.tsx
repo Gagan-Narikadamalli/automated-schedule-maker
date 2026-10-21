@@ -81,6 +81,8 @@ export function FixedEventsManager() {
   const [month, setMonth] = useState(currentMonth);
   const [filter, setFilter] = useState<"ALL" | EventType>("ALL");
   const [modalOpen, setModalOpen] = useState(false);
+  const [editingEvent, setEditingEvent] = useState<ClientEvent | null>(null);
+  const [editScope, setEditScope] = useState<"OCCURRENCE" | "SERIES">("OCCURRENCE");
   const [eventType, setEventType] = useState<EventType>("SPEECH");
   const [clientId, setClientId] = useState("");
   const [selectedNapClientIds, setSelectedNapClientIds] = useState<string[]>([]);
@@ -188,6 +190,8 @@ export function FixedEventsManager() {
   }
 
   function openAddEvent(type: EventType = "SPEECH") {
+    setEditingEvent(null);
+    setEditScope("OCCURRENCE");
     setEventType(type);
     setMode("ONE_TIME");
     setDate(localToday());
@@ -204,6 +208,21 @@ export function FixedEventsManager() {
       setStartTime("10:00");
       setEndTime("10:30");
     }
+    setModalOpen(true);
+  }
+
+  function openEditEvent(event: ClientEvent) {
+    setEditingEvent(event);
+    setEditScope("OCCURRENCE");
+    setEventType(event.eventType);
+    setClientId(event.clientId);
+    setSelectedNapClientIds(event.eventType === "NAP" ? [event.clientId] : []);
+    setMode("ONE_TIME");
+    setDate(event.date);
+    setStartTime(event.startTime);
+    setEndTime(event.endTime);
+    setPriorityCategory(event.priorityCategory ?? "OLDER");
+    setNote(event.note);
     setModalOpen(true);
   }
 
@@ -275,7 +294,7 @@ export function FixedEventsManager() {
       setMessage("Nap time must stay inside the 11:30 AM to 2:00 PM window.");
       return;
     }
-    if (mode === "WEEKLY" && selectedDays.length === 0) {
+    if (!editingEvent && mode === "WEEKLY" && selectedDays.length === 0) {
       setMessage("Select at least one weekday for a recurring event.");
       return;
     }
@@ -310,20 +329,35 @@ export function FixedEventsManager() {
             };
       const endpoint = eventType === "NAP" ? "/api/nap-sessions" : "/api/speech-sessions";
       const response = await fetch(endpoint, {
-        method: "POST",
+        method: editingEvent ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(editingEvent
+          ? {
+              locationId,
+              sessionId: editingEvent.id,
+              scope: editScope,
+              ...(editScope === "OCCURRENCE" ? { date, clientId: eventType === "NAP" ? selectedNapClientIds[0] : clientId } : {}),
+              startTime,
+              endTime: effectiveEndTime,
+              note,
+              ...(eventType === "NAP" ? { priorityCategory } : {}),
+            }
+          : payload),
       });
       const data = (await response.json()) as {
         createdCount?: number;
+        updatedCount?: number;
         clientCount?: number;
         error?: string;
       };
       if (!response.ok) throw new Error(data.error || `${formatEventType(eventType)} event could not be saved.`);
       setModalOpen(false);
-      await loadLocationData(locationId, month);
-      setMessage(
-        eventType === "NAP"
+      setEditingEvent(null);
+      if (editingEvent && editScope === "OCCURRENCE" && date.slice(0, 7) !== month) setMonth(date.slice(0, 7));
+      await loadLocationData(locationId, editingEvent && editScope === "OCCURRENCE" ? date.slice(0, 7) : month);
+      setMessage(editingEvent
+        ? `${data.updatedCount ?? 1} ${formatEventType(eventType)} event(s) updated. Existing calendar assignments were not overwritten. Review/Repair the affected schedules to apply the new event time.`
+        : eventType === "NAP"
           ? `Nap window saved for ${data.clientCount ?? selectedNapClientIds.length} client(s). Auto Generate will stagger their naps inside the window and use Nap/Break opportunities before ordinary breaks.`
           : `${data.createdCount ?? 1} speech event(s) saved. Speech is protected before nap and staff-break placement.`
       );
@@ -461,6 +495,7 @@ export function FixedEventsManager() {
 
                 {event.note && <div className={cardStyles.chips}><span className={cardStyles.chip}>{event.note}</span></div>}
                 <div className={cardStyles.cardActions}>
+                  <button type="button" className={`${cardStyles.editButton} button button-secondary button-small`} disabled={working} onClick={() => openEditEvent(event)}>Edit</button>
                   <button type="button" className="button button-secondary button-small" disabled={working} onClick={() => void removeEvent(event)}>Remove</button>
                 </div>
               </article>
@@ -472,9 +507,11 @@ export function FixedEventsManager() {
 
       <ManagementModal
         open={modalOpen}
-        title="Add Client Event"
-        eyebrow="SPEECH / NAP"
-        description="Speech is protected first. Nap can be applied to one or many kids at once. Nap windows must stay between 11:30 AM and 2:00 PM, and the actual nap duration comes from Clinic Settings."
+        title={editingEvent ? `Edit ${formatEventType(editingEvent.eventType)} Event` : "Add Client Event"}
+        eyebrow={editingEvent ? "EDIT FIXED EVENT" : "SPEECH / NAP"}
+        description={editingEvent
+          ? "Update the selected occurrence or its recurring series. Saved calendar assignments will not be changed automatically; review and repair the affected dates afterward."
+          : "Speech is protected first. Nap can be applied to one or many kids at once. Nap windows must stay between 11:30 AM and 2:00 PM, and the actual nap duration comes from Clinic Settings."}
         onClose={() => setModalOpen(false)}
         footer={
           <>
@@ -497,6 +534,8 @@ export function FixedEventsManager() {
               >
                 {working
                   ? "Saving..."
+                  : editingEvent
+                    ? editScope === "SERIES" ? "Save Series Changes" : "Save Event Changes"
                   : eventType === "NAP"
                     ? `Save Nap for ${selectedNapClientIds.length} client(s)`
                     : "Save Event"}
@@ -505,6 +544,24 @@ export function FixedEventsManager() {
           </>
         }
       >
+        {editingEvent?.recurringSeriesId && (
+          <div className={cardStyles.formSection}>
+            <h3>Which events should change?</h3>
+            <div className="day-selector">
+              <label className="checkbox-card">
+                <input type="radio" name="editScope" checked={editScope === "OCCURRENCE"} onChange={() => setEditScope("OCCURRENCE")} />
+                <span>Only this occurrence</span>
+              </label>
+              <label className="checkbox-card">
+                <input type="radio" name="editScope" checked={editScope === "SERIES"} onChange={() => setEditScope("SERIES")} />
+                <span>Entire recurring series</span>
+              </label>
+            </div>
+            <small>{editScope === "SERIES"
+              ? "Change the time, note and nap priority for every existing event in this series. Dates, clients and weekdays remain unchanged."
+              : "This occurrence becomes a standalone exception. Other recurring dates remain unchanged."}</small>
+          </div>
+        )}
         <div className={cardStyles.formSection}>
           <h3>Event type</h3>
           <p>
@@ -514,11 +571,11 @@ export function FixedEventsManager() {
           </p>
           <div className="day-selector">
             <label className="checkbox-card" style={{ backgroundColor: EVENT_COLORS.SPEECH }}>
-              <input type="radio" name="eventType" checked={eventType === "SPEECH"} onChange={() => changeEventType("SPEECH")} />
+              <input type="radio" name="eventType" disabled={Boolean(editingEvent)} checked={eventType === "SPEECH"} onChange={() => changeEventType("SPEECH")} />
               <span>Speech</span>
             </label>
             <label className="checkbox-card" style={{ backgroundColor: EVENT_COLORS.NAP }}>
-              <input type="radio" name="eventType" checked={eventType === "NAP"} onChange={() => changeEventType("NAP")} />
+              <input type="radio" name="eventType" disabled={Boolean(editingEvent)} checked={eventType === "NAP"} onChange={() => changeEventType("NAP")} />
               <span>Nap</span>
             </label>
           </div>
@@ -544,7 +601,7 @@ export function FixedEventsManager() {
                 <span>Client / kid</span>
                 <select
                   value={clientId}
-                  disabled={clients.length === 0}
+                  disabled={clients.length === 0 || Boolean(editingEvent && editScope === "SERIES")}
                   onChange={(event) => setClientId(event.target.value)}
                 >
                   {clients.length === 0 ? (
@@ -556,6 +613,15 @@ export function FixedEventsManager() {
                       </option>
                     ))
                   )}
+                </select>
+              </label>
+            ) : editingEvent ? (
+              <label className="form-field form-field-wide">
+                <span>Client / kid</span>
+                <select value={selectedNapClientIds[0] ?? ""}
+                  disabled={clients.length === 0 || editScope === "SERIES"}
+                  onChange={(event) => setSelectedNapClientIds([event.target.value])}>
+                  {clients.map((client) => <option key={client.id} value={client.id}>{client.displayCode}</option>)}
                 </select>
               </label>
             ) : (
@@ -591,7 +657,7 @@ export function FixedEventsManager() {
                 </small>
               </div>
             )}
-            <label className="form-field"><span>Schedule type</span><select value={mode} onChange={(event) => setMode(event.target.value as ScheduleMode)}><option value="ONE_TIME">One-time date</option><option value="WEEKLY">Recurring weekly</option></select></label>
+            {!editingEvent && <label className="form-field"><span>Schedule type</span><select value={mode} onChange={(event) => setMode(event.target.value as ScheduleMode)}><option value="ONE_TIME">One-time date</option><option value="WEEKLY">Recurring weekly</option></select></label>}
             <label className="form-field">
               <span>{eventType === "NAP" ? "Window starts" : "Speech starts"}</span>
               <input
@@ -637,7 +703,9 @@ export function FixedEventsManager() {
             {eventType === "NAP" && (
               <label className="form-field"><span>Nap category</span><select value={priorityCategory} onChange={(event) => setPriorityCategory(event.target.value as NapPriorityCategory)}><option value="YOUNGER">Younger child — schedule first</option><option value="OLDER">Older child — schedule second</option></select></label>
             )}
-            {mode === "ONE_TIME" ? (
+            {editingEvent && editScope === "SERIES" ? (
+              <div className="form-field"><span>Recurring schedule</span><strong>Keep all existing series dates</strong></div>
+            ) : mode === "ONE_TIME" ? (
               <label className="form-field"><span>Date</span><input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
             ) : (
               <>
@@ -648,7 +716,7 @@ export function FixedEventsManager() {
             <label className="form-field form-field-wide"><span>Note (optional)</span><input value={note} onChange={(event) => setNote(event.target.value)} placeholder={eventType === "NAP" ? "Example: Usually naps around noon" : "Example: Weekly speech therapy"} /></label>
           </div>
 
-          {mode === "WEEKLY" && (
+          {!editingEvent && mode === "WEEKLY" && (
             <div className="subsection">
               <h3>Recurring weekdays</h3>
               <div className="day-selector">

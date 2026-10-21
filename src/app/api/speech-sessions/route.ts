@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 
 import { NextResponse } from "next/server";
+import { isValidObjectId } from "mongoose";
+import { validateFixedEventEdit } from "@/features/fixed-events/validateFixedEventEdit";
 
 import {
   forbiddenResponse,
@@ -363,6 +365,110 @@ export async function POST(request: Request) {
       { error: "Speech session could not be created." },
       { status: 500 }
     );
+  }
+}
+
+type UpdateEventRequest = {
+  locationId?: string;
+  sessionId?: string;
+  scope?: "OCCURRENCE" | "SERIES";
+  clientId?: string;
+  date?: string;
+  startTime?: string;
+  endTime?: string;
+  note?: string;
+  priorityCategory?: "YOUNGER" | "OLDER";
+};
+
+/**
+ * Single-event edits become a detached exception to any weekly series.
+ * Series edits change time/category/note for its existing members without
+ * creating, deleting or silently moving recurrence dates/clients.
+ */
+export async function PATCH(request: Request) {
+  const auth = await requireApiSession();
+  if (auth.error) return auth.error;
+  if (!sessionHasAnyRole(auth.session,SCHEDULE_WRITE_ROLES)) return forbiddenResponse();
+
+  try {
+    const body=(await request.json()) as UpdateEventRequest;
+    const locationId=body.locationId?.trim()??"";
+    const sessionId=body.sessionId?.trim()??"";
+    if(!isValidObjectId(locationId)||!isValidObjectId(sessionId))
+      return NextResponse.json({error:"A valid clinic and event are required."},{status:400});
+    if(!sessionCanAccessLocation(auth.session,locationId))return forbiddenResponse("You do not have access to this clinic.");
+
+    const scope=body.scope??"OCCURRENCE";
+    const problem=validateFixedEventEdit("SPEECH",body);
+    if(problem)return NextResponse.json({error:problem},{status:400});
+
+    await connectToDatabase();
+    const original=await SpeechSession.findOne({_id:sessionId,locationId}).lean() as PlainRecord|null;
+    if(!original)return NextResponse.json({error:"The event no longer exists. Refresh the page."},{status:404});
+    if(scope==="SERIES"&&!original.recurringSeriesId)
+      return NextResponse.json({error:"This event is not part of a recurring series."},{status:400});
+
+    const seriesFilter=scope==="SERIES"
+      ? {locationId,recurringSeriesId:String(original.recurringSeriesId)}
+      : {locationId,_id:sessionId};
+    const affected=await SpeechSession.find(seriesFilter)
+      .select("_id clientId date startTime endTime note recurringSeriesId").lean() as PlainRecord[];
+    if(!affected.length)return NextResponse.json({error:"No matching events to edit."},{status:404});
+
+    const date=scope==="OCCURRENCE" ? body.date!.trim() : String(original.date);
+    const clientId=scope==="OCCURRENCE" ? body.clientId?.trim()??String(original.clientId) : String(original.clientId);
+    if(scope==="OCCURRENCE"){
+      if(!isValidObjectId(clientId))return NextResponse.json({error:"Choose a valid client."},{status:400});
+      const exists=await Client.exists({_id:clientId,locationId,active:true});
+      if(!exists)return NextResponse.json({error:"The selected active client was not found at this clinic."},{status:404});
+    }
+
+    const members=affected.map(item=>({
+      id:String(item._id),
+      clientId:scope==="SERIES"?String(item.clientId):clientId,
+      date:scope==="SERIES"?String(item.date):date
+    }));
+    const memberIds=members.map(item=>item.id);
+    const proposedClientIds=[...new Set(members.map(item=>item.clientId))];
+    const proposedDates=[...new Set(members.map(item=>item.date))];
+    const collisions=await SpeechSession.find({
+      locationId,
+      _id:{$nin:memberIds},
+      clientId:{$in:proposedClientIds},
+      date:{$in:proposedDates},
+      startTime:body.startTime!.trim(),
+    }).select("clientId date startTime").lean() as PlainRecord[];
+    if(collisions.some(collision=>members.some(item=>item.clientId===String(collision.clientId)&&item.date===String(collision.date))))
+      return NextResponse.json({error:"A speech event already exists for this client at the selected time."},{status:409});
+
+    const next={
+      startTime:body.startTime!.trim(),
+      endTime:body.endTime!.trim(),
+      note:typeof body.note==="string"?body.note.trim().slice(0,500):"",
+      
+      ...(scope==="OCCURRENCE"
+        ? {date,clientId,recurringSeriesId:""}
+        : {})
+    };
+    const result=scope==="SERIES"
+      ? await SpeechSession.updateMany(seriesFilter,{$set:next},{runValidators:true})
+      : await SpeechSession.updateOne(seriesFilter,{$set:next},{runValidators:true});
+    const updatedCount=scope==="SERIES"?result.modifiedCount:result.matchedCount;
+    await writeAuditLog({
+      locationId,userId:auth.session.userId,
+      action:scope==="SERIES"?"UPDATE_SPEECH_SERIES":"UPDATE_SPEECH_SESSION",
+      entityType:"SPEECH_SESSION",
+      entityId:scope==="SERIES"?String(original.recurringSeriesId):sessionId,
+      summary:`Updated ${affected.length} speech appointment event(s) at ${next.startTime}-${next.endTime}.`,
+      before:affected.map(item=>({id:String(item._id),date:item.date,startTime:item.startTime,
+        endTime:item.endTime,clientId:item.clientId})),
+      after:{...next,scope,modifiedCount:updatedCount}
+    });
+    return NextResponse.json({success:true,updatedCount:affected.length,scope,
+      scheduleReviewRequired:true});
+  }catch(error){
+    console.error("Failed to update speech session:",error);
+    return NextResponse.json({error:"Speech event could not be updated."},{status:500});
   }
 }
 
