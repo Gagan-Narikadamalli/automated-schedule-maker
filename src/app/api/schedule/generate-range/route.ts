@@ -237,7 +237,12 @@ export async function POST(request: Request) {
     if(linkedEventProblems.length) {
       return NextResponse.json({
         error:"Generated schedule contains inconsistent nap/break assignments; no schedules were overwritten.",
-        violations:linkedEventProblems,
+        violations:linkedEventProblems.map(problem => {
+          let label = problem;
+          for (const client of schedulerInput.clients) label = label.replaceAll(client.id, client.displayCode);
+          for (const member of schedulerInput.staff) label = label.replaceAll(member.id, member.name);
+          return label;
+        }),
         date,
       },{status:422});
     }

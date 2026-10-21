@@ -119,6 +119,7 @@ type GenerateResponse = {
   breakReliefSwapCount?: number;
   unplacedBreakStaffIds?: string[];
   automaticOverrideMode?: boolean;
+  violations?: string[];
   error?: string;
 };
 
@@ -938,7 +939,13 @@ export function ScheduleWorkspaceV3() {
         body: JSON.stringify({ locationId, date: selectedDate }),
       });
       const data = await readJson<GenerateResponse>(response);
-      if (!response.ok) throw new Error(data.error || "The schedule could not be generated.");
+      if (!response.ok) {
+        const issues = (data.violations ?? []).filter((issue): issue is string => typeof issue === "string");
+        setSchedulerWarnings(issues);
+        setShowSchedulerWarnings(issues.length > 0);
+        const details = issues.length ? ` Problems: ${issues.slice(0, 5).join("; ")}${issues.length > 5 ? `; and ${issues.length - 5} more` : ""}.` : "";
+        throw new Error((data.error || "The schedule could not be generated.") + details);
+      }
       await loadSchedule();
       const warningTexts = (data.warnings ?? []).map((warning) => {
         if (typeof warning === "string") return warning;

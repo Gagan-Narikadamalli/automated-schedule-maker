@@ -504,8 +504,11 @@ export function enrichBreakAssignmentsWithFixedEvents(
   clients: SchedulerClient[],
   slotLengthMinutes: number
 ): SchedulerAssignment[] {
-  // Preserve linked break records. Upgrade only an ordinary break when a
-  // contiguous client assignment establishes the event-supervision link.
+  // Assignments can contain several plain BREAK cells adjacent to the same
+  // nap. Claim supervised events sequentially so only one is linked.
+  const claimed = new Set(assignments
+    .filter(a => Boolean(a.clientId))
+    .map(a => `${a.clientId}|${a.startTime}`));
   return assignments.map(assignment => {
     if (assignment.source !== "AUTO" || assignment.assignmentType !== "BREAK") {
       return assignment;
@@ -514,12 +517,9 @@ export function enrichBreakAssignmentsWithFixedEvents(
       assignment, assignments, clients, slotLengthMinutes
     );
     if (!fixedEvent) return assignment;
-    const alreadySupervised = assignments.some(other =>
-      other.clientId === fixedEvent.client.id &&
-      other.startTime === assignment.startTime &&
-      other.id !== assignment.id
-    );
-    if (alreadySupervised) return assignment;
+    const eventKey = `${fixedEvent.client.id}|${assignment.startTime}`;
+    if (claimed.has(eventKey)) return assignment;
+    claimed.add(eventKey);
     return {
       ...assignment,
       clientId: fixedEvent.client.id,

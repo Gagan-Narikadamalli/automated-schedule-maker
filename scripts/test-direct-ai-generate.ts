@@ -76,6 +76,25 @@ check("insufficient staffing",Array.from({length:8},(_,i)=>s(i,slots())),
 }
 
 {
+  const client=c(42,["11:00","12:00"],{napSlots:["11:30"]});
+  const source:SchedulerAssignment[]=[
+    {id:"caregiver-a",staffId:"s1",clientId:client.id,startTime:"11:00",assignmentType:"CLIENT_1_TO_1",source:"AUTO",locked:false},
+    {id:"caregiver-b",staffId:"s2",clientId:client.id,startTime:"12:00",assignmentType:"CLIENT_1_TO_1",source:"AUTO",locked:false},
+    {id:"break-a",staffId:"s1",startTime:"11:30",assignmentType:"BREAK",source:"AUTO",locked:true},
+    {id:"break-b",staffId:"s2",startTime:"11:30",assignmentType:"BREAK",source:"AUTO",locked:true},
+  ];
+  const result=enrichBreakAssignmentsWithFixedEvents(source,[client],30);
+  assert.equal(result.filter(row=>row.assignmentType==="BREAK_NAP"&&row.clientId===client.id).length,1,
+    "A nap must not be claimed by two simultaneously converted ordinary breaks");
+  assert.equal(result.filter(row=>row.assignmentType==="BREAK").length,1,
+    "The other staff should retain one ordinary break");
+  assert.deepEqual(auditLinkedNapBreakRules(result,[client]),[]);
+  assert.deepEqual(enrichBreakAssignmentsWithFixedEvents(result,[client],30),result,
+    "Enrichment should be stable over repeat runs");
+  console.log("PASS no duplicate client nap from simultaneous staff breaks");
+}
+
+{
   const napClient=c(99,["11:00","11:30","12:00"],{napSlots:["11:30"]});
   const item=(id:string,staffId:string,type:"NAP"|"BREAK_NAP"|"BREAK",time="11:30"):SchedulerAssignment=>({
     id,staffId,clientId:type==="BREAK"?undefined:"c99",startTime:time,
