@@ -135,13 +135,24 @@ export function AttendanceManager() {
       if (!response.ok) throw Error(data.error || "Unable to save attendance");
       setSaved((existing) => [...existing.filter((entry) => entry.personType !== group), ...current]);
       setMessage("Attendance saved. Updating the day's schedule...");
-      const generation = await fetch("/api/schedule/generate", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ locationId, date })
+      // Call-ins/outs use minimal repair, not a full day regeneration.
+      const repaired = await fetch("/api/schedule/repair", {
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({locationId,date,mode:"COVERAGE"})
       });
-      const generationResult = await generation.json() as { error?: string };
-      setMessage(generation.ok ? "Attendance saved and today's schedule regenerated. You can return to the Daily Schedule." :
-        `Attendance saved, but automatic regeneration needs review: ${generationResult.error ?? "unknown error"}`);
+      const repairResult=await repaired.json() as {
+        error?:string;violations?:string[];preservedOriginalCount?:number;
+        addedAssignmentCount?:number;removedAssignmentCount?:number;unplacedRemainingCount?:number
+      };
+      setMessage(repaired.ok
+        ? "Attendance saved. Minimum-change repair kept "+
+          (repairResult.preservedOriginalCount??0)+" valid cells, placed "+
+          (repairResult.addedAssignmentCount??0)+" new/replacement cells, and left "+
+          (repairResult.unplacedRemainingCount??0)+" unresolved block(s) in Unplaced Assignments."
+        : "Attendance saved, but safe repair could not complete: "+
+          (repairResult.error??"Unknown issue")+" "+
+          (repairResult.violations??[]).slice(0,3).join("; ")+
+          ". The previous saved schedule was not overwritten; review flagged conflicts.");
     } catch (error) { setMessage(error instanceof Error ? error.message : "Unable to save"); }
     finally { setSaving(false); }
   }
