@@ -1,4 +1,4 @@
-import { getSlotsInsideTimeRange } from "./dateUtils";
+import { getEndTimeForSlot, getEventStartSlotsInsideTimeRange } from "./dateUtils";
 
 export type FlexibleEventWindow = {
   key: string;
@@ -14,10 +14,6 @@ export type FlexibleEventDurationRule = {
   slotLengthMinutes: number;
 };
 
-function clamp(value: number, minimum: number, maximum: number): number {
-  return Math.min(Math.max(value, minimum), maximum);
-}
-
 function safeSlotCount(
   minutes: number,
   slotLengthMinutes: number
@@ -31,8 +27,9 @@ function safeSlotCount(
 
 /**
  * A configured event start/end time is a placement WINDOW, not the event
- * duration. When enabled, exactly one contiguous event of the configured
- * duration is selected inside that window. Overlapping windows are staggered
+ * duration. The event window end is an inclusive allowed START:
+ * a 13:00–14:00 window permits the 14:00 start finishing at 14:30.
+ * All occupied slots still need client/staff attendance. Overlapping windows are staggered
  * when possible so nap/speech time can also create useful staff-break capacity.
  *
  * When disabled, the automatic scheduler ignores the window completely.
@@ -70,7 +67,7 @@ export function resolveFlexibleEventWindows(
     const allowedSlotSet = window.allowedSlots
       ? new Set(window.allowedSlots)
       : null;
-    const availableSlots = getSlotsInsideTimeRange(
+    const availableSlots = getEventStartSlotsInsideTimeRange(
       window.startTime,
       window.endTime
     ).filter(
@@ -82,11 +79,11 @@ export function resolveFlexibleEventWindows(
       continue;
     }
 
-    const durationSlots = clamp(
-      safeSlotCount(rule.durationMinutes, rule.slotLengthMinutes),
-      1,
-      availableSlots.length
-    );
+    const durationSlots = safeSlotCount(rule.durationMinutes, rule.slotLengthMinutes);
+    if (availableSlots.length < durationSlots) {
+      resolved.set(window.key, []);
+      continue;
+    }
 
     let bestSlots = availableSlots.slice(0, durationSlots);
     let bestScore = Number.POSITIVE_INFINITY;
@@ -100,6 +97,9 @@ export function resolveFlexibleEventWindows(
         startIndex,
         startIndex + durationSlots
       );
+      // Missing middle attendance slots must never produce a discontinuous event.
+      if (candidate.some((slot,index)=>index>0 &&
+        getEndTimeForSlot(candidate[index-1])!==slot)) continue;
       const totalOverlap = candidate.reduce(
         (sum, slot) => sum + (slotLoad.get(slot) ?? 0),
         0
@@ -122,6 +122,10 @@ export function resolveFlexibleEventWindows(
       }
     }
 
+    if (!Number.isFinite(bestScore)) {
+      resolved.set(window.key, []);
+      continue;
+    }
     resolved.set(window.key, bestSlots);
 
     for (const slot of bestSlots) {

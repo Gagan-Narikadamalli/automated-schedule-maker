@@ -10,7 +10,7 @@ export default function FixedEventsPage() {
         <SectionHeader
           eyebrow="FIXED CLIENT EVENTS"
           title="Speech, Nap & Attendance Changes"
-          description="Manage color-coded Speech and Nap event cards plus client call-outs and call-ins. Nap times are protected between 11:00 AM and 2:00 PM, with younger-child naps prioritized before older-child naps when the automatic scheduler places staff breaks."
+          description="Manage color-coded Speech and Nap event cards plus client call-outs and call-ins. Nap windows describe allowed 30-minute START times, including their end time. A 2:00 PM nap start finishes at 2:30 PM if attendance permits; younger-child naps are prioritized before older-child naps."
         />
 
         <FixedEventsManager />

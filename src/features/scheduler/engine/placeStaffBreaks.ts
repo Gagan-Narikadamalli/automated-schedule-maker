@@ -300,11 +300,11 @@ function findBestFreeBreaks(
         const availableEvent = alreadyLinked ? null : fixedEvent;
         const insideNormalWindow =
           slotTime >= rules.breakWindowStart &&
-          slotTime < rules.breakWindowEnd;
+          slotTime <= rules.breakWindowEnd;
         const insideNapExtension =
           availableEvent?.assignmentType === "BREAK_NAP" &&
           slotTime >= rules.breakWindowStart &&
-          slotTime < NAP_BREAK_WINDOW_END;
+          slotTime <= NAP_BREAK_WINDOW_END;
 
         if (!insideNormalWindow && !insideNapExtension) {
           return null;
@@ -429,7 +429,7 @@ function findReliefSwap(
           (assignment.source === "AUTO" && !assignment.locked)) &&
         Boolean(assignment.clientId) &&
         assignment.startTime >= rules.breakWindowStart &&
-        assignment.startTime < rules.breakWindowEnd
+        assignment.startTime <= rules.breakWindowEnd
     )
     .sort((left, right) => {
       const leftHistory = countReferenceBreaks(
@@ -826,7 +826,7 @@ function alignPlainBreaksWithAdjacentNaps(
       }
     }
     const choices=person.availableSlots.filter(time=>
-      time>=rules.breakWindowStart&&time<rules.breakWindowEnd &&
+      time>=rules.breakWindowStart&&time<=rules.breakWindowEnd &&
       time!==old.startTime &&
       !result.some(a=>a.staffId===person.id&&a.startTime===time)
     ).map(time=>({time,event:findFixedEventForStaffSlot(
@@ -866,7 +866,7 @@ function reserveRequiredNapBreaks(
     for (const time of [...new Set(client.napSlots)].sort()) {
       const key = `${client.id}|${time}`;
       if (linked.has(key)) continue;
-      if (time < rules.breakWindowStart || time >= rules.breakWindowEnd) continue;
+      if (time < rules.breakWindowStart || time > rules.breakWindowEnd) continue;
       if (assignments.some(a => a.clientId === client.id && a.startTime === time)) continue;
       const previous = shiftTime(time,-rules.slotLengthMinutes);
       const next = shiftTime(time,rules.slotLengthMinutes);
@@ -953,7 +953,7 @@ export function placeStaffBreaksAfterCoverage({
     const hasBreakWindowAvailability = staffMember.availableSlots.some(
       (slot) =>
         slot >= rules.breakWindowStart &&
-        slot < rules.breakWindowEnd
+        slot <= rules.breakWindowEnd
     );
 
     if (!hasBreakWindowAvailability) {

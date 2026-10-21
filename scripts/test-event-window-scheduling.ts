@@ -76,3 +76,28 @@ assert.deepEqual(
 );
 
 console.log("Event-window scheduling tests passed.");
+
+import { getEventStartSlotsInsideTimeRange, getSlotsInsideTimeRange } from "../src/features/scheduler/engine/dateUtils";
+
+assert.deepEqual(
+  getEventStartSlotsInsideTimeRange("13:00","14:00"),
+  ["13:00","13:30","14:00"],
+  "Nap 13:00–14:00 permits starts at 13:00,13:30,14:00"
+);
+assert.deepEqual(
+  getSlotsInsideTimeRange("13:00","14:00"),
+  ["13:00","13:30"],
+  "Shift attendance uses the end-exclusive convention"
+);
+const endpoint=resolveFlexibleEventWindows([
+  {key:"early",startTime:"13:00",endTime:"13:00"},
+  {key:"middle",startTime:"13:30",endTime:"13:30"},
+  {key:"last",startTime:"13:00",endTime:"14:00"},
+],{enabled:true,durationMinutes:30,slotLengthMinutes:30});
+assert.deepEqual(endpoint.get("last"),["14:00"],
+  "After 13:00 and 13:30 are taken, 14:00–14:30 is the remaining nap");
+const boundary=resolveFlexibleEventWindows([
+  {key:"boundary",startTime:"13:00",endTime:"14:00",allowedSlots:["14:00"]}
+],{enabled:true,durationMinutes:30,slotLengthMinutes:30});
+assert.deepEqual(boundary.get("boundary"),["14:00"],
+  "2:00 PM must be a legal start when client available for 2:00–2:30");

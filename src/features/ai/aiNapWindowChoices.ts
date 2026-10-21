@@ -1,4 +1,4 @@
-import { getSlotsInsideTimeRange } from "@/features/scheduler/engine/dateUtils";
+import { getEventStartSlotsInsideTimeRange } from "@/features/scheduler/engine/dateUtils";
 import type { SchedulerInput } from "@/features/scheduler/engine/types";
 
 type SavedNapWindow = {clientId: unknown;startTime: string;endTime: string};
@@ -34,7 +34,7 @@ export function restoreAiNapWindowChoices(
         if (String(window.clientId) !== client.id ||
             !window.startTime || !window.endTime ||
             window.endTime <= window.startTime) continue;
-        for (const slot of getSlotsInsideTimeRange(window.startTime, window.endTime)) {
+        for (const slot of getEventStartSlotsInsideTimeRange(window.startTime, window.endTime)) {
           if (attendance.has(slot) && !client.speechSlots.includes(slot)) eligible.add(slot);
         }
       }

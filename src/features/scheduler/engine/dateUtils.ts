@@ -61,6 +61,21 @@ export function getSlotsInsideTimeRange(
   ).map((slot) => slot.startTime);
 }
 
+/**
+ * Event scheduling START time window, inclusive at both ends.
+ * Unlike attendance and call-out intervals, which are end-exclusive.
+ * E.g. 13:00–14:00 permits 13:00, 13:30 and 14:00 starts.
+ */
+export function getEventStartSlotsInsideTimeRange(startTime: string,endTime: string): string[] {
+  return DAILY_TIME_SLOTS.filter(slot=>slot.startTime>=startTime&&slot.startTime<=endTime)
+    .map(slot=>slot.startTime);
+}
+
+export function isEventStartInsideWindow(startTime:string,windowStart:string,windowEnd:string):boolean {
+  return DAILY_TIME_SLOTS.some(slot=>slot.startTime===startTime &&
+    startTime>=windowStart && startTime<=windowEnd);
+}
+
 export function isSlotInsideTimeRange(
   slotStartTime: string,
   startTime: string,

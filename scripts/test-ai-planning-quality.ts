@@ -64,7 +64,7 @@ assert.deepEqual(windows.clients[0].requiredSlots,["11:00","11:30","12:00","12:3
 const fixed=restoreAiNapWindowChoices(napInput,[{
   clientId:"c1",startTime:"11:00",endTime:"11:30"
 }]);
-assert.deepEqual(fixed.clients[0].napSlots,["11:00"],"An exact nap event remains fixed.");
+assert.deepEqual(fixed.clients[0].napSlots,["11:00","11:30"],"Both start and end of a flexible nap window are eligible when attendance permits.");
 const noNap=restoreAiNapWindowChoices({...input,clients:[input.clients[0]]},[{
   clientId:"c1",startTime:"11:00",endTime:"13:00"
 }]);

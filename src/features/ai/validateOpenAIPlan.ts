@@ -79,7 +79,7 @@ export function validateOpenAIPlan(input: SchedulerInput, values: Candidate[]) {
     if(row.assignmentType==="NAP")problems.push(`Standalone nap is not a linked staff break: ${row.clientId} at ${row.startTime}`);
   }
   for (const person of input.staff) {
-    if (calledOut.has(person.id) || !person.availableSlots.some(time=>time >= "11:00" && time < "14:00")) continue;
+    if (calledOut.has(person.id) || !person.availableSlots.some(time=>time >= "11:00" && time <= "14:00")) continue;
     const count = breakCount.get(person.id) ?? 0;
     if (count !== 1) problems.push(`Staff requires exactly one 30-minute break: ${person.id} (${count})`);
   }
@@ -87,7 +87,7 @@ export function validateOpenAIPlan(input: SchedulerInput, values: Candidate[]) {
     if (row?.assignmentType?.startsWith("BREAK")) {
       const [h,m] = row.startTime.split(":").map(Number);
       const minute = h * 60 + m;
-      if (minute < 660 || minute >= 840) problems.push(`Break outside 11:00-14:00: ${row.staffId}`);
+      if (minute < 660 || minute > 840) problems.push(`Break start outside inclusive 11:00-14:00: ${row.staffId}`);
     }
   }
   const missing = input.clients.flatMap(c => c.requiredSlots

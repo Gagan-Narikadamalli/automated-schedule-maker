@@ -511,7 +511,7 @@ export function FixedEventsManager() {
         eyebrow={editingEvent ? "EDIT FIXED EVENT" : "SPEECH / NAP"}
         description={editingEvent
           ? "Update the selected occurrence or its recurring series. Saved calendar assignments will not be changed automatically; review and repair the affected dates afterward."
-          : "Speech is protected first. Nap can be applied to one or many kids at once. Nap windows must stay between 11:30 AM and 2:00 PM, and the actual nap duration comes from Clinic Settings."}
+          : "Speech is protected first. Nap can be applied to one or many kids at once. Nap START windows must be within 11:30 AM-2:00 PM inclusive. A nap starting at 2:00 ends at 2:30 if attendance permits. Duration is set in Clinic Settings."}
         onClose={() => setModalOpen(false)}
         footer={
           <>
@@ -565,9 +565,9 @@ export function FixedEventsManager() {
         <div className={cardStyles.formSection}>
           <h3>Event type</h3>
           <p>
-            Speech is one client for one fixed 30-minute appointment. Nap is a
-            flexible 11:30 AM-2:00 PM placement window that can be shared by
-            multiple kids.
+            Speech is one client for one fixed 30-minute appointment. Nap windows allow a 30-minute start at any half-hour from
+            the selected start through the selected end, including the end.
+            Several kids can share a window, with their naps staggered.
           </p>
           <div className="day-selector">
             <label className="checkbox-card" style={{ backgroundColor: EVENT_COLORS.SPEECH }}>
@@ -694,9 +694,10 @@ export function FixedEventsManager() {
                 <small>Speech is always exactly 30 minutes for one client.</small>
               ) : (
                 <small>
-                  Nap is a flexible placement window between 11:30 AM and
-                  2:00 PM. Auto Generate chooses each selected kid&apos;s
-                  actual nap block inside this range.
+                  These are allowed start times (both endpoints included).
+                  A 1:00–2:00 PM window permits a 1:00, 1:30, or 2:00 PM
+                  30-minute nap. A 2:00 start finishes at 2:30 PM if the
+                  child and caregiver are available.
                 </small>
               )}
             </label>

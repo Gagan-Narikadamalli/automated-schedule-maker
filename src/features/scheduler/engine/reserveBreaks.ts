@@ -437,7 +437,7 @@ export function reserveStaffBreaks({
       .filter(
         (startTime) =>
           startTime >= rules.breakWindowStart &&
-          startTime < rules.breakWindowEnd
+          startTime <= rules.breakWindowEnd
       )
       .filter(
         (startTime) =>

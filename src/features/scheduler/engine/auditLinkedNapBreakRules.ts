@@ -57,7 +57,7 @@ export function auditLinkedNapBreakRules(
       if(!occupied.has(`${client.id}|${time}`))
         problems.push(`Client ${client.id} missing scheduled Break/Nap at ${time}`);
   for(const person of activeStaff) {
-    if(!person.availableSlots.some(t=>t>=breakWindowStart&&t<breakWindowEnd))continue;
+    if(!person.availableSlots.some(t=>t>=breakWindowStart&&t<=breakWindowEnd))continue;
     if(!breaks.has(person.id))
       problems.push(`Staff ${person.id} missing required 30-minute break`);
   }

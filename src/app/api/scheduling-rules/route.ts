@@ -432,7 +432,7 @@ export async function PUT(request: Request) {
       return NextResponse.json(
         {
           error:
-            "Staff breaks must stay inside the 11:00 AM to 2:00 PM clinic break window.",
+            "Staff breaks must START from 11:00 AM through 2:00 PM inclusive; a 2:00 PM start finishes at 2:30 PM if staff is available.",
         },
         { status: 400 }
       );

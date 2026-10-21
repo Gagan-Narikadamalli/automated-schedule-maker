@@ -36,7 +36,7 @@ export function buildFixedScheduleChoices(snapshot:FixedScheduleSnapshot) {
     timeProperties[time]={type:"array",items:{type:"string"},minItems:ids.length,maxItems:ids.length};
   }
   const napProperties=Object.fromEntries(snapshot.clients.filter(c=>c.napSlots.length).map(c=>[c.id,{type:"string",enum:[...new Set(c.napSlots)]}]));
-  const breakProperties=Object.fromEntries(staff.map(s=>[s.id,{type:"string",enum:[...s.availableSlots.filter(t=>t>=(snapshot.rules.breakWindowStart??"11:00")&&t<(snapshot.rules.breakWindowEnd??"14:00")),"UNPLACED"]}]));
+  const breakProperties=Object.fromEntries(staff.map(s=>[s.id,{type:"string",enum:[...s.availableSlots.filter(t=>t>=(snapshot.rules.breakWindowStart??"11:00")&&t<=(snapshot.rules.breakWindowEnd??"14:00")),"UNPLACED"]}]));
   const schema=object({napTimes:object(napProperties),breakTimes:object(breakProperties),staffByTime:object(timeProperties),
     explanation:{type:"string"},decisions:{type:"array",items:{type:"string"}},tradeoffs:{type:"array",items:{type:"string"}}});
   return {schema,grid,candidateSets};
