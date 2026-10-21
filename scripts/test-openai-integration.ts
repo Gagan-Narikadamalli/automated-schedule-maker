@@ -3,11 +3,22 @@ import { getSchedulerOpenAIModel, OPENAI_SETUP_MESSAGE } from "../src/features/a
 import { isWebsiteRequest } from "../src/features/ai/websiteScope";
 import { designOpenAISchedule, expandOpenAIPlan, type OpenAISchedulePlan } from "../src/features/ai/openaiSchedulePlan";
 import { validateOpenAIPlan } from "../src/features/ai/validateOpenAIPlan";
+import { isExplicitDayGenerationCommand, isProtectedDayGenerationApproval } from "../src/features/ai/schedulerActionIntent";
 import type { SchedulerInput } from "../src/features/scheduler/engine/types";
 import { POST as generateRoute } from "../src/app/api/schedule/ai-generate/route";
 import { POST as paidRoute } from "../src/app/api/ai/paid/route";
 
 async function main() {
+ assert.equal(isExplicitDayGenerationCommand("generate a new schedule for today"),true);
+ assert.equal(isExplicitDayGenerationCommand("regenerate the schedule for 2026-10-21"),true);
+ assert.equal(isExplicitDayGenerationCommand("how can I generate a new schedule?"),false);
+ assert.equal(isExplicitDayGenerationCommand("generate next week's schedule"),false);
+ const confirmation=[{role:"user",text:"generate a new schedule for today"},
+   {role:"assistant",text:"The saved schedule for 2026-10-21 contains 23 protected assignments. Rebuilding the day will replace them. Do you allow me to override these protected assignments and proceed?"}];
+ assert.equal(isProtectedDayGenerationApproval("yes",confirmation,"2026-10-21"),true);
+ assert.equal(isProtectedDayGenerationApproval("yes",confirmation,"2026-10-22"),false);
+ assert.equal(isProtectedDayGenerationApproval("yes",[], "2026-10-21"),false);
+ assert.equal(isProtectedDayGenerationApproval("no",confirmation,"2026-10-21"),false);
  const previousProvider=process.env.SCHEDULER_AI_PROVIDER;process.env.SCHEDULER_AI_PROVIDER="openai";
  const key=process.env.OPENAI_API_KEY;delete process.env.OPENAI_API_KEY;
  assert.throws(()=>getSchedulerOpenAIModel(),new RegExp(OPENAI_SETUP_MESSAGE.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")));

@@ -18,7 +18,7 @@ import { buildSchedulerAiInstructions } from "@/features/ai/schedulerPrompt";
 import { buildSchedulerReplyFallback } from "@/features/ai/schedulerReplyFallback";
 import { buildSchedulerPrivacy } from "@/features/ai/buildSchedulerPrivacy";
 import { encodeSafeSchedulerHistory } from "@/features/ai/schedulerPrivacy";
-import { isSchedulerActionRequest } from "@/features/ai/schedulerActionIntent";
+import { isSchedulerActionRequest, isExplicitDayGenerationCommand, isProtectedDayGenerationApproval } from "@/features/ai/schedulerActionIntent";
 import { adaptSchedulerToolsForPaid } from "@/features/ai/schedulerPaidToolAdapter";
 import { createPaidTemplateTools } from "@/features/ai/schedulerPaidTemplateTools";
 import { ensureSchedulerConversationClosing } from "@/features/ai/schedulerConversationLifecycle";
@@ -501,10 +501,11 @@ export async function POST(request: Request) {
     // The Generate button already declares its action. Dispatch that action
     // directly; the independent planner still makes every placement decision.
     // This avoids asking another model to rediscover the button's intent.
-    if (body.intent === "GENERATE_DAY") {
+    const protectedGenerationApproved = isProtectedDayGenerationApproval(message, history, resolvedDate.date);
+    if (body.intent === "GENERATE_DAY" || isExplicitDayGenerationCommand(message) || protectedGenerationApproved) {
       if (!writeToolsEnabled) return NextResponse.json({error:"This request cannot save a schedule because AI writes are disabled or the request is read-only."},{status:403});
       const generationTool=createOpenAIGenerationTools(context).generate_schedule;
-      const output=await generationTool.execute?.({scope:"DAY",save:true,allowProtectedReplacement:body.allowProtectedReplacement===true}) as Record<string,any>;
+      const output=await generationTool.execute?.({scope:"DAY",save:true,allowProtectedReplacement:body.allowProtectedReplacement===true || protectedGenerationApproved}) as Record<string,any>;
       const saved=output?.saved===true;
       const decisions=Array.isArray(output?.decisionSummary)?output.decisionSummary.filter((item:unknown)=>typeof item==="string"):[];
       const tradeoffs=Array.isArray(output?.tradeoffs)?output.tradeoffs.filter((item:unknown)=>typeof item==="string"):[];
