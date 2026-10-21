@@ -4,7 +4,7 @@ import { getSlotsInsideTimeRange, getEndTimeForSlot } from "@/features/scheduler
 import { buildFixedScheduleChoices,decodeFixedScheduleChoices,type FixedScheduleSnapshot,type FixedScheduleChoices } from "./fixedScheduleChoices";
 import { designFixedDayInBatches } from "./openaiBatchedDayPlanner";
 
-export type OpenAIPlanSegment = {staff:string;client:string|null;startTime:string;endTime:string;type:"CLIENT_1_TO_1"|"SPEECH"|"BREAK"|"BREAK_NAP"|"BREAK_SPEECH"};
+export type OpenAIPlanSegment = {staff:string;client:string|null;startTime:string;endTime:string;type:"CLIENT_1_TO_1"|"NAP"|"SPEECH"|"BREAK"|"BREAK_NAP"|"BREAK_SPEECH"};
 export type OpenAISchedulePlan = {segments:OpenAIPlanSegment[];explanation:string;decisions:string[];tradeoffs:string[];fixedChoices?:FixedScheduleChoices;batched?:boolean;planningBatches?:number};
 export async function designOpenAISchedule(snapshot:unknown, corrections?:string[]) {
   const effort = "high" as const;
