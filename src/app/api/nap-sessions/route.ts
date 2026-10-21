@@ -456,7 +456,6 @@ export async function POST(request: Request) {
         );
 
         createdIds.push(String(session._id));
-      }
     }
 
     const displayCodes = clients
