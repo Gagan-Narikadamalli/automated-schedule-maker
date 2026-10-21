@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { designOpenAISchedule, expandOpenAIPlan } from "../src/features/ai/openaiSchedulePlan";
 import { fixedCellCandidates, validateFixedEventChoices } from "../src/features/ai/openaiBatchedDayPlanner";
+import { decodeFixedScheduleChoices } from "../src/features/ai/fixedScheduleChoices";
 import { validateOpenAIPlan } from "../src/features/ai/validateOpenAIPlan";
 import type { FixedScheduleSnapshot } from "../src/features/ai/fixedScheduleChoices";
 import type { SchedulerInput } from "../src/features/scheduler/engine/types";
@@ -16,7 +17,12 @@ const snapshot:FixedScheduleSnapshot={
     {id:"Client1",requiredSlots:times,napSlots:["12:00","12:30"],speechSlots:[],excludedStaff:[],serviceSetting:"IN_CENTER"},
     {id:"Client2",requiredSlots:times,napSlots:[],speechSlots:[],excludedStaff:[],serviceSetting:"IN_CENTER"}
   ],
-  rules:{breakWindowStart:"11:00",breakWindowEnd:"14:00"}
+  rules:{breakWindowStart:"11:00",breakWindowEnd:"14:00"},
+  templates:[{isApplied:true,sourceType:"WORKBOOK",assignments:[
+    {staff:"Staff2",client:"Client1",startTime:"12:00",endTime:"12:30",type:"BREAK_NAP"},
+    {staff:"Staff1",client:"Client2",startTime:"13:00",endTime:"13:30",type:"CLIENT_1_TO_1"}
+  ]}],
+  regenerationPolicy:"Templates are reference observations, not fixed placement targets."
 };
 const stage={
   napTimes:{Client1:"12:00"},
@@ -26,17 +32,19 @@ const stage={
   tradeoffs:[]
 };
 assert.deepEqual(validateFixedEventChoices(snapshot,stage),[]);
-assert.deepEqual(fixedCellCandidates(snapshot,stage,"Client1","12:00"),["Staff1"]);
+assert.deepEqual(fixedCellCandidates(snapshot,stage,"Client1","12:00"),["Staff1","Staff2","Staff3"],
+  "Caregiver can supervise a nap even if their break occurs somewhere else.");
 assert.deepEqual(fixedCellCandidates(snapshot,stage,"Client2","12:00"),["Staff2","Staff3"]);
 assert.deepEqual(fixedCellCandidates(snapshot,stage,"Client2","13:00"),["Staff1","Staff3"]);
-assert.ok(validateFixedEventChoices(snapshot,{...stage,breakTimes:{...stage.breakTimes,Staff1:"11:30"}})
-  .some(x=>x.includes("No eligible therapist")));
-const invalidSnapshot:FixedScheduleSnapshot={...snapshot,clients:[...snapshot.clients,{
+assert.deepEqual(validateFixedEventChoices(snapshot,{...stage,breakTimes:{...stage.breakTimes,Staff1:"11:30"}}),[],
+  "Client nap must not be forced to coincide with caregiver's staff break.");
+const invalidSnapshot:FixedScheduleSnapshot={...snapshot,clients:[
+  {...snapshot.clients[0],excludedStaff:["Staff2","Staff3"]},snapshot.clients[1],{
   id:"Client3",requiredSlots:times,napSlots:["12:00"],speechSlots:[],
   excludedStaff:["Staff2","Staff3"],serviceSetting:"IN_CENTER"
 }]};
 assert.ok(validateFixedEventChoices(invalidSnapshot,stage).length>0,
-  "Two simultaneous naps cannot use the same therapist's break.");
+  "Two simultaneous naps cannot be supervised by only one eligible therapist.");
 
 const makeRows=(list:string[],invalid=false)=>{
   const staffByTime:Record<string,string[]>={};
@@ -74,6 +82,10 @@ async function mockPlan(invalid=false){
     assert.equal(plan.batched,true);
     assert.equal(plan.planningBatches,3,"One global event decision + two compact time batches.");
     assert.equal(requests,invalid?4:3);
+    assert.ok(allRequests.some(req=>JSON.stringify(req).includes("reference")),
+      "Model requests should say that historical templates are reference evidence.");
+    assert.ok(allRequests.some(req=>JSON.stringify(req).includes("WORKBOOK")),
+      "A same-weekday workbook template is included as an optional reference.");
     assert.ok(allRequests.every(req=>JSON.stringify(req).length<95000),
       "Do not send huge 262-cell grids in every request.");
     const rows=expandOpenAIPlan(plan,
@@ -94,6 +106,21 @@ async function mockPlan(invalid=false){
     assert.equal(rows.some(r=>r.clientId==="c1"&&r.startTime==="12:00"&&r.assignmentType==="BREAK_NAP"),true);
     assert.equal(rows.some(r=>r.staffId==="s2"&&r.startTime==="13:00"&&r.assignmentType==="BREAK"),true);
     assert.equal(rows.length,invalid?21:22,"One deliberately unplaced client cell reduces the emitted assignment count.");
+    if(!invalid) {
+      const alternative=decodeFixedScheduleChoices(snapshot,{
+        ...plan.fixedChoices!,
+        breakTimes:{...plan.fixedChoices!.breakTimes,Staff1:"11:30"},
+        staffByTime:{...plan.fixedChoices!.staffByTime,
+          "11:30":["Staff2","Staff3"]}
+      });
+      const separateRows=expandOpenAIPlan(alternative,
+        new Map([["Staff1","s1"],["Staff2","s2"],["Staff3","s3"]]),
+        new Map([["Client1","c1"],["Client2","c2"]]));
+      assert.equal(separateRows.filter(row=>row.clientId==="c1"&&row.startTime==="12:00"&&row.assignmentType==="NAP").length,1);
+      assert.equal(separateRows.filter(row=>row.staffId==="s1"&&row.startTime==="11:30"&&row.assignmentType==="BREAK").length,1);
+      assert.deepEqual(validateOpenAIPlan(input,separateRows).problems,[],
+        "Supervised client nap and different valid staff break are independent requirements.");
+    }
     return plan;
   }finally{
     globalThis.fetch=originalFetch;

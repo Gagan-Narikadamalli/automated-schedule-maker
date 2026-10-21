@@ -123,7 +123,7 @@ export async function POST(request: Request) {
     const sanitized = {
       useFixedCells:true,
       date,
-      regenerationPolicy:"The manager requested a new independently designed day; current assignments are reference evidence and may be reallocated. Hard eligibility and event constraints still apply.",
+      regenerationPolicy:"OPENAI INDEPENDENT PLANNING: generate the best feasible day from current roster/attendance/call-outs. Templates, previous schedules and historical pairings are NOT protected staff placements, and copying a template is NOT the goal. Use them as weak observational evidence. Improve coverage, naps/breaks, continuity and handoffs by departing from history whenever sensible. Relax only SOFT team, typical pairing/day and grouping preferences. Never violate actual availability, a hard client-staff restriction, single-therapist occupancy or non-overridable clinic requirements. The manager separately approves replacement of protected saved rows before save.",
       staff:roster.staff.map(p=>({id:staffAlias.get(p.id),role:p.role,teamId:p.teamId?teamAlias.get(String(p.teamId)):undefined,availableSlots:p.availableSlots,
         serviceSetting:p.serviceSetting,maximumDailyHours:p.maximumDailyHours,remainingWeeklyHours:p.maximumWeeklyHours===undefined?undefined:Math.max(0,p.maximumWeeklyHours-(p.scheduledWeeklyClientHoursBeforeDate??0))})),
       clients:roster.clients.map(p=>({id:clientAlias.get(p.id),requiredSlots:p.requiredSlots,
@@ -151,8 +151,10 @@ export async function POST(request: Request) {
         preferredClientsPerStaffPerDay:roster.rules.preferredClientsPerStaffPerDay,
         preferredStaffPerClientPerDay:roster.rules.preferredStaffPerClientPerDay,
       },
-      // Large literal workbook grids can overwhelm a cloud-model request.
-      // Include the applied template first and representative assignment cells.
+      // Present at most two same-weekday templates as REFERENCE EXAMPLES;
+      // even an applied template is nonbinding for an independent AI Generate.
+      // The clinic's native template-first Auto Generate remains separate.
+      // Large workbook grids are compressed before model submission.
       templates:[...templates].sort((a,b)=>Number(b.isApplied)-Number(a.isApplied))
         .slice(0,2).map(t=>({...t,assignments:compactHistory(t.assignments).slice(0,140)})),
       currentAssignments:compactHistory(deidentifiedAssignments(roster.existingAssignments)).slice(0,240),

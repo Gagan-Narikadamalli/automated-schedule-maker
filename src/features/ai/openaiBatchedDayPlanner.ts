@@ -2,6 +2,7 @@ import { generateText, Output, jsonSchema } from "ai";
 import { getSchedulerModel, schedulerModelOptions } from "./schedulerModelProvider";
 import { buildFixedScheduleChoices, decodeFixedScheduleChoices, type FixedScheduleChoices, type FixedScheduleSnapshot } from "./fixedScheduleChoices";
 import type { OpenAISchedulePlan } from "./openaiSchedulePlan";
+import { INDEPENDENT_AI_PLANNING_PRIORITIES } from "./independentAiPlanningPriorities";
 
 type Stage = Pick<FixedScheduleChoices, "napTimes"|"breakTimes"|"explanation"|"decisions"|"tradeoffs">;
 type Batch = {staffByTime: Record<string,string[]>};
@@ -37,6 +38,7 @@ function compactSnapshot(snapshot:FixedScheduleSnapshot, times?:string[]) {
     referenceAssignments:trim(o.referenceAssignments,180).filter(relevant).slice(0,65),
     currentAssignments:trim(o.currentAssignments,100).filter(relevant).slice(0,30),
     importedWorkbookTraining:o.importedWorkbookTraining,
+    planningPriorities:INDEPENDENT_AI_PLANNING_PRIORITIES,
     regenerationPolicy:o.regenerationPolicy
   };
 }
@@ -46,6 +48,10 @@ export function validateFixedEventChoices(snapshot:FixedScheduleSnapshot, events
   const problems:string[]=[];
   const calledOut=new Set(snapshot.calledOutStaff??[]);
   const active=snapshot.staff.filter(s=>s.availableSlots.length&&!calledOut.has(s.id));
+  // A client's NAP and a therapist's BREAK are separate obligations.
+  // Prefer linking them where it improves continuity, but an eligible
+  // caregiver may supervise NAP while using a different valid BREAK.
+  const byNapTime=new Map<string,string[]>();
   for(const client of snapshot.clients){
     if(!client.napSlots.length)continue;
     const time=events.napTimes[client.id];
@@ -53,45 +59,33 @@ export function validateFixedEventChoices(snapshot:FixedScheduleSnapshot, events
       problems.push("Nap start unavailable for "+client.id);
       continue;
     }
-    const linked=active.filter(staff=>
-      staff.availableSlots.includes(time)&&events.breakTimes[staff.id]===time&&
-      !client.excludedStaff?.includes(staff.id)&&
-      (!staff.serviceSetting||!client.serviceSetting||
-        staff.serviceSetting==="BOTH"||client.serviceSetting==="BOTH"||
-        staff.serviceSetting===client.serviceSetting));
-    if(!linked.length)problems.push("No eligible therapist has their single break linked to the nap of "+client.id+" at "+time);
-  }
-  // Several clients may need naps simultaneously. Each needs a DISTINCT
-  // eligible therapist whose single break is at the same time.
-  const byNapTime=new Map<string,string[]>();
-  for(const client of snapshot.clients) {
-    if(!client.napSlots.length)continue;
-    const time=events.napTimes[client.id];
-    if(!time)continue;
     byNapTime.set(time,[...(byNapTime.get(time)??[]),client.id]);
   }
-  for(const [time,clients] of byNapTime) {
+  // Distinct caregivers are still mandatory for simultaneous clients.
+  // Do not require those caregivers to take their staff breaks at that time.
+  for(const [time,clients] of byNapTime){
     const matched=new Map<string,string>();
     const find=(clientId:string,seen:Set<string>):boolean=>{
-      const c=snapshot.clients.find(x=>x.id===clientId)!;
-      for(const staff of active) {
-        if(!staff.availableSlots.includes(time) ||
-          events.breakTimes[staff.id]!==time ||
-          c.excludedStaff?.includes(staff.id) ||
-          (staff.serviceSetting&&c.serviceSetting &&
-            staff.serviceSetting!=="BOTH"&&c.serviceSetting!=="BOTH" &&
-            staff.serviceSetting!==c.serviceSetting) ||
-          seen.has(staff.id))continue;
-        seen.add(staff.id);
-        const prior=matched.get(staff.id);
-        if(!prior||find(prior,seen)){matched.set(staff.id,clientId);return true;}
+      const client=snapshot.clients.find(c=>c.id===clientId)!;
+      for(const therapist of active){
+        if(!therapist.availableSlots.includes(time)||
+          client.excludedStaff?.includes(therapist.id)||
+          (therapist.serviceSetting&&client.serviceSetting&&
+            therapist.serviceSetting!=="BOTH"&&client.serviceSetting!=="BOTH"&&
+            therapist.serviceSetting!==client.serviceSetting)||
+          seen.has(therapist.id))continue;
+        seen.add(therapist.id);
+        const previous=matched.get(therapist.id);
+        if(!previous||find(previous,seen)){
+          matched.set(therapist.id,clientId);return true;
+        }
       }
       return false;
     };
-    let total=0;
-    for(const id of clients)if(find(id,new Set()))total++;
-    if(total<clients.length)
-      problems.push("Not enough distinct nap-linked therapists at "+time+" for "+clients.join(", "));
+    let count=0;
+    for(const clientId of clients)if(find(clientId,new Set()))count++;
+    if(count<clients.length)
+      problems.push("Not enough distinct eligible nap caregivers at "+time+" for "+clients.join(", "));
   }
   for(const member of active){
     const inWindow=member.availableSlots.filter(t=>
@@ -117,8 +111,7 @@ export function fixedCellCandidates(snapshot:FixedScheduleSnapshot,events:Stage,
     !out.has(s.id)&&s.availableSlots.includes(time)&&!c.excludedStaff?.includes(s.id)&&
     (!s.serviceSetting||!c.serviceSetting||s.serviceSetting==="BOTH"||
       c.serviceSetting==="BOTH"||s.serviceSetting===c.serviceSetting)&&
-    (events.breakTimes[s.id]!==time||nap||speech)&&
-    (!nap||events.breakTimes[s.id]===time)
+    (events.breakTimes[s.id]!==time||nap||speech)
   ).map(s=>s.id);
 }
 
@@ -136,7 +129,7 @@ export async function designFixedDayInBatches(snapshot:FixedScheduleSnapshot,cor
     tradeoffs:{type:"array",items:{type:"string"}}
   });
   const stagePrompt=JSON.stringify({
-    task:"Choose every fixed client nap start and every eligible staff break start. A nap MUST be linked to one eligible staff whose break starts at exactly the same time. Give each working staff only one break. Break/nap window END is an inclusive START, e.g. 14:00–14:30 is valid if attendance permits. Attend full slot; never fabricate availability. Think globally about how to maximize 1:1 coverage and preserve multi-hour runs. Return choices, not assignments.",
+    task:"Independently choose feasible 30-minute client nap start times and each eligible staff member's single break start, considering availability and future coverage. A CLIENT NAP and a STAFF BREAK are distinct requirements. Prefer moving a movable staff break onto a supervised client nap (BREAK_NAP) when this improves continuity or frees a slot, but do not require every nap to also be a staff break. Break/nap start windows include their END points. Never invent availability, clients or extra time. Templates show past workable patterns, NOT required assignments or mandatory break times; deviate for better safe coverage and natural handoffs.",
     snapshot:compactSnapshot(snapshot),
     corrections:corrections.slice(0,12)
   });
@@ -144,7 +137,7 @@ export async function designFixedDayInBatches(snapshot:FixedScheduleSnapshot,cor
     const response=await generateText({
       model:getSchedulerModel(),providerOptions:schedulerModelOptions(true,"medium"),
       reasoning:"medium",maxOutputTokens:4500,maxRetries:0,timeout:{totalMs:55000},
-      instructions:"You independently plan a therapy-clinic day using only numbered website aliases. Choose one permitted 30-minute nap start for each client with a nap and exactly one valid 30-minute break for each eligible staff. Ensure each nap has an eligible therapist who can have their ONE break at the same slot. NEVER add clients, staff, hours, or appointments. Reflect meaningful decisions only. The backend will hard-validate before saving.",
+      instructions:"Independently plan today's staff breaks and client naps using only provided numbered website aliases. The template is historical evidence and may be rejected entirely. Choose each nap start and each staff break independently, linking a caregiver break to a child's nap when it improves coverage, but not as a prerequisite to supervision. Exactly one valid break per eligible staff and one supervised nap per scheduled child; hard attendance and restrictions always apply. You may bend team, continuity, 4-hour grouping, typical clients/day, and template preferences to achieve better safe coverage. Never invent shifts or double book a person. Explain observable decisions and tradeoffs, not private chain of thought.",
       prompt,output:Output.object({schema:jsonSchema<Stage>(stageSchema)})
     });
     return response.output;
@@ -155,7 +148,7 @@ export async function designFixedDayInBatches(snapshot:FixedScheduleSnapshot,cor
     // Limited retry of ONLY the small event plan, not another full-day plan.
     events=await chooseEvents(stagePrompt+"\nRepair these invalid event selections: "+eventProblems.slice(0,12).join("; "));
     eventProblems=validateFixedEventChoices(snapshot,events);
-    if(eventProblems.length)throw new Error("OpenAI could not find valid linked naps/breaks: "+eventProblems.slice(0,5).join("; "));
+    if(eventProblems.length)throw new Error("OpenAI could not find valid client nap times and staff break starts: "+eventProblems.slice(0,5).join("; "));
   }
   const grid=fixed.grid;
   const allTimes=Object.keys(grid).sort();
@@ -174,7 +167,7 @@ export async function designFixedDayInBatches(snapshot:FixedScheduleSnapshot,cor
         maxItems:columns[time].length}
     ])))});
     const prompt=JSON.stringify({
-      task:"Independently assign EXACTLY one therapist alias or UNPLACED for each client/30-minute cell, time column by time column. Use the exact ordered client lists, and only therapists in allowedStaffForCell. No staff can serve two clients or take a break and provide 1:1 in the same half-hour. An event NAP must be assigned to a therapist whose chosen break is at that time. A speech event may satisfy the therapist's chosen break. Preserve staff/client continuity from priorBatchClientStaff and minimize handoffs and short alternating blocks. Prefer preferred staff, same team, and BTs, but maximize safe 1:1 coverage above soft preferences. Never assign a staff outside the eligible list.",
+      task:"Make YOUR OWN BEST JUDGMENT for the current date: choose EXACTLY one therapist or UNPLACED per required client half-hour, from allowedStaffForCell. No staff may serve two clients at one time, or serve 1:1 during a plain staff break. A client nap requires a caregiver but need not coincide with that caregiver's break; matching nap/break times produces a linked Break/Nap and frees a later work slot. A caregiver may hand off to ANOTHER client right after the nap. Templates and historical assignments are nonbinding REFERENCE EXAMPLES; do not copy them cell-for-cell unless they really are the best current plan. Prefer safe coverage, contiguous 2–4-hour blocks, few handoffs, preferred staff and frontline BTs, in that order when feasible. Feel free to bend SOFT team, history, typical clients/day, block-length and rotation preferences to fill more valid client cells; NEVER bend shifts, call-outs, hard restrictions, service setting, actual fixed events or 1:1 non-overlap. Preserve continuity across batches when useful, and favor relief assignments that cover more unmet client blocks.",
       date:(snapshot as Record<string,unknown>).date,
       times,orderedClientsByTime:columns,allowedStaffForCell:candidateGroups,
       events:{napTimes:events.napTimes,breakTimes:events.breakTimes,
@@ -182,13 +175,14 @@ export async function designFixedDayInBatches(snapshot:FixedScheduleSnapshot,cor
       priorBatchClientStaff:previousClientStaff,
       assignedSlotsByStaff:allocatedSlots,
       snapshot:compactSnapshot(snapshot,times),
-      corrections:corrections.slice(0,10)
+      corrections:corrections.slice(0,10),
+      planningPriorities:INDEPENDENT_AI_PLANNING_PRIORITIES
     });
     async function planBatch(request:string){
       const response=await generateText({
         model:getSchedulerModel(),providerOptions:schedulerModelOptions(true,"low"),
         reasoning:"low",maxOutputTokens:5000,maxRetries:0,timeout:{totalMs:48000},
-        instructions:"Make concrete slot-by-slot therapist assignments for a pediatric therapy center. Model must choose ALL placements from verified candidates. Choose UNPLACED only when no safe therapist is possible. Never repeat a therapist in the same time column. Give one staff a client continuously rather than arbitrary 30-minute alternation. Do not return narrative; exact JSON schema only. Backend validates all blocks before saving.",
+        instructions:"Independently select the BEST eligible 30-minute therapist assignment for every child. Do not reproduce the workbook template or historical schedule by default: templates are fallible examples and should be overridden when current attendance, uninterrupted coverage, break/naps or better continuity justify it. You may relax soft preferences (team, typical pair counts, rotation patterns, target block lengths) if safe coverage increases, but never break eligibility, hard restrictions, service location, actual attendance, mandatory events or the one-staff-per-slot rule. A nap can be supervised without being that staff member's break. Avoid gratuitous 30-minute changes; make an intentional handoff after nap when it serves another child. Use UNPLACED only if no safe coverage can be assigned. Return exact structured JSON, not narrative. Server validates before save.",
         prompt:request,output:Output.object({schema:jsonSchema<Batch>(schema)})
       });
       return response.output?.staffByTime;

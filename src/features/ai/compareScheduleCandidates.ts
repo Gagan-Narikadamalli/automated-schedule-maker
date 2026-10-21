@@ -65,10 +65,15 @@ export function assessAiCandidate(input: SchedulerInput, rows: AiCandidateRow[])
     }
     if (run > 0 && run < 4) shortRuns++;
   }
-  // Priorities matter only when the same number of required blocks are covered.
-  const softScore = frontline1to1*4+preferredPairs*3+sameTeam*2+
-    templateMatches+Math.min(40,historicalPairingEvidence/5)-
-    handoffs*8-shortRuns*5;
+  // History/templates are WEAK tie-break evidence, never a quota or an
+  // incentive to recreate yesterday's workbook. Compare covered client
+  // requirements BEFORE any soft quality score (see compareAiCandidates).
+  // Prefer coherent runs over historical cell-for-cell similarity.
+  const referenceHint=Math.min(12,templateMatches*0.1);
+  const historyHint=Math.min(12,historicalPairingEvidence/20);
+  const softScore = frontline1to1*4+preferredPairs*2+sameTeam*0.75+
+    referenceHint+historyHint-
+    handoffs*12-shortRuns*7;
   return {
     valid:audit.problems.length===0, hardViolations:audit.problems.length,
     covered:audit.covered, required:audit.required,

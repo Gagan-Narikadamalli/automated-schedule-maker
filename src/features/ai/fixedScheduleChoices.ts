@@ -69,7 +69,7 @@ export function decodeFixedScheduleChoices(snapshot:FixedScheduleSnapshot,choice
       if(!staff||staff==="UNPLACED")continue;
       if(!staffIds.has(staff))throw new Error("AI returned an unknown staff alias.");
       const speech=client.speechSlots.includes(time);
-      const type=nap===time?"BREAK_NAP":speech?(choices.breakTimes[staff]===time?"BREAK_SPEECH":"SPEECH"):"CLIENT_1_TO_1";
+      const type=nap===time?(choices.breakTimes[staff]===time?"BREAK_NAP":"NAP"):speech?(choices.breakTimes[staff]===time?"BREAK_SPEECH":"SPEECH"):"CLIENT_1_TO_1";
       segments.push({staff,client:client.id,startTime:time,endTime:getEndTimeForSlot(time),type});
       if(type.startsWith("BREAK"))linkedBreaks.add(`${staff}|${time}`);
     }

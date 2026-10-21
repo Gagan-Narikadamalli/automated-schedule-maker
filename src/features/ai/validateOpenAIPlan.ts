@@ -65,7 +65,7 @@ export function validateOpenAIPlan(input: SchedulerInput, values: Candidate[]) {
     if(member.maximumWeeklyHours!==undefined&&hours+(member.scheduledWeeklyClientHoursBeforeDate??0)>member.maximumWeeklyHours)problems.push(`Weekly hour limit: ${member.id}`);
   }
   for (const client of input.clients) {
-    const naps=values.filter(a=>a.clientId===client.id&&a.assignmentType==="BREAK_NAP");
+    const naps=values.filter(a=>a.clientId===client.id&&(a.assignmentType==="BREAK_NAP"||a.assignmentType==="NAP"));
     if(client.napSlots.length&&naps.length!==1)problems.push(`Exactly one nap required: ${client.id}`);
     for(const time of client.speechSlots)if(!values.some(a=>a.clientId===client.id&&a.startTime===time&&(a.assignmentType==="SPEECH"||a.assignmentType==="BREAK_SPEECH")))problems.push(`Fixed speech missing: ${client.id} ${time}`);
     if(client.maxConsecutiveBlocksWithSameStaff)for(const member of input.staff){
@@ -74,10 +74,9 @@ export function validateOpenAIPlan(input: SchedulerInput, values: Candidate[]) {
       for(const row of rows){run=previous===row.startTime?run+1:1;previous=getEndTimeForSlot(row.startTime);if(run>client.maxConsecutiveBlocksWithSameStaff)problems.push(`Clinical rotation limit: ${member.id} / ${client.id}`);}
     }
   }
-  // AI nap supervision is a single linked staff break, never a second NAP cell.
-  for(const row of values) {
-    if(row.assignmentType==="NAP")problems.push(`Standalone nap is not a linked staff break: ${row.clientId} at ${row.startTime}`);
-  }
+  // Client nap and staff break are distinct obligations. A supervised NAP is
+  // allowed even when the caregiver's break happens in another slot.
+  // BREAK_NAP counts both only when it matches the caregiver's break.
   for (const person of input.staff) {
     if (calledOut.has(person.id) || !person.availableSlots.some(time=>time >= "11:00" && time <= "14:00")) continue;
     const count = breakCount.get(person.id) ?? 0;
