@@ -47,6 +47,9 @@ function serializeRecord(record: PlainRecord) {
     clientCode: client?.displayCode ? String(client.displayCode) : null,
     clientColor: client?.color ? String(client.color) : null,
     displayText: String(record.displayText ?? ""),
+    eventKind: String(record.eventKind ?? "CLIENT_1_TO_1"),
+    eventWindowStart: String(record.eventWindowStart ?? ""),
+    eventWindowEnd: String(record.eventWindowEnd ?? ""),
     originalStaffId: record.originalStaffId
       ? String(record.originalStaffId)
       : null,

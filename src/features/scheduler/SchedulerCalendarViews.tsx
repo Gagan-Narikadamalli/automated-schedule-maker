@@ -392,17 +392,16 @@ function ClientScheduleView({
     const napBreak = matching.find((assignment) => assignment.assignmentType === "BREAK_NAP");
     const nap = matching.find((assignment) => assignment.assignmentType === "NAP");
     if (napBreak || nap) {
-      const breakStaff = napBreak
-        ? staffNameById.get(napBreak.staffId) || "Staff"
-        : null;
-      const detail = coverageName
-        ? napBreak
-          ? `Covered by ${coverageName}; ${breakStaff} on break`
-          : `Covered by ${coverageName}`
-        : napBreak
-          ? `${breakStaff} on break during nap`
-          : "Client nap";
-      return { text: "Nap", detail, kind: "nap" };
+      const caregiver = (napBreak || nap)!;
+      const name = staffNameById.get(caregiver.staffId) || "Assigned therapist";
+      return {
+        text: "Nap",
+        detail: napBreak
+          ? `Supervised by ${name}; this is also ${name}'s staff break`
+          : `Supervised by ${name}; staff break is separate`,
+        kind: "nap",
+        staffColor: staffColorById.get(caregiver.staffId)
+      };
     }
 
     const speechBreak = matching.find((assignment) => assignment.assignmentType === "BREAK_SPEECH");
@@ -423,17 +422,17 @@ function ClientScheduleView({
 
     if (resolvedEvent?.eventType === "NAP") {
       return {
-        text: "Nap",
-        detail: "Scheduled 30-minute nap",
-        kind: "nap",
+        text: "Nap needs staff",
+        detail: "Nap time is configured, but no supervising therapist is assigned; this is not completed coverage.",
+        kind: "uncovered",
       };
     }
 
     if (resolvedEvent?.eventType === "SPEECH") {
       return {
-        text: "Speech",
-        detail: "Scheduled 30-minute speech",
-        kind: "speech",
+        text: "Speech needs staff",
+        detail: "Scheduled speech event is not assigned to a therapist.",
+        kind: "uncovered",
       };
     }
 
@@ -464,7 +463,7 @@ function ClientScheduleView({
         <div>
           <span className={styles.eyebrow}>CLIENT COVERAGE VIEW</span>
           <h2>{locationName} · {longDate(date)}</h2>
-          <p>This view is rebuilt from the same saved assignments as Staff Schedule. Client color remains the card background, while the assigned staff member's saved color appears as the left accent and staff dot. Nap and Speech are shown explicitly instead of looking like missing coverage.</p>
+          <p>This view is rebuilt from the same saved assignments as Staff Schedule. Client color remains the card background, while the assigned staff member's saved color appears as the left accent and staff dot. Nap and Speech are marked completed only when a saved therapist assignment exists. Unassigned events are shown as needs coverage.</p>
         </div>
         <div className={styles.legend}>
           <span><i className={styles.legendCoverage} />Client background + staff color accent = 1:1</span>

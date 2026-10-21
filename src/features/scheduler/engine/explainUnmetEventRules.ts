@@ -13,7 +13,7 @@ export function explainUnmetEventRules(ctx:ProblemContext):string[] {
   const clients=new Map(ctx.clients.map(c=>[c.id,c]));
   const callouts=new Set(ctx.calledOutStaffIds);
   return ctx.problems.map(problem=>{
-    const nap=/^Client (.+) missing scheduled Break\/Nap at (\d{2}:\d{2})$/.exec(problem);
+    const nap=/^Client (.+) missing (?:required 30-minute nap|scheduled Break\/Nap) at (\d{2}:\d{2})$/.exec(problem);
     if(nap){
       const client=clients.get(nap[1]);
       if(!client)return problem+": client not present in current roster";
@@ -27,7 +27,7 @@ export function explainUnmetEventRules(ctx:ProblemContext):string[] {
       const free=eligible.filter(s=>!ctx.assignments.some(a=>
         a.staffId===s.id&&a.startTime===nap[2]));
       return problem+(free.length
-        ? ": eligible staff exist, but no valid linked single staff break/nap was placed; review break allocation and continuity"
+        ? ": eligible caregivers exist, but the client's supervised nap was not placed; review continuity and separate staff breaks"
         : ": all eligible therapists have another assignment or break at this time; relief or a different permitted nap start is required");
     }
     const staffBreak=/^Staff (.+) missing required 30-minute break$/.exec(problem);

@@ -3,6 +3,7 @@ import type {
   UncoveredRequirement,
 } from "@/features/scheduler/engine/types";
 import { UnplacedAssignment } from "@/models/UnplacedAssignment";
+import type { UnplacedEvent } from "@/features/scheduler/engine/classifyEventAuditForPartialSave";
 
 type ExistingManualGap = {
   _id?: unknown;
@@ -48,7 +49,8 @@ export async function syncAutoUnplacedGaps(
   locationId: string,
   date: string,
   uncoveredRequirements: UncoveredRequirement[],
-  currentAssignments: SchedulerAssignment[] = []
+  currentAssignments: SchedulerAssignment[] = [],
+  unresolvedEvents: UnplacedEvent[] = []
 ): Promise<number> {
   const manualGaps = (await UnplacedAssignment.find({
     locationId,
@@ -117,15 +119,16 @@ export async function syncAutoUnplacedGaps(
       )
   );
 
-  if (gapsToCreate.length === 0) {
+  if (gapsToCreate.length === 0 && unresolvedEvents.length === 0) {
     return 0;
   }
 
-  await UnplacedAssignment.insertMany(
-    gapsToCreate.map((requirement) => ({
+  await UnplacedAssignment.insertMany([
+    ...gapsToCreate.map((requirement) => ({
       locationId,
       date,
       clientId: requirement.clientId,
+      eventKind: "CLIENT_1_TO_1",
       displayText: `${requirement.clientCode} 1:1`,
       originalStaffId: null,
       originalStartTime: requirement.startTime,
@@ -135,8 +138,22 @@ export async function syncAutoUnplacedGaps(
       origin: "AUTO_UNCOVERED",
       status: "UNPLACED",
       createdBy: "scheduler-system",
+    })),
+    ...unresolvedEvents.map(event=>({
+      locationId, date,
+      clientId:event.clientId??null,
+      eventKind:event.eventKind,
+      originalStaffId:event.originalStaffId??null,
+      originalStartTime:event.originalStartTime,
+      eventWindowStart:event.eventWindowStart??"",
+      eventWindowEnd:event.eventWindowEnd??"",
+      displayText:event.displayText,
+      reason:event.reason,
+      origin:"AUTO_UNCOVERED",
+      status:"UNPLACED",
+      createdBy:"scheduler-system"
     }))
-  );
+  ]);
 
-  return gapsToCreate.length;
+  return gapsToCreate.length+unresolvedEvents.length;
 }

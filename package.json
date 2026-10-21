@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "npm run test:openai-batches && npm run test:event-diagnostics && tsx scripts/test-minimal-safe-repair.ts && tsx scripts/test-schedule-view-consistency.ts && tsx scripts/test-individual-nap-attendance.ts && tsx scripts/test-event-window-scheduling.ts && tsx scripts/test-inclusive-event-starts.ts && tsx scripts/test-weekly-quick-apply.ts && tsx scripts/test-fixed-event-edit.ts && tsx scripts/test-direct-ai-generate.ts && tsx scripts/test-ai-planning-quality.ts && npm run test:openai && tsx scripts/test-scheduler-ai-provider-modes.ts && next build",
+    "build": "npm run test:linked-nap-break-handoff && npm run test:openai-batches && npm run test:event-diagnostics && tsx scripts/test-minimal-safe-repair.ts && tsx scripts/test-schedule-view-consistency.ts && tsx scripts/test-individual-nap-attendance.ts && tsx scripts/test-event-window-scheduling.ts && tsx scripts/test-inclusive-event-starts.ts && tsx scripts/test-weekly-quick-apply.ts && tsx scripts/test-fixed-event-edit.ts && tsx scripts/test-direct-ai-generate.ts && tsx scripts/test-ai-planning-quality.ts && npm run test:openai && tsx scripts/test-scheduler-ai-provider-modes.ts && next build",
     "test:scheduler": "tsx scripts/test-minimal-safe-repair.ts && tsx scripts/test-inclusive-event-starts.ts && tsx scripts/test-event-window-scheduling.ts && tsx scripts/test-scheduler.ts && tsx scripts/test-repair.ts && tsx scripts/test-preflight.ts && tsx scripts/test-break-eligibility.ts && tsx scripts/test-preflight-eligibility.ts && tsx scripts/test-template-learning.ts && tsx scripts/test-workbook-template-import.ts && tsx scripts/test-template-priority-simulations.ts && tsx scripts/test-october-month-schedules.ts && tsx scripts/test-native-scheduler-ai.ts && tsx scripts/test-native-scheduler-ai-conversation.ts && tsx scripts/test-native-scheduler-ai-language.ts && tsx scripts/test-native-scheduler-ai-management.ts && tsx scripts/test-native-scheduler-ai-followup.ts && tsx scripts/test-native-scheduler-ai-clarifications.ts && tsx scripts/test-native-scheduler-ai-evaluation.ts && tsx scripts/test-native-scheduler-ai-typos.ts && tsx scripts/test-native-scheduler-ai-parity.ts && tsx scripts/test-native-scheduler-ai-lifecycle.ts && tsx scripts/test-native-scheduler-ai-dates.ts && tsx scripts/test-callout-visibility.ts && tsx scripts/test-native-scheduler-ai-date-workflows.ts && tsx scripts/test-scheduler-ai-provider-modes.ts && tsx scripts/test-openai-integration.ts && tsx scripts/test-scheduler-ai-privacy.ts && tsx scripts/test-paid-ai-readonly.ts && tsx scripts/test-fixed-ai-planning.ts && tsc --noEmit --noUnusedLocals --noUnusedParameters",
     "start": "next start",
     "test:native-ai": "tsx scripts/test-native-scheduler-ai.ts",
@@ -34,7 +34,8 @@
     "test:schedule-view-consistency": "tsx scripts/test-schedule-view-consistency.ts",
     "test:minimal-repair": "tsx scripts/test-minimal-safe-repair.ts",
     "test:openai-batches": "tsx scripts/test-batched-openai-planning.ts && tsx scripts/test-batched-openai-large.ts",
-    "test:event-diagnostics": "tsx scripts/test-event-diagnostics.ts"
+    "test:event-diagnostics": "tsx scripts/test-event-diagnostics.ts",
+    "test:linked-nap-break-handoff": "tsx scripts/test-linked-nap-break-handoff.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.95",

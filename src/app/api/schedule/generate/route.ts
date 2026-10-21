@@ -11,6 +11,7 @@ import {
 import { auditFinalCoverage } from "@/features/scheduler/engine/auditFinalCoverage";
 import { auditLinkedNapBreakRules } from "@/features/scheduler/engine/auditLinkedNapBreakRules";
 import { explainUnmetEventRules } from "@/features/scheduler/engine/explainUnmetEventRules";
+import { classifyEventAuditForPartialSave, auditPartialAssignmentSafety } from "@/features/scheduler/engine/classifyEventAuditForPartialSave";
 import { getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
 import { generateSchedule } from "@/features/scheduler/engine/generateSchedule";
 import { placeStaffBreaksAfterCoverage } from "@/features/scheduler/engine/placeStaffBreaks";
@@ -207,29 +208,37 @@ export async function POST(request: Request) {
     const linkedEventProblems = auditLinkedNapBreakRules(eventEnrichedAssignments,schedulerInput.clients,
       schedulerInput.staff.filter(s=>!schedulerInput.callOutStaffIds.includes(s.id)),
       dayData.extendedRules.breakWindowStart,dayData.extendedRules.breakWindowEnd);
-    if(linkedEventProblems.length) {
-      const eventDiagnostics=explainUnmetEventRules({
-        problems:linkedEventProblems,clients:schedulerInput.clients,
-        staff:schedulerInput.staff,assignments:eventEnrichedAssignments,
-        calledOutStaffIds:schedulerInput.callOutStaffIds
-      });
+    // Unplaced client naps / staff breaks are NOT the same as an unsafe
+    // assignment. Save valid coverage; put the unmet separate obligations in
+    // Unplaced. Do not save actual double-booking or availability violations.
+    const eventStatus=classifyEventAuditForPartialSave({
+      issues:linkedEventProblems,clients:schedulerInput.clients,
+      staff:schedulerInput.staff,assignments:eventEnrichedAssignments,
+      breakWindowStart:dayData.extendedRules.breakWindowStart,
+      breakWindowEnd:dayData.extendedRules.breakWindowEnd
+    });
+    const dangerous=[...eventStatus.conflicts,
+      ...auditPartialAssignmentSafety({
+        assignments:eventEnrichedAssignments,clients:schedulerInput.clients,
+        staff:schedulerInput.staff,calledOutStaffIds:schedulerInput.callOutStaffIds
+      })];
+    if(dangerous.length) {
       return NextResponse.json({
-        error:"Auto Generate could not fit every required nap and staff break safely. No previous schedule was overwritten. Review the specific coverage and break conflicts below.",
-        eventDiagnostics:eventDiagnostics.map(problem=>{
-          let label=problem;
-          for(const client of schedulerInput.clients)label=label.replaceAll(client.id,client.displayCode);
-          for(const member of schedulerInput.staff)label=label.replaceAll(member.id,member.name);
-          return label;
-        }),
-        violations:linkedEventProblems.map(problem => {
-          let label = problem;
-          for (const client of schedulerInput.clients) label = label.replaceAll(client.id, client.displayCode);
-          for (const member of schedulerInput.staff) label = label.replaceAll(member.id, member.name);
-          return label;
-        }),
-        date,
+        error:"Generated assignments contain conflicts, not just missing requirements. Existing saved assignments were preserved.",
+        violations:[...new Set(dangerous)],date
       },{status:422});
     }
+    const unresolvedEventDiagnostics=explainUnmetEventRules({
+      problems:eventStatus.unresolvedWarnings,
+      clients:schedulerInput.clients,staff:schedulerInput.staff,
+      assignments:eventEnrichedAssignments,
+      calledOutStaffIds:schedulerInput.callOutStaffIds
+    }).map(problem=>{
+      let label=problem;
+      for(const client of schedulerInput.clients)label=label.replaceAll(client.id,client.displayCode);
+      for(const member of schedulerInput.staff)label=label.replaceAll(member.id,member.name);
+      return label;
+    });
     const finalCoverage = auditFinalCoverage(
       schedulerInput.clients,
       eventEnrichedAssignments,
@@ -262,6 +271,9 @@ export async function POST(request: Request) {
     const warnings = [
       ...coverageResult.warnings,
       ...finalOnlyWarnings,
+      ...unresolvedEventDiagnostics.map(message=>({
+        code:"NO_ELIGIBLE_STAFF" as const,message
+      }))
     ];
 
     await connectToDatabase();
@@ -303,10 +315,12 @@ export async function POST(request: Request) {
       locationId,
       date,
       finalCoverage.uncoveredRequirements,
-      eventEnrichedAssignments
+      eventEnrichedAssignments,
+      eventStatus.unplacedEvents
     );
 
-    const completeCoverage = metrics.uncoveredClientSlots === 0;
+    const unresolvedEventCount=eventStatus.unplacedEvents.length;
+    const completeCoverage = metrics.uncoveredClientSlots === 0 && unresolvedEventCount===0;
     const partialBuild = !completeCoverage;
     const coverageByRole = buildCoverageByRole(
       eventEnrichedAssignments,
@@ -328,6 +342,8 @@ export async function POST(request: Request) {
         metrics,
         uncoveredRequirements: finalCoverage.uncoveredRequirements,
         managerGapCount,
+        unresolvedEventCount,
+        unresolvedEventDiagnostics,
         warningCount: warnings.length,
         reservedBreakCount: breakPlan.reservedBreaks.length,
         reliefSwapCount: breakPlan.reliefSwapCount,
@@ -370,13 +386,16 @@ export async function POST(request: Request) {
       completeCoverage,
       partialBuild,
       message: partialBuild
-        ? "The automatic scheduler built every assignment it could safely cover. Nap and speech events were protected first, then staff breaks were placed. Remaining client blocks were added to the manager Unplaced Assignments tray."
-        : "The automatic scheduler completed all required client coverage, protected nap and speech events first, and then placed staff breaks.",
+        ? "Saved the best safe partial schedule. Uncovered client blocks and unscheduled client naps, speech sessions, or staff breaks appear separately in Unplaced Assignments with reasons. They are NOT marked completed."
+        : "Auto Generate saved complete client coverage, supervised naps, fixed speech and staff breaks.",
       readiness,
       metrics,
       warnings,
       uncoveredRequirements: finalCoverage.uncoveredRequirements,
       managerGapCount,
+      unresolvedEventCount,
+      unresolvedEventDiagnostics,
+      unplacedEvents:eventStatus.unplacedEvents,
       templateMatchedBlocks: templatePinning.pinned.length,
       primaryTemplateBlocks: templatePinning.primaryCount,
       secondaryTemplateBlocks: templatePinning.secondaryCount,

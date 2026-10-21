@@ -294,7 +294,6 @@ function findBestFreeBreaks(
         // per slot. Other employees may still take an ordinary break.
         const alreadyLinked = fixedEvent?.assignmentType === "BREAK_NAP" &&
           assignments.some((assignment) =>
-            assignment.assignmentType === "BREAK_NAP" &&
             assignment.clientId === fixedEvent.client.id &&
             assignment.startTime === slotTime);
         const availableEvent = alreadyLinked ? null : fixedEvent;
@@ -848,54 +847,116 @@ function alignPlainBreaksWithAdjacentNaps(
  * Each nap receives exactly one eligible, free caregiver and a single BREAK_NAP.
  * Impossible naps remain absent and are rejected by the final event audit.
  */
+/**
+ * Nap belongs to the CLIENT, break belongs to STAFF. Both have independent
+ * completion states. A supervised NAP is valid even when the caregiver took
+ * their staff break elsewhere. Only BREAK_NAP satisfies both.
+ *
+ * Prefer a caregiver who had this child in the preceding 30-minute slot.
+ * When that caregiver already has a movable AUTO BREAK later, move that same
+ * break to the nap and FREE the later slot. Do not require the caregiver to
+ * continue with the same child after the nap; a handoff is entirely valid.
+ */
 function reserveRequiredNapBreaks(
-  assignments: SchedulerAssignment[],
-  staff: SchedulerStaff[],
-  clients: SchedulerClient[],
-  callOutStaffIds: Set<string>,
-  rules: PostCoverageBreakRules
-): void {
-  if (rules.defaultBreakMinutes !== rules.slotLengthMinutes) return;
-  const linked = new Set(assignments
-    .filter(a => a.assignmentType === "BREAK_NAP" && a.clientId)
-    .map(a => `${a.clientId}|${a.startTime}`));
-  for (const client of [...clients].sort((a,b)=>
-    Number(a.napPriorityCategory !== "YOUNGER")-Number(b.napPriorityCategory !== "YOUNGER") ||
-    a.displayCode.localeCompare(b.displayCode)
-  )) {
-    for (const time of [...new Set(client.napSlots)].sort()) {
-      const key = `${client.id}|${time}`;
-      if (linked.has(key)) continue;
-      if (time < rules.breakWindowStart || time > rules.breakWindowEnd) continue;
-      if (assignments.some(a => a.clientId === client.id && a.startTime === time)) continue;
-      const previous = shiftTime(time,-rules.slotLengthMinutes);
-      const next = shiftTime(time,rules.slotLengthMinutes);
-      const eligible = staff.filter(person =>
-        !callOutStaffIds.has(person.id) &&
-        person.availableSlots.includes(time) &&
-        !staffAlreadyHasBreak(person.id,assignments) &&
-        !assignments.some(a=>a.staffId===person.id && a.startTime===time) &&
-        client.staffRelationships[person.id] !== "HARD_RESTRICTION" &&
-        (!person.serviceSetting || !client.serviceSetting ||
-          person.serviceSetting === "BOTH" || client.serviceSetting === "BOTH" ||
-          person.serviceSetting === client.serviceSetting)
-      );
-      const continuity = (person:SchedulerStaff) =>
-        assignments.some(a => a.staffId===person.id && a.clientId===client.id &&
-          a.assignmentType==="CLIENT_1_TO_1" &&
-          (a.startTime===previous || a.startTime===next)) ? 0 : 1;
-      eligible.sort((a,b)=>
-        continuity(a)-continuity(b) ||
-        Number(!a.teamId || a.teamId!==client.teamId)-Number(!b.teamId || b.teamId!==client.teamId) ||
-        coverageRoleTier(a.role)-coverageRoleTier(b.role) ||
-        a.name.localeCompare(b.name));
+  assignments:SchedulerAssignment[],
+  staff:SchedulerStaff[],
+  clients:SchedulerClient[],
+  callOutStaffIds:Set<string>,
+  rules:PostCoverageBreakRules
+):void {
+  const staffById=new Map(staff.map(person=>[person.id,person]));
+  const clientsOrdered=[...clients].sort((a,b)=>
+    Number(a.napPriorityCategory!=="YOUNGER")-Number(b.napPriorityCategory!=="YOUNGER")||
+    a.displayCode.localeCompare(b.displayCode));
+
+  function canSupervise(person:SchedulerStaff,client:SchedulerClient,time:string):boolean {
+    return !callOutStaffIds.has(person.id) && person.availableSlots.includes(time) &&
+      client.staffRelationships[person.id]!=="HARD_RESTRICTION" &&
+      (!person.serviceSetting||!client.serviceSetting||
+        person.serviceSetting==="BOTH"||client.serviceSetting==="BOTH"||
+        person.serviceSetting===client.serviceSetting);
+  }
+
+  function linkDecision(person:SchedulerStaff,time:string) {
+    const ownBreaks=assignments.filter(a=>a.staffId===person.id&&isBreakAssignment(a));
+    const movable=ownBreaks.filter(a=>a.assignmentType==="BREAK"&&a.source==="AUTO");
+    const protectedBreak=ownBreaks.some(a=>a.assignmentType!=="BREAK"||a.source!=="AUTO");
+    return {
+      shouldLink:rules.defaultBreakMinutes===rules.slotLengthMinutes &&
+        time>=rules.breakWindowStart && time<=rules.breakWindowEnd &&
+        !protectedBreak,
+      movable
+    };
+  }
+
+  function relocateMovableBreaks(movable:SchedulerAssignment[]) {
+    // A future automatic plain break cannot block a nap-linked break.
+    // Saved MANUAL, COPIED and TEMPLATE breaks are never removed here.
+    const obsolete=new Set(movable.map(a=>a.id));
+    for(let i=assignments.length-1;i>=0;i--)
+      if(obsolete.has(assignments[i].id))assignments.splice(i,1);
+  }
+
+  for(const client of clientsOrdered){
+    for(const time of [...new Set(client.napSlots)].sort()){
+      const current=assignments.find(a=>a.clientId===client.id&&a.startTime===time);
+      if(current) {
+        // A protected NAP or an existing NAP may already be assigned to an
+        // eligible caregiver. Respect that real supervision; don't duplicate.
+        if(current.assignmentType==="NAP"){
+          const caregiver=staffById.get(current.staffId);
+          if(!caregiver||!canSupervise(caregiver,client,time))continue;
+          const decision=linkDecision(caregiver,time);
+          if(decision.shouldLink){
+            relocateMovableBreaks(decision.movable);
+            const index=assignments.findIndex(a=>a.id===current.id);
+            if(index>=0)assignments[index]={
+              ...assignments[index],assignmentType:"BREAK_NAP",
+              note:(current.note?current.note+" | ":"")+
+                "Client nap and caregiver break linked in one 30-minute slot."
+            };
+          }
+        }
+        continue;
+      }
+
+      const before=shiftTime(time,-rules.slotLengthMinutes);
+      const after=shiftTime(time,rules.slotLengthMinutes);
+      const eligible=staff.filter(person=>canSupervise(person,client,time)&&
+        !assignments.some(a=>a.staffId===person.id&&a.startTime===time));
+      eligible.sort((a,b)=>{
+        const preferred=(person:SchedulerStaff)=>{
+          const previous=assignments.some(row=>row.staffId===person.id &&
+            row.clientId===client.id&&row.startTime===before&&
+            row.assignmentType==="CLIENT_1_TO_1");
+          const next=assignments.some(row=>row.staffId===person.id &&
+            row.clientId===client.id&&row.startTime===after&&
+            row.assignmentType==="CLIENT_1_TO_1");
+          const breaks=linkDecision(person,time);
+          // Strong preference for existing caregiver BEFORE nap. Having a
+          // movable break later improves the choice (no extra break needed).
+          return (previous?0:next?20:45) +
+            (breaks.shouldLink?(breaks.movable.length?0:3):20) +
+            (!person.teamId||person.teamId!==client.teamId?3:0);
+        };
+        return preferred(a)-preferred(b)||
+          coverageRoleTier(a.role)-coverageRoleTier(b.role)||
+          a.name.localeCompare(b.name);
+      });
       const caregiver=eligible[0];
-      if(!caregiver) continue;
-      assignments.push(createBreakAssignment(caregiver,time,{
-        client,assignmentType:"BREAK_NAP",
-        priority:client.napPriorityCategory==="YOUNGER"?10:20
-      }));
-      linked.add(key);
+      if(!caregiver)continue;
+      const decision=linkDecision(caregiver,time);
+      if(decision.shouldLink)relocateMovableBreaks(decision.movable);
+      const linked=decision.shouldLink;
+      assignments.push({
+        id:`nap-${client.id}-${time}-${caregiver.id}`,
+        staffId:caregiver.id,clientId:client.id,startTime:time,
+        assignmentType:linked?"BREAK_NAP":"NAP",
+        source:"AUTO",locked:false,
+        note:linked
+          ? "30-minute client nap supervised by existing caregiver; caregiver break combined here."
+          : "30-minute client nap supervised; caregiver's separate staff break remains unchanged."
+      });
     }
   }
 }
@@ -1054,6 +1115,8 @@ export function placeStaffBreaksAfterCoverage({
     humanStyleBlockSwapCount: humanBalance.blockSwapCount,
     humanStylePenaltyBefore: humanBalance.penaltyBefore,
     humanStylePenaltyAfter: humanBalance.penaltyAfter,
-    unplacedBreakStaffIds,
+    unplacedBreakStaffIds:unplacedBreakStaffIds.filter(id=>
+      !napAlignedAssignments.some(a=>a.staffId===id&&isBreakAssignment(a))
+    ),
   };
 }

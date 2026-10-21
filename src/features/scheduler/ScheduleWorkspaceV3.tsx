@@ -59,6 +59,9 @@ type UnplacedRecord = {
   displayText: string;
   originalStaffId: string | null;
   originalStartTime: string;
+  eventKind?: "CLIENT_1_TO_1" | "BREAK" | "NAP" | "SPEECH";
+  eventWindowStart?: string;
+  eventWindowEnd?: string;
   reason: string;
   origin?: "MANUAL_DISPLACEMENT" | "AUTO_UNCOVERED";
 };
@@ -317,7 +320,11 @@ function clientWasMovedInsideBatch(clientId: string, mutations: ScheduleGridMuta
   );
 }
 
+function isClientCoverageGap(record:UnplacedRecord):boolean {
+  return !record.eventKind||record.eventKind==="CLIENT_1_TO_1";
+}
 function unplacedLabel(record: UnplacedRecord): string {
+  if(!isClientCoverageGap(record))return record.displayText;
   return record.clientCode || record.displayText.replace(/\s+1:1$/i, "").split(/\s+/)[0] || "Client";
 }
 
@@ -751,12 +758,21 @@ export function ScheduleWorkspaceV3() {
   }
 
   function beginPlacement(record: UnplacedRecord) {
+    if(!isClientCoverageGap(record)){
+      setDetailsRecord(record);
+      setStatusMessage("This is an unresolved "+record.eventKind+
+        ", not ordinary client 1:1 coverage. Add an eligible event using the appropriate Nap, Speech or Break action, then revalidate.");
+      return;
+    }
     setManualMode(true);
     setPlacementRecord(record);
     setStatusMessage(`${record.displayText} is ready to place. Drag it onto the calendar or click a destination cell.`);
   }
 
   function beginUnplacedDrag(event: DragEvent<HTMLButtonElement>, record: UnplacedRecord) {
+    if(!isClientCoverageGap(record)){
+      event.preventDefault();setDetailsRecord(record);return;
+    }
     beginPlacement(record);
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", record.displayText);
@@ -1347,7 +1363,7 @@ export function ScheduleWorkspaceV3() {
           <div className={styles.trayHeader}>
             <div>
               <h2>Unplaced Assignments</h2>
-              <p>Drag a client block into the calendar, or click it for details.</p>
+              <p>Drag uncovered client 1:1 blocks to place them. Missing client naps, speech and staff breaks are separate review items.</p>
             </div>
             <span className={styles.countBadge}>{unplacedAssignments.length}</span>
           </div>
@@ -1368,18 +1384,25 @@ export function ScheduleWorkspaceV3() {
                 <div key={assignment.id} className={styles.blockRow}>
                   <button
                     type="button"
-                    draggable={!working}
+                    draggable={!working && isClientCoverageGap(assignment)}
                     className={styles.unplacedBlock}
                     style={{ backgroundColor: assignment.clientColor || "#D9F4EE" }}
                     onClick={() => setDetailsRecord(assignment)}
                     onDragStart={(event) => beginUnplacedDrag(event, assignment)}
-                    title="Drag this block onto the schedule, or click for details"
+                    title={isClientCoverageGap(assignment) ? "Drag to assign 1:1 coverage" : "This mandatory event is still unplaced; click to review"}
                   >
                     <strong>{unplacedLabel(assignment)}</strong>
                     <span>{unplacedReasonLabel(assignment)}</span>
-                    {assignment.originalStartTime && <small>{assignment.originalStartTime}</small>}
+                    {assignment.originalStartTime && <small>
+                      {assignment.eventKind==="BREAK" && assignment.eventWindowEnd
+                        ? `Start window ${assignment.eventWindowStart}-${assignment.eventWindowEnd}`
+                        : assignment.originalStartTime}
+                    </small>}
                   </button>
-                  <button type="button" className={`button button-primary button-small ${styles.placeButton}`} disabled={working} onClick={() => beginPlacement(assignment)}>Place</button>
+                  <button type="button" className={`button button-primary button-small ${styles.placeButton}`} disabled={working}
+                    onClick={() => isClientCoverageGap(assignment) ? beginPlacement(assignment) : setDetailsRecord(assignment)}>
+                    {isClientCoverageGap(assignment) ? "Place" : "Review"}
+                  </button>
                 </div>
               ))}
             </div>
@@ -1397,17 +1420,19 @@ export function ScheduleWorkspaceV3() {
         footer={
           detailsRecord ? (
             <>
-              <button type="button" className="button button-secondary" onClick={() => void resolveUnplaced(detailsRecord.id)}>Mark Covered</button>
-              <button type="button" className="button button-primary" onClick={() => { beginPlacement(detailsRecord); setDetailsRecord(null); }}>Place on Calendar</button>
+              {isClientCoverageGap(detailsRecord) ? (<>
+                <button type="button" className="button button-secondary" onClick={() => void resolveUnplaced(detailsRecord.id)}>Mark Covered</button>
+                <button type="button" className="button button-primary" onClick={() => { beginPlacement(detailsRecord); setDetailsRecord(null); }}>Place on Calendar</button>
+              </>) : <button type="button" className="button button-primary" onClick={() => setDetailsRecord(null)}>Review Calendar</button>}
             </>
           ) : null
         }
       >
         {detailsRecord && (
           <div className={styles.detailsGrid}>
-            <div><span>Client</span><strong>{detailsRecord.displayText}</strong></div>
-            <div><span>Status</span><strong>Needs scheduling</strong></div>
-            <div><span>Required time</span><strong>{detailsRecord.originalStartTime || "Flexible"}</strong></div>
+            <div><span>Client / staff requirement</span><strong>{detailsRecord.displayText}</strong></div>
+            <div><span>Status</span><strong>Unplaced — not completed</strong></div>
+            <div><span>Required time</span><strong>{detailsRecord.eventKind==="BREAK" && detailsRecord.eventWindowEnd ? `${detailsRecord.eventWindowStart}-${detailsRecord.eventWindowEnd} inclusive` : detailsRecord.originalStartTime || "Flexible"}</strong></div>
             <div><span>Reason</span><strong>{detailsRecord.reason || "Coverage is currently missing."}</strong></div>
             <div><span>Source</span><strong>{detailsRecord.origin === "AUTO_UNCOVERED" ? "Automatic scheduler gap" : "Manager edit displacement"}</strong></div>
           </div>

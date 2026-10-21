@@ -19,6 +19,14 @@ const UnplacedAssignmentSchema = new Schema(
       default: null,
       index: true,
     },
+    eventKind: {
+      type: String,
+      enum: ["CLIENT_1_TO_1", "BREAK", "NAP", "SPEECH"],
+      default: "CLIENT_1_TO_1",
+      index: true,
+    },
+    eventWindowStart: { type: String, default: "" },
+    eventWindowEnd: { type: String, default: "" },
     displayText: {
       type: String,
       required: true,
