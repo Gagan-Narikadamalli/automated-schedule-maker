@@ -13,21 +13,6 @@ export async function POST() {
   const provider = getSchedulerCloudProvider();
   try {
     const model = getSchedulerModel();
-    if (provider === "gemini") {
-      // This read-only metadata request also distinguishes network/key access
-      // from model generation latency. The key stays in a server-only header.
-      const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim() || "";
-      const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000", {
-        headers:{"x-goog-api-key":apiKey},signal:AbortSignal.timeout(15000),cache:"no-store",
-      });
-      console.info("Gemini model access check", {status:response.status,elapsedMs:Date.now()-started});
-      if (!response.ok) return NextResponse.json({ok:false,provider,providerStatus:response.status,
-        elapsedMs:Date.now()-started,error:"Gemini rejected the server API key or project access."},{status:503});
-      const listing = await response.json() as {models?:Array<{name?:string}>};
-      if (!listing.models?.some(item=>item.name===`models/${model.modelId}`)) {
-        return NextResponse.json({ok:false,provider,model:model.modelId,error:"The configured Gemini model is not available to this API key."},{status:503});
-      }
-    }
     const result = await generateText({model,providerOptions:schedulerModelOptions(false,"low"),
       prompt:"Reply with exactly OK. This is a connection check; no user data is included.",
       maxOutputTokens:1000,maxRetries:0,timeout:{totalMs:60000}});
