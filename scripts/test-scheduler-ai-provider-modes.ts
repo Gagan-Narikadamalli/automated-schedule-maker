@@ -177,8 +177,23 @@ assert.match(
 );
 assert.match(
   assistant,
-  /if \(!\(await clearPendingAiState\(requestContext\.locationId\)\)\)/,
-  "Switching providers must always clear Native pending confirmation state."
+  /const \[nativeMessages,setNativeMessages\]/,
+  "Native conversation history must survive provider changes."
+);
+assert.match(
+  assistant,
+  /const \[openaiMessages,setOpenaiMessages\]/,
+  "OpenAI conversation history must survive switching to Free AI."
+);
+assert.match(
+  assistant,
+  /scheduler-ai-chat-v2:/,
+  "Per-provider tab session should retain text conversations while the manager works."
+);
+assert.doesNotMatch(
+  assistant.slice(assistant.indexOf("async function changeProvider("),assistant.indexOf("async function completeConversation(")),
+  /clearPendingAiState\(|setMessages\(\[\]\)/,
+  "Switching between Free AI and OpenAI must NOT erase either chat or pending conversation state."
 );
 
 assert.match(nativeRoute, /provider: "native"/);
