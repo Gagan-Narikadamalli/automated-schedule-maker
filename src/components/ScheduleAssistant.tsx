@@ -617,7 +617,9 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
         ? "OpenAI is reading the screenshot, comparing it with the live scheduler, and preparing a preview. No changes will be made on this upload turn."
         : provider === "native"
           ? "Free AI is resolving the date and analyzing scheduler rules, staff, clients, coverage, breaks, events, and Unplaced work..."
-          : "OpenAI is using high reasoning with the live scheduler context..."
+          : requestIntent === "GENERATE_DAY"
+            ? "OpenAI is choosing valid naps and breaks, then filling the day in smaller 30-minute planning batches. The schedule is saved once, after validation; this can take a few minutes for a large clinic."
+            : "OpenAI is analyzing the live scheduler and validating proposed changes..."
     );
 
     try {
