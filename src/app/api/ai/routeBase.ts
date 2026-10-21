@@ -552,6 +552,7 @@ export async function POST(request: Request) {
       const generationTool=createOpenAIGenerationTools(context,request.signal).generate_schedule;
       const output=await generationTool.execute?.({scope:"DAY",save:true,allowProtectedReplacement:body.allowProtectedReplacement===true || protectedGenerationApproved}) as Record<string,any>;
       const saved=output?.saved===true;
+      const fallbackMode=output?.planningMode==="TEMPLATE_FALLBACK";
       const decisions=Array.isArray(output?.decisionSummary)?output.decisionSummary.filter((item:unknown)=>typeof item==="string"):[];
       const tradeoffs=Array.isArray(output?.tradeoffs)?output.tradeoffs.filter((item:unknown)=>typeof item==="string"):[];
       const metrics=output?.metrics;
@@ -565,7 +566,7 @@ export async function POST(request: Request) {
           (unplaced.length>10?"\n• "+(unplaced.length-10)+" additional blocks in the tray.":"")
         : "";
       const reply = saved
-        ? (output.partialBuild?"Partial AI schedule saved — manager review required":"Complete AI schedule validated and saved")+
+        ? (fallbackMode?"Template-assisted schedule validated and saved (OpenAI planning timed out)":output.partialBuild?"Partial AI schedule saved — manager review required":"Complete AI schedule validated and saved")+
           " for "+resolvedDate.date+". "+(metrics?.coveredClientSlots??0)+" of "+
           (metrics?.requiredClientSlots??0)+" required client/event blocks are covered."+
           (output.partialBuild?" Remaining client blocks are in the Unplaced Assignments tray.":"")+

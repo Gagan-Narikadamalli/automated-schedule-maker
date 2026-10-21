@@ -174,7 +174,7 @@ export async function POST(request: Request) {
     // The large-day batched planner has already asked OpenAI for every cell.
     // Repeating ALL planning batches to polish soft preferences can double
     // latency and hit server timeouts; keep safe decisions instead.
-    const needsImprovement = !plan.batched && (
+    const needsImprovement = !plan.batched && !plan.templateGuided && (
       audit.problems.length>0 || audit.missing.length>0 ||
       quality.handoffs > Math.max(5,roster.clients.length) ||
       quality.shortRuns > Math.max(8,roster.clients.length)
@@ -299,7 +299,7 @@ export async function POST(request: Request) {
       optimization:{proposalsCompared,planningBatches:plan.planningBatches??1,selectedQuality:quality},
       managerSummary:{
         status:statusLabel,saved,requiredClientSlots:audit.required,coveredClientSlots:audit.covered,
-        modelProposalsCompared:proposalsCompared,planningBatches:plan.planningBatches??1,quality:{handoffs:quality.handoffs,shortRuns:quality.shortRuns,preferredPairs:quality.preferredPairs,sameTeam:quality.sameTeam,frontline1to1:quality.frontline1to1,referenceMatches:quality.templateMatches},
+        modelProposalsCompared:proposalsCompared,planningBatches:plan.planningBatches??1,planningMode:plan.templateGuided?(plan.modelUsed===false?"TEMPLATE_FALLBACK":"OPENAI_TEMPLATE_GUIDED"):"OPENAI_FULL_PLAN",quality:{handoffs:quality.handoffs,shortRuns:quality.shortRuns,preferredPairs:quality.preferredPairs,sameTeam:quality.sameTeam,frontline1to1:quality.frontline1to1,referenceMatches:quality.templateMatches},
         unplacedClientSlots:placementIssues.length,unplacedCreated:unplacedCount,
         unplaced:placementIssues.slice(0,40),unresolvedMandatoryEvents:breakIssues,
         summary:complete?"All required client and event blocks placed and independently validated.":
@@ -309,7 +309,8 @@ export async function POST(request: Request) {
       saved,
       regenerationSummary,
       provider:getSchedulerCloudProvider(),
-      modelUsed:true,
+      modelUsed:plan.modelUsed!==false,
+      planningMode:plan.templateGuided?(plan.modelUsed===false?"TEMPLATE_FALLBACK":"OPENAI_TEMPLATE_GUIDED"):"OPENAI_FULL_PLAN",
       decisionSummary:plan.decisions,
       tradeoffs:plan.tradeoffs,
       historicalTraining:{matchedScheduleDays:historicalTraining.matchedScheduleDayCount,matchedAssignments:historicalTraining.matchedRecordCount},
@@ -323,7 +324,7 @@ export async function POST(request: Request) {
       uncoveredRequirements: placementIssues,
       explanation: typeof data.explanation === "string" ? data.explanation.slice(0, 4000) : "",
       error: !valid ? "The AI proposal still has scheduling conflicts after correction. It was not saved; manager review or another proposal is needed." : undefined,
-      message: saved ? (complete ? "Complete AI schedule validated and saved." : `Partial AI schedule saved. ${placementIssues.length} uncovered client blocks added to Unplaced Assignments for human placement.`) : "Validated AI schedule preview; no schedule was overwritten.",
+      message: saved ? (complete ? (plan.modelUsed===false?"Template-assisted fallback schedule validated and saved; OpenAI strategic suggestion did not finish.":"Complete AI schedule validated and saved.") : `Partial AI schedule saved. ${placementIssues.length} uncovered client blocks added to Unplaced Assignments for human placement.`) : "Validated AI schedule preview; no schedule was overwritten.",
     }, { status: valid ? 200 : 422 });
   } catch (error) {
     if (error instanceof Error && [OPENAI_SETUP_MESSAGE].includes(error.message)) return invalid(error.message,503);

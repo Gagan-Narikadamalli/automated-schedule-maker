@@ -3,9 +3,10 @@ import { getSchedulerModel, schedulerModelOptions } from "./schedulerModelProvid
 import { getSlotsInsideTimeRange, getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
 import { buildFixedScheduleChoices,decodeFixedScheduleChoices,type FixedScheduleSnapshot,type FixedScheduleChoices } from "./fixedScheduleChoices";
 import { designFixedDayInBatches } from "./openaiBatchedDayPlanner";
+import { designTemplateGuidedDay,hasUsefulTemplateEvidence } from "./templateGuidedDayPlanner";
 
 export type OpenAIPlanSegment = {staff:string;client:string|null;startTime:string;endTime:string;type:"CLIENT_1_TO_1"|"NAP"|"SPEECH"|"BREAK"|"BREAK_NAP"|"BREAK_SPEECH"};
-export type OpenAISchedulePlan = {segments:OpenAIPlanSegment[];explanation:string;decisions:string[];tradeoffs:string[];fixedChoices?:FixedScheduleChoices;batched?:boolean;planningBatches?:number};
+export type OpenAISchedulePlan = {segments:OpenAIPlanSegment[];explanation:string;decisions:string[];tradeoffs:string[];fixedChoices?:FixedScheduleChoices;batched?:boolean;planningBatches?:number;templateGuided?:boolean;modelUsed?:boolean};
 export async function designOpenAISchedule(snapshot:unknown, corrections?:string[],signal?:AbortSignal) {
   const effort = "high" as const;
   const fixed=snapshot&&typeof snapshot==="object"&&"useFixedCells" in snapshot&&snapshot.useFixedCells===true
@@ -14,6 +15,9 @@ export async function designOpenAISchedule(snapshot:unknown, corrections?:string
   // A single enormous structured response repeatedly reached the 120-second
   // model timeout. Ask for fixed event choices once, then plan six consecutive
   // half-hour columns at a time, preserving prior model choices and continuity.
+  if(fixed&&Object.keys(fixed.grid).length>8&&
+      hasUsefulTemplateEvidence(snapshot as FixedScheduleSnapshot))
+    return designTemplateGuidedDay(snapshot as FixedScheduleSnapshot,signal);
   if (fixed && Object.keys(fixed.grid).length > 8)
     return designFixedDayInBatches(snapshot as FixedScheduleSnapshot,corrections,signal);
   const result=await generateText({
