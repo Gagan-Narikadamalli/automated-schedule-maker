@@ -188,7 +188,13 @@ export async function GET(request: Request) {
         teamId:null,availableSlots:[],active:false
       });
     }
-    const viewConsistencyWarnings=auditSavedDayViewConsistency(staffColumns,plainAssignments);
+    const savedProjectionRows=plainAssignments.map(assignment=>({
+      staffId:scheduleStaffId(assignment.staffId),
+      clientId:assignment.clientId,
+      startTime:String(assignment.startTime),
+      assignmentType:String(assignment.assignmentType)
+    }));
+    const viewConsistencyWarnings=auditSavedDayViewConsistency(staffColumns,savedProjectionRows);
     return NextResponse.json({
       clients: clientRows,
       rosterStaff:plainStaffDocuments.filter(member=>member.active!==false).map(member=>({
