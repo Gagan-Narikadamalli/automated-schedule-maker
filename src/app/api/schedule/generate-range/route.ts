@@ -5,6 +5,7 @@ import { auditLinkedNapBreakRules } from "@/features/scheduler/engine/auditLinke
 import { getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
 import { generateSchedule } from "@/features/scheduler/engine/generateSchedule";
 import { placeStaffBreaksAfterCoverage } from "@/features/scheduler/engine/placeStaffBreaks";
+import { prepareGroupAwareTemplateEvidence } from "@/features/scheduler/engine/prepareGroupAwareTemplateEvidence";
 import { enrichBreakAssignmentsWithFixedEvents } from "@/features/scheduler/engine/reserveBreaks";
 import type {
   SchedulerAssignment,
@@ -203,12 +204,14 @@ export async function POST(request: Request) {
       );
 
       const schedulerInput = historicalTraining.input;
+      const templateEvidence=prepareGroupAwareTemplateEvidence(schedulerInput);
       const protectedAssignments = schedulerInput.existingAssignments.filter(
         shouldKeepExistingAssignment
       );
 
       const coverageResult = generateSchedule({
         ...schedulerInput,
+        referenceAssignments:templateEvidence.references,
         existingAssignments: protectedAssignments,
       });
 
@@ -216,7 +219,7 @@ export async function POST(request: Request) {
         staff: schedulerInput.staff,
         clients: schedulerInput.clients,
         assignments: coverageResult.assignments,
-        referenceAssignments: schedulerInput.referenceAssignments,
+        referenceAssignments: templateEvidence.references,
         callOutStaffIds: schedulerInput.callOutStaffIds,
         rules: {
           ...dayData.extendedRules,
@@ -324,6 +327,8 @@ export async function POST(request: Request) {
         previousReferenceDate: dayData.previousReferenceDate,
         workbookTrainingApplied: workbookTraining.applied,
         workbookTrainingReferences: workbookTraining.referenceCount,
+        groupedTemplateBlocks:templateEvidence.retainedGroupedCoverageCells,
+        ignoredIsolatedTemplateCells:templateEvidence.ignoredIsolatedCoverageCells,
         importedTrainingScheduleDays:
           historicalTraining.matchedScheduleDayCount,
         importedTrainingRecords: historicalTraining.matchedRecordCount,

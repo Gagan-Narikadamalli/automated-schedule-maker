@@ -13,6 +13,7 @@ import { auditLinkedNapBreakRules } from "@/features/scheduler/engine/auditLinke
 import { explainUnmetEventRules } from "@/features/scheduler/engine/explainUnmetEventRules";
 import { classifyEventAuditForPartialSave, auditPartialAssignmentSafety } from "@/features/scheduler/engine/classifyEventAuditForPartialSave";
 import { refillCoverageAfterBreakAlignment } from "@/features/scheduler/engine/refillCoverageAfterBreakAlignment";
+import { prepareGroupAwareTemplateEvidence } from "@/features/scheduler/engine/prepareGroupAwareTemplateEvidence";
 import { getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
 import { generateSchedule } from "@/features/scheduler/engine/generateSchedule";
 import { placeStaffBreaksAfterCoverage } from "@/features/scheduler/engine/placeStaffBreaks";
@@ -137,7 +138,19 @@ export async function POST(request: Request) {
 
     // Fresh generation starts from workbook pins, not previously generated/manual cells.
     // Repair mode is a separate action and retains the saved schedule.
-    const templatePinning = pinWorkbookTemplates(schedulerInput);
+    // Only real multi-slot workbook pairings are pinned. Historical BREAK,
+    // BREAK_NAP and BREAK_SPEECH supply staff break-time hints, never a
+    // locked assumption that today’s child nap must happen at that cell.
+    const existingDayIds = new Set(schedulerInput.existingAssignments.map(item => item.id));
+    const freshReferences = schedulerInput.referenceAssignments.filter(reference =>
+      !existingDayIds.has(reference.id) && reference.source !== "AUTO"
+    );
+    const templateEvidence=prepareGroupAwareTemplateEvidence({
+      ...schedulerInput,referenceAssignments:freshReferences
+    });
+    const templatePinning = pinWorkbookTemplates({
+      ...schedulerInput,referenceAssignments:templateEvidence.groupedCoverageReferences
+    });
     const protectedAssignments = templatePinning.pinned;
 
 
@@ -150,13 +163,9 @@ export async function POST(request: Request) {
     // weekday template and the current attendance/availability.
     // Auto Generate must NEVER learn from the schedule already saved for the
     // target date. Workbook references are independent of existing day cells.
-    const existingDayIds = new Set(schedulerInput.existingAssignments.map(item => item.id));
-    const freshReferences = schedulerInput.referenceAssignments.filter(reference =>
-      !existingDayIds.has(reference.id) && reference.source !== "AUTO"
-    );
     const coverageResult = generateSchedule({
       ...schedulerInput,
-      referenceAssignments: freshReferences,
+      referenceAssignments: templateEvidence.references,
       existingAssignments: protectedAssignments,
     });
 
@@ -168,7 +177,7 @@ export async function POST(request: Request) {
       staff: schedulerInput.staff,
       clients: schedulerInput.clients,
       assignments: coverageResult.assignments,
-      referenceAssignments: freshReferences,
+      referenceAssignments: templateEvidence.references,
       callOutStaffIds: schedulerInput.callOutStaffIds,
       rules: {
         ...dayData.extendedRules,
@@ -178,29 +187,10 @@ export async function POST(request: Request) {
       schedulerRules: schedulerInput.rules,
     });
 
-    const enrichedAssignments = breakPlan.assignments.map(assignment => {
-      // Workbook BREAK, BREAK_NAP and BREAK_SPEECH must remain exactly as saved.
-      const pinned = templatePinning.pinned.find(item =>
-        item.staffId === assignment.staffId && item.startTime === assignment.startTime
-      );
-      // Workbook break/nap cells are historical preferences, not authority
-      // to override a date-specific saved event or a new valid assignment.
-      // A stale pinned BREAK_NAP previously removed real client coverage and
-      // caused the "missing Break/Nap" warnings reported by managers.
-      if(!pinned)return assignment;
-      if(pinned.assignmentType==="BREAK_NAP" &&
-        !schedulerInput.clients.some(client=>
-          client.id===pinned.clientId&&client.napSlots.includes(assignment.startTime)))
-        return assignment;
-      if(pinned.assignmentType==="BREAK_SPEECH" &&
-        !schedulerInput.clients.some(client=>
-          client.id===pinned.clientId&&client.speechSlots.includes(assignment.startTime)))
-        return assignment;
-      if(pinned.assignmentType.startsWith("BREAK") &&
-         !assignment.assignmentType.startsWith("BREAK"))
-        return assignment;
-      return {...assignment,assignmentType:pinned.assignmentType,clientId:pinned.clientId};
-    });
+    // Already-pinned continuous workbook 1:1 blocks remain protected.
+    // Never reapply a historical BREAK_NAP or BREAK_SPEECH over the newly
+    // computed current-day event: only today's dated nap/speech may link.
+    const enrichedAssignments = breakPlan.assignments;
     const eventEnrichedAssignments = enrichBreakAssignmentsWithFixedEvents(
       enrichedAssignments,
       schedulerInput.clients,
@@ -210,7 +200,7 @@ export async function POST(request: Request) {
     // makes its former time available. Give newly free time to uncovered
     // 1:1 clients without moving or replacing ANY existing valid assignment.
     const finalPass=refillCoverageAfterBreakAlignment(
-      {...schedulerInput,referenceAssignments:freshReferences},
+      {...schedulerInput,referenceAssignments:templateEvidence.references},
       eventEnrichedAssignments
     );
     const finalAssignments=finalPass.assignments;
@@ -340,6 +330,9 @@ export async function POST(request: Request) {
         managerGapCount,
         unresolvedEventCount,
         recoveredCoverageAfterBreakMove:finalPass.addedCount,
+        groupedTemplateBlocks:templateEvidence.retainedGroupedCoverageCells,
+        ignoredIsolatedTemplateCells:templateEvidence.ignoredIsolatedCoverageCells,
+        historicalStaffBreakHints:templateEvidence.historicalBreakHints.length,
         unresolvedEventDiagnostics,
         warningCount: warnings.length,
         reservedBreakCount: breakPlan.reservedBreaks.length,
