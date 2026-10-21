@@ -1,4 +1,4 @@
-import { getSchedulerModel, getSchedulerCloudProvider, GEMINI_SETUP_MESSAGE } from "@/features/ai/schedulerModelProvider";
+import { getSchedulerModel, getSchedulerCloudProvider } from "@/features/ai/schedulerModelProvider";
 import { NextResponse } from "next/server";
 import {
   forbiddenResponse,
@@ -284,7 +284,7 @@ export async function POST(request: Request) {
       message: saved ? (complete ? "Complete AI schedule validated and saved." : `Partial AI schedule saved. ${placementIssues.length} uncovered client blocks added to Unplaced Assignments for human placement.`) : "Validated AI schedule preview; no schedule was overwritten.",
     }, { status: valid ? 200 : 422 });
   } catch (error) {
-    if (error instanceof Error && [OPENAI_SETUP_MESSAGE,GEMINI_SETUP_MESSAGE].includes(error.message)) return invalid(error.message,503);
+    if (error instanceof Error && [OPENAI_SETUP_MESSAGE].includes(error.message)) return invalid(error.message,503);
     console.error("AI Schedule preview error:", error);
     const status=error&&typeof error==="object"&&"statusCode" in error?Number(error.statusCode):undefined;
     if(status===429||status!==undefined&&status>=500)return invalid("The AI provider is currently busy or rate-limited. Please try again shortly. The saved schedule was not changed.",503);
