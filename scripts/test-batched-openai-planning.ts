@@ -67,9 +67,10 @@ async function mockPlan(invalid=false){
     const index=requests++;
     let selection:object;
     if(index===0)selection=stage;
-    else if(index===1)selection=makeRows(times.slice(0,6),invalid);
+    else if(index===1)selection=makeRows(times.slice(0,4),invalid);
     else if(index===2&&invalid)selection=makeRows(times.slice(0,6),invalid);
-    else selection=makeRows(times.slice(6));
+    else if(index===(invalid?4:3))selection=makeRows(times.slice(8));
+    else selection=makeRows(times.slice(4,8));
     return new Response(JSON.stringify({
       id:"resp_"+index,object:"response",created_at:1,status:"completed",model:body.model,
       output:[{type:"message",id:"msg_"+index,role:"assistant",status:"completed",
@@ -80,8 +81,8 @@ async function mockPlan(invalid=false){
   try {
     const plan=await designOpenAISchedule(snapshot);
     assert.equal(plan.batched,true);
-    assert.equal(plan.planningBatches,3,"One global event decision + two compact time batches.");
-    assert.equal(requests,invalid?4:3);
+    assert.equal(plan.planningBatches,4,"One global event decision + three four-column batches.");
+    assert.equal(requests,invalid?5:4);
     assert.ok(allRequests.some(req=>JSON.stringify(req).includes("reference")),
       "Model requests should say that historical templates are reference evidence.");
     assert.ok(allRequests.some(req=>JSON.stringify(req).includes("WORKBOOK")),
@@ -131,6 +132,6 @@ async function mockPlan(invalid=false){
 async function main(){
   await mockPlan();
   await mockPlan(true);
-  console.log("PASS batched paid OpenAI schedule: 3 sequential bounded model calls, 20 required blocks, one nap and 3 breaks, continuity, safe partial unplaced tray, and valid batch retries.");
+  console.log("PASS batched paid OpenAI schedule: 4 sequential bounded model calls, 20 required blocks, one nap and 3 breaks, continuity, safe partial unplaced tray, and valid batch retries.");
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});

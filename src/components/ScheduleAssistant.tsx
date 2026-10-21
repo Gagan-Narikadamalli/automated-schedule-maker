@@ -3,7 +3,9 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
+  type SetStateAction,
   type ChangeEvent,
   type FormEvent,
 } from "react";
@@ -248,6 +250,7 @@ function readWorkspaceContext(): WorkspaceContext | null {
 }
 
 export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps) {
+  const [provider,setProvider]=useState<SchedulerAiProviderMode>("openai");
   const [pendingGeneration, setPendingGeneration] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
@@ -255,14 +258,34 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
   const [locationId, setLocationId] = useState("");
   const [date, setDate] = useState(getTodayForDateInput);
   const [dateSelectionExplicit, setDateSelectionExplicit] = useState(false);
-  const [input, setInput] = useState("");
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [nativeInput, setNativeInput] = useState("");
+  const [openaiInput, setOpenaiInput] = useState("");
+  const [nativeMessages,setNativeMessages]=useState<ChatMessage[]>([]);
+  const [openaiMessages,setOpenaiMessages]=useState<ChatMessage[]>([]);
+  const [nativeRetry,setNativeRetry]=useState<{text:string;intent?:"GENERATE_DAY";date:string}|null>(null);
+  const [openaiRetry,setOpenaiRetry]=useState<{text:string;intent?:"GENERATE_DAY";date:string}|null>(null);
+  const requestController=useRef<AbortController|null>(null);
+  const requestSequence=useRef(0);
+  const hydratedLocation=useRef("");
+  const [storageReadyFor,setStorageReadyFor]=useState("");
+  const messages=provider==="native"?nativeMessages:openaiMessages;
+  const input=provider==="native"?nativeInput:openaiInput;
+  const retry=provider==="native"?nativeRetry:openaiRetry;
+  function setMessages(value:SetStateAction<ChatMessage[]>) {
+    (provider==="native"?setNativeMessages:setOpenaiMessages)(value);
+  }
+  function setInput(value:SetStateAction<string>) {
+    (provider==="native"?setNativeInput:setOpenaiInput)(value);
+  }
+  function setRetry(value:{text:string;intent?:"GENERATE_DAY";date:string}|null) {
+    (provider==="native"?setNativeRetry:setOpenaiRetry)(value);
+  }
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [working, setWorking] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
   const [status, setStatus] = useState("Connected to the Automatic Scheduler website");
   const [mode, setMode] = useState<SchedulerAiMode | null>(null);
-  const [provider, setProvider] = useState<SchedulerAiProviderMode>("openai");
+
   const [correctionFor, setCorrectionFor] = useState<string | null>(null);
   const [correction, setCorrection] = useState("");
 
@@ -270,6 +293,39 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     () => locations.find((location) => location.id === locationId)?.name ?? "Clinic",
     [locations, locationId]
   );
+
+  // One tab's session holds text-only context, isolated by clinic/provider.
+  // Do not serialize screenshots, API keys, or confidential attachments.
+  useEffect(()=>{
+    if(!locationId||locationId.startsWith("demo-")||hydratedLocation.current===locationId)return;
+    hydratedLocation.current=locationId;
+    function read(mode:"native"|"openai"):ChatMessage[]{
+      try{
+        const raw=window.sessionStorage.getItem("scheduler-ai-chat-v2:"+locationId+":"+mode);
+        if(!raw)return [];
+        const data=JSON.parse(raw);
+        if(!Array.isArray(data))return [];
+        return data.slice(-50).filter((x:unknown)=>
+          x&&typeof x==="object"&&
+          ["user","assistant"].includes((x as ChatMessage).role)&&
+          typeof (x as ChatMessage).text==="string"
+        ).map((x:ChatMessage)=>({...x,attachments:undefined,attachmentContext:undefined}));
+      }catch{return [];}
+    }
+    setNativeMessages(read("native"));setOpenaiMessages(read("openai"));
+    setStorageReadyFor(locationId);
+  },[locationId]);
+  useEffect(()=>{
+    if(storageReadyFor!==locationId||!locationId)return;
+    for(const [which,chat] of [["native",nativeMessages],["openai",openaiMessages]] as const) {
+      try{
+        const key="scheduler-ai-chat-v2:"+locationId+":"+which;
+        if(!chat.length)window.sessionStorage.removeItem(key);
+        else window.sessionStorage.setItem(key,JSON.stringify(chat.slice(-50)
+          .map(({attachments,attachmentContext,...entry})=>entry)));
+      }catch{/* Browsers may block tab storage; in-memory conversations still work. */}
+    }
+  },[locationId,nativeMessages,openaiMessages,storageReadyFor]);
 
   useEffect(() => {
     function openGeneration(event: Event) {
@@ -368,6 +424,21 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     };
   }
 
+  function stopActiveRequest() {
+    requestSequence.current+=1;
+    requestController.current?.abort();
+    requestController.current=null;
+    setWorking(false);
+    setPendingGeneration(null);
+    setStatus("Request cancelled in this conversation. The server has been asked to stop; refresh the saved calendar before assuming a prior write was cancelled.");
+  }
+
+  function closeAssistant() {
+    if(working)stopActiveRequest();
+    resetConversation();
+    setOpen(false);
+  }
+
   function resetConversation() {
     const workspaceContext = readWorkspaceContext();
     if (workspaceContext) {
@@ -377,6 +448,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     }
     setMessages([]);
     setInput("");
+    setRetry(null);
     setAttachments([]);
     setShowHelp(false);
     setMode(null);
@@ -443,32 +515,20 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
   }
 
   async function changeProvider(nextProvider: SchedulerAiProviderMode) {
-    if (working || nextProvider === provider) return;
-
-    const requestContext = getRequestContext();
-
-    if (!(await clearPendingAiState(requestContext.locationId))) {
-      setStatus(
-        "AI mode was not changed because the previous Native confirmation state could not be cleared safely. Try again."
-      );
-      return;
-    }
-
+    if(nextProvider===provider)return;
+    // Switching providers is NOT ending either conversation. If a request is
+    // in flight, stop it first; no silent background generation on another tab.
+    if(working)stopActiveRequest();
     setProvider(nextProvider);
-    window.localStorage.setItem("scheduler-ai-provider", nextProvider);
-    setMessages([]);
-    setInput("");
+    window.localStorage.setItem("scheduler-ai-provider",nextProvider);
     setAttachments([]);
     setShowHelp(false);
     setMode(null);
     setCorrectionFor(null);
     setCorrection("");
-
-    setStatus(
-      nextProvider === "native"
-        ? "Free AI selected — Native Scheduler AI uses local deterministic reasoning and no paid model tokens."
-        : "OpenAI selected — using server-side OpenAI API credits."
-    );
+    setStatus(nextProvider==="native"
+      ? "Free AI selected. Your OpenAI conversation is preserved in this tab."
+      : "OpenAI selected. Your Free AI conversation is preserved in this tab.");
   }
 
   async function completeConversation(
@@ -608,6 +668,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     };
 
     setMessages((current) => [...current, userMessage]);
+    setRetry({text:message,intent:requestIntent,date:requestContext.date});
     setInput("");
     setAttachments([]);
     setShowHelp(false);
@@ -622,6 +683,9 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
             : "OpenAI is analyzing the live scheduler and validating proposed changes..."
     );
 
+    const controller=new AbortController();
+    requestController.current=controller;
+    const sequence=++requestSequence.current;
     try {
       const endpoint =
         provider === "native" ? "/api/ai/native" : "/api/ai/paid";
@@ -642,9 +706,12 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
             dataUrl: attachment.dataUrl,
           })),
         }),
+        signal:controller.signal,
       });
       const data = (await response.json()) as SchedulerAiResponse;
+      if(sequence!==requestSequence.current || controller.signal.aborted)return;
       if (!response.ok) throw new Error(data.error || "Scheduler AI could not complete the request.");
+      setRetry(null);
 
       setMode(data.mode ?? null);
       if (data.provider) {
@@ -694,6 +761,11 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
         );
       }
     } catch (error) {
+      if(sequence!==requestSequence.current)return;
+      if(error instanceof Error&&error.name==="AbortError"){
+        setStatus("Request stopped. You can retry from the preserved conversation.");
+        return;
+      }
       const messageText =
         error instanceof Error && error.message.trim()
           ? error.message
@@ -709,7 +781,10 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
       ]);
       setStatus(messageText);
     } finally {
-      setWorking(false);
+      if(sequence===requestSequence.current){
+        requestController.current=null;
+        setWorking(false);
+      }
     }
   }
 
@@ -774,7 +849,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
                 type="button"
                 className={styles.closeButton}
                 aria-label="Close Schedule Assistant"
-                onClick={() => setOpen(false)}
+                onClick={closeAssistant}
               >
                 ×
               </button>
@@ -826,7 +901,6 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
                 type="button"
                 className={provider === "native" ? styles.providerActive : ""}
                 aria-pressed={provider === "native"}
-                disabled={working}
                 onClick={() => void changeProvider("native")}
               >
                 <strong>Free AI</strong>
@@ -836,7 +910,6 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
                 type="button"
                 className={provider !== "native" ? styles.providerActive : ""}
                 aria-pressed={provider !== "native"}
-                disabled={working}
                 onClick={() => void changeProvider("openai")}
               >
                 <strong>OpenAI</strong>
@@ -1077,6 +1150,14 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
                 {working ? "Working…" : "Run"}
               </button>
             </div>
+            {working && <button type="button" className={styles.helpButton}
+              onClick={stopActiveRequest}>Stop request</button>}
+            {!working && retry && <button type="button" className={styles.helpButton}
+              onClick={()=>{if(retry.date!==getRequestContext().date){
+                setStatus("Select "+retry.date+" in the calendar before retrying this request.");
+                return;
+              }void askScheduler(undefined,retry.text,retry.intent);}}
+            >Retry last request</button>}
             <small className={styles.attachmentHint}>
               {provider === "native"
                 ? "Free AI: text only, no paid model tokens."
@@ -1092,7 +1173,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
         type="button"
         className={styles.launchButton}
         aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => {if(open)closeAssistant();else setOpen(true);}}
       >
         <span aria-hidden="true">AI</span>
         Schedule Assistant

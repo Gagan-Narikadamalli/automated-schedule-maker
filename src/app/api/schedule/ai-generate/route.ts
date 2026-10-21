@@ -164,7 +164,7 @@ export async function POST(request: Request) {
       importedWorkbookTraining:{matchedScheduleDays:historicalTraining.matchedScheduleDayCount,
         matchedAssignments:historicalTraining.matchedRecordCount},
     };
-    let plan = await designOpenAISchedule(sanitized);
+    let plan = await designOpenAISchedule(sanitized,undefined,request.signal);
     let values = expandOpenAIPlan(plan,staffRefs,clientRefs);
     let audit = validatePreview(roster,values);
     let quality = assessAiCandidate(roster,values);
@@ -191,7 +191,7 @@ export async function POST(request: Request) {
       });
       try {
         const revisedPlan=await designOpenAISchedule(
-          {...sanitized,previousProposal:plan.fixedChoices??plan},feedback.slice(0,120)
+          {...sanitized,previousProposal:plan.fixedChoices??plan},feedback.slice(0,120),request.signal
         );
         const revisedValues=expandOpenAIPlan(revisedPlan,staffRefs,clientRefs);
         const revisedQuality=assessAiCandidate(roster,revisedValues);
@@ -213,6 +213,7 @@ export async function POST(request: Request) {
       return staffId?roster.staff.find(s=>s.id===staffId)?.name??alias:clientId?roster.clients.find(c=>c.id===clientId)?.displayCode??alias:alias;
     });
     plan={...plan,explanation:describe(plan.explanation),decisions:plan.decisions.map(describe),tradeoffs:plan.tradeoffs.map(describe)};
+    if(request.signal.aborted)return invalid("AI planning was cancelled. No generated assignments were saved.",499);
     const data={assignments:values,explanation:plan.explanation};
     const complete=audit.missing.length===0;
     const valid=audit.problems.length===0;
@@ -223,6 +224,7 @@ export async function POST(request: Request) {
     let unplacedCount = 0;
     let regenerationSummary: Record<string, number> | undefined;
     if (body.save === true) {
+      if(request.signal.aborted)return invalid("AI Generate was cancelled before saving.",499);
       if (!valid) {
         return NextResponse.json({
           success:false,saved:false,
@@ -240,6 +242,7 @@ export async function POST(request: Request) {
       const latestNaps=await NapSession.find({locationId,date}).select("clientId startTime endTime").lean();
       if(latestAvailability!==availabilitySnapshot||JSON.stringify(latestNaps)!==JSON.stringify(napDocuments))return invalid("Availability, rules or nap events changed while AI was planning. Please generate again; the saved day was preserved.",409);
       if(scheduleFingerprint(latestDay.input.existingAssignments)!==scheduleSnapshot)return invalid("The saved schedule changed while AI was planning. Generate again to avoid overwriting another edit.",409);
+      if(request.signal.aborted)return invalid("AI Generate was cancelled before database changes.",499);
       await connectToDatabase();
       // Recheck protected rows immediately before the save. The ordinary
       // button cannot replace them without a manager-authorized retry.

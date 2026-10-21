@@ -9,7 +9,8 @@ type Batch = {staffByTime: Record<string,string[]>};
 const object=(properties:Record<string,unknown>)=>({
   type:"object",additionalProperties:false,properties,required:Object.keys(properties)
 });
-const size=6;
+// Four 30-minute columns per request keep outputs bounded (up to ~80 cells with 20 clients).
+const size=4;
 const trim=(items:unknown,limit:number)=>Array.isArray(items)?items.slice(0,limit):[];
 function compactSnapshot(snapshot:FixedScheduleSnapshot, times?:string[]) {
   const o=snapshot as Record<string,unknown>;
@@ -116,11 +117,11 @@ export function fixedCellCandidates(snapshot:FixedScheduleSnapshot,events:Stage,
 }
 
 /**
- * One small model response for nap/break choices, then 6 consecutive half-hour
+ * One small model response for nap/break choices, then 4 consecutive half-hour
  * columns per response. The whole day is assembled in memory, hard-validated
  * and saved atomically by the existing API; there are NO partial DB writes.
  */
-export async function designFixedDayInBatches(snapshot:FixedScheduleSnapshot,corrections:string[]=[]):Promise<OpenAISchedulePlan>{
+export async function designFixedDayInBatches(snapshot:FixedScheduleSnapshot,corrections:string[]=[],signal?:AbortSignal):Promise<OpenAISchedulePlan>{
   const fixed=buildFixedScheduleChoices(snapshot);
   const props=fixed.schema.properties as Record<string,unknown>;
   const stageSchema=object({
@@ -135,8 +136,8 @@ export async function designFixedDayInBatches(snapshot:FixedScheduleSnapshot,cor
   });
   async function chooseEvents(prompt:string) {
     const response=await generateText({
-      model:getSchedulerModel(),providerOptions:schedulerModelOptions(true,"medium"),
-      reasoning:"medium",maxOutputTokens:4500,maxRetries:0,timeout:{totalMs:55000},
+      model:getSchedulerModel(),providerOptions:schedulerModelOptions(true,"medium"),abortSignal:signal,
+      reasoning:"medium",maxOutputTokens:3000,maxRetries:0,timeout:{totalMs:45000},
       instructions:"Independently plan today's staff breaks and client naps using only provided numbered website aliases. The template is historical evidence and may be rejected entirely. Choose each nap start and each staff break independently, linking a caregiver break to a child's nap when it improves coverage, but not as a prerequisite to supervision. Exactly one valid break per eligible staff and one supervised nap per scheduled child; hard attendance and restrictions always apply. You may bend team, continuity, 4-hour grouping, typical clients/day, and template preferences to achieve better safe coverage. Never invent shifts or double book a person. Explain observable decisions and tradeoffs, not private chain of thought.",
       prompt,output:Output.object({schema:jsonSchema<Stage>(stageSchema)})
     });
@@ -157,6 +158,7 @@ export async function designFixedDayInBatches(snapshot:FixedScheduleSnapshot,cor
   const allocatedSlots:Record<string,number>={};
   let batchCount=0;
   for(let offset=0;offset<allTimes.length;offset+=size){
+    if(signal?.aborted)throw new Error("AI generation cancelled by manager");
     const times=allTimes.slice(offset,offset+size);
     const columns=Object.fromEntries(times.map(time=>[time,Object.keys(grid[time])]));
     const candidateGroups=Object.fromEntries(times.map(time=>[time,
@@ -180,8 +182,8 @@ export async function designFixedDayInBatches(snapshot:FixedScheduleSnapshot,cor
     });
     async function planBatch(request:string){
       const response=await generateText({
-        model:getSchedulerModel(),providerOptions:schedulerModelOptions(true,"low"),
-        reasoning:"low",maxOutputTokens:5000,maxRetries:0,timeout:{totalMs:48000},
+        model:getSchedulerModel(),providerOptions:schedulerModelOptions(true,"low"),abortSignal:signal,
+        reasoning:"low",maxOutputTokens:3600,maxRetries:0,timeout:{totalMs:42000},
         instructions:"Independently select the BEST eligible 30-minute therapist assignment for every child. Do not reproduce the workbook template or historical schedule by default: templates are fallible examples and should be overridden when current attendance, uninterrupted coverage, break/naps or better continuity justify it. You may relax soft preferences (team, typical pair counts, rotation patterns, target block lengths) if safe coverage increases, but never break eligibility, hard restrictions, service location, actual attendance, mandatory events or the one-staff-per-slot rule. A nap can be supervised without being that staff member's break. Avoid gratuitous 30-minute changes; make an intentional handoff after nap when it serves another child. Use UNPLACED only if no safe coverage can be assigned. Return exact structured JSON, not narrative. Server validates before save.",
         prompt:request,output:Output.object({schema:jsonSchema<Batch>(schema)})
       });
@@ -208,7 +210,7 @@ export async function designFixedDayInBatches(snapshot:FixedScheduleSnapshot,cor
     }
     let errors=problems(batch);
     if(errors.length){
-      // Only retry the offending six columns. Never repeat the complete day.
+      // Only retry the offending four columns. Never repeat the complete day.
       try {
         batch=await planBatch(prompt+"\nCorrect the following invalid cells without changing other time columns: "+
           errors.slice(0,12).join("; "));

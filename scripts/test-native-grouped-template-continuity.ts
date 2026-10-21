@@ -1,4 +1,3 @@
-process.env.NAP_DEBUG_TEST="true";
 import assert from "node:assert/strict";
 import { prepareGroupAwareTemplateEvidence } from "../src/features/scheduler/engine/prepareGroupAwareTemplateEvidence";
 import { pinWorkbookTemplates } from "../src/features/scheduler/engine/pinWorkbookTemplates";

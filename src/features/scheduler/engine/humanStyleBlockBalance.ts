@@ -460,6 +460,16 @@ export function repairLinkedNapReliefHandoffs(
     if (!client || !client.napSlots.includes(linked.startTime)) continue;
     const owner = staff.find(p => p.id === linked.staffId);
     if (!owner) continue;
+    // A correct linked nap must NEVER be handed away from the staff member
+    // already covering this child immediately before or after the nap.
+    // The older relief optimizer transferred the nap to an idle therapist
+    // merely to relocate a break, creating the exact IsMo/JeMa fragmentation.
+    const before = shiftTime(linked.startTime,-_rules.slotLengthMinutes);
+    const after = shiftTime(linked.startTime,_rules.slotLengthMinutes);
+    const isExistingCaregiver = [before,after].some(time =>
+      result.some(a => a.staffId===owner.id && a.clientId===client.id &&
+        a.startTime===time && a.assignmentType==="CLIENT_1_TO_1"));
+    if (isExistingCaregiver) continue;
     // Never transfer the break if the original employee has another break.
     if (result.filter(a => a.staffId === owner.id && breakTypes.has(a.assignmentType)).length !== 1) continue;
     // A linked nap only moves to a staff member genuinely free at the nap time.

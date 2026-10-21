@@ -549,7 +549,7 @@ export async function POST(request: Request) {
     const protectedGenerationApproved = isProtectedDayGenerationApproval(message, history, resolvedDate.date);
     if (body.intent === "GENERATE_DAY" || isExplicitDayGenerationCommand(message) || protectedGenerationApproved) {
       if (!writeToolsEnabled) return NextResponse.json({error:"This request cannot save a schedule because AI writes are disabled or the request is read-only."},{status:403});
-      const generationTool=createOpenAIGenerationTools(context).generate_schedule;
+      const generationTool=createOpenAIGenerationTools(context,request.signal).generate_schedule;
       const output=await generationTool.execute?.({scope:"DAY",save:true,allowProtectedReplacement:body.allowProtectedReplacement===true || protectedGenerationApproved}) as Record<string,any>;
       const saved=output?.saved===true;
       const decisions=Array.isArray(output?.decisionSummary)?output.decisionSummary.filter((item:unknown)=>typeof item==="string"):[];
@@ -641,7 +641,7 @@ This upload turn is PREVIEW-ONLY. Compare the extracted source data with live sc
           ...createSchedulerWriteTools(context),
           ...createSchedulerBulkTools(context),
           ...createPaidTemplateTools(context),
-          ...createOpenAIGenerationTools(context),
+          ...createOpenAIGenerationTools(context,request.signal),
         }
       : {
           ...readTools,

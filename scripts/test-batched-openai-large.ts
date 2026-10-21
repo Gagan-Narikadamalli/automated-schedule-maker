@@ -39,7 +39,7 @@ globalThis.fetch=async(url,options)=>{
   assert.equal(String(url),"https://api.openai.com/v1/responses");
   const body=JSON.parse(String(options?.body));
   const n=requests++;
-  const batchTimes=times.slice((n-1)*6,n*6);
+  const batchTimes=times.slice((n-1)*4,n*4);
   const response=n===0?stage:{staffByTime:Object.fromEntries(
     batchTimes.map(time=>[time,Array.from({length:20},(_,i)=>cellStaff(i,time))]))};
   assert.ok(JSON.stringify(body).length<105000,"Model request must stay bounded by current planning batch.");
@@ -54,8 +54,8 @@ async function main(){
   try{
     const plan=await designOpenAISchedule(fixed);
     assert.equal(plan.batched,true);
-    assert.equal(plan.planningBatches,4);
-    assert.equal(requests,4,"One global event stage plus three six-column staff assignment requests.");
+    assert.equal(plan.planningBatches,5);
+    assert.equal(requests,5,"One global event stage plus four four-column staff assignment requests.");
     const staffIds=new Map(staff.map((s,i)=>[s.id,"s"+(i+1)]));
     const clientIds=new Map(clients.map((c,i)=>[c.id,"c"+(i+1)]));
     const rows=expandOpenAIPlan(plan,staffIds,clientIds);
@@ -73,7 +73,7 @@ async function main(){
     assert.equal(rows.filter(r=>r.assignmentType==="BREAK_NAP").length,10);
     assert.equal(rows.filter(r=>r.assignmentType==="BREAK").length,16);
     assert.equal(rows.filter(r=>r.assignmentType==="CLIENT_1_TO_1").length,310);
-    console.log("PASS model-planned 20 clients / 26 staff / 320 client slots: 10 linked naps, 26 staff breaks and 3 bounded time-column batches (mocked API).");
+    console.log("PASS model-planned 20 clients / 26 staff / 320 client slots: 10 linked naps, 26 staff breaks and 4 bounded time-column batches (mocked API).");
   }finally{
     globalThis.fetch=previousFetch;
     if(previousKey===undefined)delete process.env.OPENAI_API_KEY;
