@@ -80,8 +80,6 @@ function run(name:string,primary:string,child:string,service:string[],nap:string
    callOutStaffIds:[],referenceAssignments:evidence.references,
    rules:breakRules,schedulerRules:rules
  });
- console.log("DEBUG GROUP "+name+" generated="+JSON.stringify(generated.assignments.map(a=>[a.staffId,a.clientId,a.startTime,a.assignmentType]))+
-   " placed="+JSON.stringify(placed.assignments.map(a=>[a.staffId,a.clientId,a.startTime,a.assignmentType])));
  const serviceRows=placed.assignments.filter(a=>a.assignmentType==="CLIENT_1_TO_1"&&a.clientId===child);
  assert.ok(serviceRows.length===service.length,
    name+" client service must be covered, expected "+service.length+" got "+serviceRows.length);

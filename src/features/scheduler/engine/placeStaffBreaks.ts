@@ -924,25 +924,25 @@ function reserveRequiredNapBreaks(
       const after=shiftTime(time,rules.slotLengthMinutes);
       const eligible=staff.filter(person=>canSupervise(person,client,time)&&
         !assignments.some(a=>a.staffId===person.id&&a.startTime===time));
-      eligible.sort((a,b)=>{
-        const preferred=(person:SchedulerStaff)=>{
-          const previous=assignments.some(row=>row.staffId===person.id &&
-            row.clientId===client.id&&row.startTime===before&&
-            row.assignmentType==="CLIENT_1_TO_1");
-          const next=assignments.some(row=>row.staffId===person.id &&
-            row.clientId===client.id&&row.startTime===after&&
-            row.assignmentType==="CLIENT_1_TO_1");
-          const breaks=linkDecision(person,time);
-          // Strong preference for existing caregiver BEFORE nap. Having a
-          // movable break later improves the choice (no extra break needed).
-          return (previous?0:next?20:45) +
-            (breaks.shouldLink?(breaks.movable.length?0:3):20) +
-            (!person.teamId||person.teamId!==client.teamId?3:0);
-        };
-        return preferred(a)-preferred(b)||
-          coverageRoleTier(a.role)-coverageRoleTier(b.role)||
-          a.name.localeCompare(b.name);
-      });
+
+      // Explicit priority tiers, not just a weak scoring bonus:
+      // (1) therapist who already covers the child BEFORE this nap,
+      // (2) therapist who covers the child AFTER the nap,
+      // (3) other eligible caregivers.
+      // This prevents a free relief worker from "stealing" a supervised
+      // nap and forcing an avoidable client-staff handoff.
+      const adjacentCoverage=(person:SchedulerStaff,at:string|null)=>
+        Boolean(at&&assignments.some(row=>
+          row.staffId===person.id&&row.clientId===client.id&&
+          row.startTime===at&&row.assignmentType==="CLIENT_1_TO_1"));
+      const rank=(person:SchedulerStaff)=>{
+        const beforeRank=adjacentCoverage(person,before)?0:
+          adjacentCoverage(person,after)?1:2;
+        const decision=linkDecision(person,time);
+        return beforeRank*100+(decision.shouldLink?0:15)+
+          (decision.movable.length?0:1)+coverageRoleTier(person.role)*3;
+      };
+      eligible.sort((a,b)=>rank(a)-rank(b)||a.name.localeCompare(b.name));
       const caregiver=eligible[0];
       if(!caregiver)continue;
       const decision=linkDecision(caregiver,time);
