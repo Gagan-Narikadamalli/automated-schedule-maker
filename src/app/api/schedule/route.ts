@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { getEndTimeForSlot, patternMatchesDate } from "@/features/scheduler/engine/dateUtils";
 import { applyFixedNapSessions } from "@/features/scheduler/server/applyFixedNapSessions";
 import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySchedulerInput";
+import { auditSavedDayViewConsistency, scheduleStaffId, type ScheduleViewStaff } from "@/features/scheduler/scheduleViewConsistency";
 import {
   forbiddenResponse,
   requireApiSession,
@@ -57,10 +58,7 @@ function serializeAssignment(assignment: PlainDatabaseRecord) {
     id: String(assignment._id),
     _id: undefined,
     locationId: String(assignment.locationId),
-    staffId:
-      assignment.staffId && typeof assignment.staffId === "object"
-        ? assignment.staffId
-        : String(assignment.staffId),
+    staffId: scheduleStaffId(assignment.staffId),
     clientId: client ?? (assignment.clientId ? String(assignment.clientId) : null),
   };
 }
@@ -98,8 +96,8 @@ export async function GET(request: Request) {
       savedDates,
     ] = await Promise.all([
       buildDaySchedulerInput(locationId, date),
-      Staff.find({ locationId, active: true })
-        .select("fullName role color teamId shiftPatterns startDate endDate")
+      Staff.find({ locationId })
+        .select("fullName role color teamId shiftPatterns startDate endDate active")
         .sort({ fullName: 1 })
         .lean(),
       Client.find({ locationId, active: true })
@@ -151,43 +149,59 @@ export async function GET(request: Request) {
     // current shift/attendance settings no longer match the saved schedule.
     // Otherwise client view displays coverage with no corresponding staff cell.
     const assignedStaffIds = new Set(
-      plainAssignments.map((assignment) =>
-        String(typeof assignment.staffId === "object"
-          ? assignment.staffId?._id ?? assignment.staffId?.id ?? ""
-          : assignment.staffId ?? "")
-      ).filter(Boolean)
+      plainAssignments.map((assignment) => scheduleStaffId(assignment.staffId)).filter(Boolean)
     );
-    const absentClientIds = new Set(dayData.input.clients.map((client) => client.id));
-    const clientRows = plainClientDocuments.map((client) => ({ id: String(client._id), code: String(client.displayCode ?? ""), name: firstNameOnly(client.fullName ?? client.displayCode), color: String(client.color ?? "#D9F4EE") }));
+    const clientRows = plainClientDocuments.map((client) => ({
+      id:String(client._id),code:String(client.displayCode??""),
+      name:firstNameOnly(client.fullName??client.displayCode),
+      color:String(client.color??"#D9F4EE")
+    }));
 
+    // Include inactive therapists when an older saved assignment still refers
+    // to them. Hiding that column made Client View show coverage while Staff
+    // View looked empty. Never imply that archived staff are available.
+    const staffColumns: ScheduleViewStaff[] = plainStaffDocuments
+      .filter(member => {
+        const id=String(member._id);
+        const schedulerMember=dayData.staff.find(record=>record.id===id);
+        const hasShift=Array.isArray(member.shiftPatterns) &&
+          member.shiftPatterns.some((pattern:PlainDatabaseRecord)=>
+            patternMatchesDate(pattern.days??[],date));
+        return assignedStaffIds.has(id) ||
+          (member.active!==false && Boolean(schedulerMember &&
+            (schedulerMember.availableSlots.length>0 || hasShift)));
+      })
+      .map(member=>({
+        id:String(member._id),
+        name:firstNameOnly(member.fullName)+(member.active===false?" (inactive)":""),
+        role:String(member.role??""),
+        color:String(member.color??"#DCE9F8"),
+        teamId:member.teamId?String(member.teamId):null,
+        availableSlots:availableSlotMap.get(String(member._id))??[],
+        active:member.active!==false,
+      }));
+    const knownStaffIds=new Set(staffColumns.map(member=>member.id));
+    for(const id of assignedStaffIds) {
+      if(knownStaffIds.has(id))continue;
+      staffColumns.push({
+        id,name:"Archived staff (review)",role:"OTHER",color:"#FCE2D7",
+        teamId:null,availableSlots:[],active:false
+      });
+    }
+    const viewConsistencyWarnings=auditSavedDayViewConsistency(staffColumns,plainAssignments);
     return NextResponse.json({
       clients: clientRows,
-      rosterStaff: plainStaffDocuments.map((member) => ({
-        id: String(member._id),
-        name: firstNameOnly(member.fullName),
-        role: String(member.role ?? ""),
-        color: String(member.color ?? "#DCE9F8"),
+      rosterStaff:plainStaffDocuments.filter(member=>member.active!==false).map(member=>({
+        id:String(member._id),name:firstNameOnly(member.fullName),
+        role:String(member.role??""),color:String(member.color??"#DCE9F8")
       })),
-      date,
-      locationId,
-      recentSavedScheduleDates,
-      staff: plainStaffDocuments
-        .filter((staffMember) => {
-          const schedulerMember = dayData.staff.find((record) => record.id === String(staffMember._id));
-          const hasShiftToday = Array.isArray(staffMember.shiftPatterns) && staffMember.shiftPatterns.some(
-            (pattern: PlainDatabaseRecord) => patternMatchesDate(pattern.days ?? [], date)
-          );
-          return assignedStaffIds.has(String(staffMember._id)) || Boolean(schedulerMember && (schedulerMember.availableSlots.length > 0 || hasShiftToday));
-        })
-        .map((staffMember) => ({
-          id: String(staffMember._id),
-          name: firstNameOnly(staffMember.fullName),
-          role: String(staffMember.role ?? ""),
-          color: String(staffMember.color ?? "#DCE9F8"),
-          teamId: staffMember.teamId ? String(staffMember.teamId) : null,
-          availableSlots: availableSlotMap.get(String(staffMember._id)) ?? [],
-        })),
-      assignments: plainAssignments.filter((assignment) => !assignment.clientId || assignment.assignmentType !== "CLIENT_1_TO_1" || absentClientIds.has(String(typeof assignment.clientId === "object" ? assignment.clientId._id : assignment.clientId))).map((assignment) => serializeAssignment(assignment)),
+      date,locationId,recentSavedScheduleDates,
+      staff:staffColumns,
+      viewConsistencyWarnings,
+      // Both calendar projections get identical persisted rows. A row no
+      // longer consistent with today's roster is shown with a warning,
+      // not silently dropped from only one view.
+      assignments:plainAssignments.map(serializeAssignment),
       clientEvents: effectiveClients.flatMap((client) => {
         const presentation = clientPresentation.get(client.id);
         return [

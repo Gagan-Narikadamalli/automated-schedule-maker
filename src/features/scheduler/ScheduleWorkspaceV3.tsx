@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState, type DragEvent } from "react";
 import { ManagementModal } from "@/components/ManagementModal";
 import { DAILY_TIME_SLOTS } from "./constants";
 import { getVisibleStaffIndexes } from "./callOutVisibility";
+import { hiddenFullDayCallOutStaff, type ScheduleViewAssignment } from "./scheduleViewConsistency";
 import {
   createDemoGrid,
   DEMO_STAFF,
@@ -71,6 +72,7 @@ type ScheduleResponse = {
   assignments?: ScheduleAssignment[];
   recentSavedScheduleDates?: string[];
   requiredClientSlots?: number;
+  viewConsistencyWarnings?: Array<{code:string;message:string}>;
   error?: string;
 };
 
@@ -347,6 +349,7 @@ export function ScheduleWorkspaceV3() {
   const [manualMode, setManualMode] = useState(false);
   const [statusMessage, setStatusMessage] = useState("Loading the clinic schedule...");
   const [schedulerWarnings, setSchedulerWarnings] = useState<string[]>([]);
+  const [viewConsistencyWarnings, setViewConsistencyWarnings] = useState<string[]>([]);
   const [showSchedulerWarnings, setShowSchedulerWarnings] = useState(false);
   const [unplacedAssignments, setUnplacedAssignments] = useState<UnplacedRecord[]>([]);
   const [placementRecord, setPlacementRecord] = useState<UnplacedRecord | null>(null);
@@ -483,7 +486,11 @@ export function ScheduleWorkspaceV3() {
     }
   }
 
-  async function loadCallOuts(requestedLocationId = locationId, requestedDate = selectedDate, dayStaff: ScheduleStaff[] = staff) {
+  async function loadCallOuts(
+    requestedLocationId = locationId, requestedDate = selectedDate,
+    dayStaff: ScheduleStaff[] = staff,
+    dayAssignments: ScheduleViewAssignment[] = []
+  ) {
     if (!requestedLocationId || requestedLocationId.startsWith("demo-")) {
       setCallOutStaffIds([]);
       setSavedCallOutStaffIds([]);
@@ -502,7 +509,9 @@ export function ScheduleWorkspaceV3() {
     const ids = data.selectedStaffIds ?? [];
     setCallOutStaffIds(ids);
     setSavedCallOutStaffIds(ids);
-    setFullDayCallOutStaffIds((data.fullDayStaffIds ?? []).filter((id) => dayStaff.some((person) => person.id === id && person.availableSlots.length === 0)));
+    setFullDayCallOutStaffIds(
+      hiddenFullDayCallOutStaff(data.fullDayStaffIds ?? [],dayStaff,dayAssignments)
+    );
     const clientResponse = await fetch(`/api/client-call-outs?locationId=${encodeURIComponent(requestedLocationId)}&date=${encodeURIComponent(requestedDate)}`, { cache: "no-store" });
     const clientData = await readJson<ClientCallOutResponse>(clientResponse);
     if (!clientResponse.ok) throw new Error(clientData.error || "Client call-outs could not be loaded.");
@@ -540,24 +549,36 @@ export function ScheduleWorkspaceV3() {
       setRosterStaff(data.rosterStaff ?? []);
       setClients(data.clients ?? []);
       setInitialGrid(buildGrid(nextStaff, nextAssignments));
+      setViewConsistencyWarnings((data.viewConsistencyWarnings ?? []).map(warning=>warning.message));
       setRequiredClientSlots(data.requiredClientSlots ?? 0);
       setGridVersion((current) => current + 1);
-      await Promise.all([
+      // Auxiliary attendance/unplaced requests must not erase the genuine
+      // schedule when one endpoint fails. The client calendar uses the same
+      // primary schedule endpoint, so keep these two projections consistent.
+      const aux=await Promise.allSettled([
         loadUnplacedAssignments(requestedLocationId, requestedDate),
-        loadCallOuts(requestedLocationId, requestedDate, nextStaff),
+        loadCallOuts(requestedLocationId, requestedDate, nextStaff,nextAssignments),
         loadAttendance(requestedLocationId, requestedDate),
       ]);
+      const partialFailures=aux.filter(result=>result.status==="rejected");
       const recentDates = data.recentSavedScheduleDates ?? [];
-      setStatusMessage(
-        nextAssignments.length === 0 && recentDates.length > 0
-          ? `No saved assignments exist for ${requestedDate}. Other saved schedules still exist in MongoDB on recent dates: ${recentDates.join(", ")}.`
-          : `Loaded ${nextAssignments.length} saved assignment${nextAssignments.length === 1 ? "" : "s"}. ${data.requiredClientSlots ?? 0} client blocks require coverage.`
+      const baseMessage=nextAssignments.length === 0 && recentDates.length > 0
+        ? `No saved assignments exist for ${requestedDate}. Other saved schedules still exist in MongoDB on recent dates: ${recentDates.join(", ")}.`
+        : `Loaded ${nextAssignments.length} saved assignment${nextAssignments.length === 1 ? "" : "s"}. ${data.requiredClientSlots ?? 0} client blocks require coverage.`;
+      setStatusMessage(baseMessage+
+        (partialFailures.length?` ${partialFailures.length} auxiliary panel(s) could not refresh; the saved assignment grid remains unchanged.`:"")
       );
     } catch (error) {
-      setLocations(DEMO_LOCATIONS);
-      setLocationId(DEMO_LOCATIONS[0].id);
-      loadDemoSchedule();
-      setStatusMessage(error instanceof Error ? `${error.message} Preview mode has been enabled.` : "The live schedule could not be loaded.");
+      // Do not silently switch a real clinic to demo assignments on API failure.
+      // That previously made staff columns appear empty while client view still
+      // showed live saved 1:1 assignments.
+      setStaff([]);
+      setInitialGrid([]);
+      setUnplacedAssignments([]);
+      setViewConsistencyWarnings([]);
+      setStatusMessage(error instanceof Error
+        ? `The live staff schedule could not be loaded: ${error.message}. Refresh to try again; no saved assignments were changed.`
+        : "The live staff schedule could not be loaded; no saved assignments were changed.");
     } finally {
       setLoading(false);
     }
@@ -1282,6 +1303,15 @@ export function ScheduleWorkspaceV3() {
         <span>{statusMessage}</span>
       </section>
 
+      {viewConsistencyWarnings.length > 0 && (
+        <section className="notice warning-notice" role="alert">
+          <strong>{viewConsistencyWarnings.length} saved assignment consistency warning(s) — review required</strong>
+          <ul>
+            {viewConsistencyWarnings.slice(0,6).map((warning,index)=><li key={index}>{warning}</li>)}
+          </ul>
+          {viewConsistencyWarnings.length>6 && <p>Plus {viewConsistencyWarnings.length-6} additional issues. These rows stay visible instead of appearing as empty staff cells.</p>}
+        </section>
+      )}
       <div className="schedule-layout">
         <section className="schedule-card">
           {loading ? (

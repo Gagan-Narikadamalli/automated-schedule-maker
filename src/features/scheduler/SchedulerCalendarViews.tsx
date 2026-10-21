@@ -57,6 +57,7 @@ type ScheduleResponse = {
   assignments?: ScheduleAssignment[];
   clientEvents?: ClientEvent[];
   requiredClientSlots?: number;
+  viewConsistencyWarnings?: Array<{code:string;message:string}>;
   error?: string;
 };
 
@@ -270,6 +271,7 @@ function ClientScheduleView({
   const [staff, setStaff] = useState<ScheduleStaff[]>([]);
   const [assignments, setAssignments] = useState<ScheduleAssignment[]>([]);
   const [clientEvents, setClientEvents] = useState<ClientEvent[]>([]);
+  const [viewConsistencyWarnings, setViewConsistencyWarnings] = useState<string[]>([]);
   const [unplaced, setUnplaced] = useState<UnplacedRecord[]>([]);
 
   const load = useCallback(async (silent = false) => {
@@ -291,6 +293,7 @@ function ClientScheduleView({
       setStaff(scheduleData.staff ?? []);
       setAssignments(scheduleData.assignments ?? []);
       setClientEvents(scheduleData.clientEvents ?? []);
+      setViewConsistencyWarnings((scheduleData.viewConsistencyWarnings ?? []).map(warning=>warning.message));
       setUnplaced(unplacedData.unplacedAssignments ?? []);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Client schedule could not be loaded.");
@@ -471,6 +474,13 @@ function ClientScheduleView({
         </div>
       </div>
 
+      {viewConsistencyWarnings.length > 0 && (
+        <div className={styles.errorState} role="alert">
+          <strong>{viewConsistencyWarnings.length} saved assignment(s) require review; both views display the same persisted rows.</strong>
+          {viewConsistencyWarnings.slice(0,3).map((warning,index)=><p key={index}>{warning}</p>)}
+          {viewConsistencyWarnings.length > 3 && <p>Plus {viewConsistencyWarnings.length-3} further warning(s).</p>}
+        </div>
+      )}
       {clients.length === 0 ? (
         <div className={styles.emptyState}>No client assignments are saved for this date.</div>
       ) : (

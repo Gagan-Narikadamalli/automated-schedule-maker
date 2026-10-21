@@ -104,6 +104,11 @@ export function ScheduleWorkspaceShell() {
 
   function handleViewChange(nextView: ScheduleView) {
     setView(nextView);
+    if (nextView === "STAFF") {
+      // Client view reloads on selection; also refresh staff from the same
+      // persisted endpoint to avoid a stale staff grid after external edits.
+      setStaffReloadKey((current)=>current+1);
+    }
     if (nextView === "CLIENT") {
       // The Client Schedule is a projection of the exact same saved day
       // assignments used by the Staff Schedule. Force a fresh read whenever
