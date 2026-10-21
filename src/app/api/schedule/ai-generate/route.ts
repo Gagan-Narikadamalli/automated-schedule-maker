@@ -9,6 +9,7 @@ import {
 } from "@/lib/api/auth";
 import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySchedulerInput";
 import { applyHistoricalTraining } from "@/features/scheduler/server/applyHistoricalTraining";
+import { applyFixedNapSessions } from "@/features/scheduler/server/applyFixedNapSessions";
 import { persistScheduleReplacementSafely } from "@/features/scheduler/server/persistScheduleReplacementSafely";
 import { getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
 import { connectToDatabase } from "@/lib/db";
@@ -66,19 +67,22 @@ export async function POST(request: Request) {
       .select("clientId startTime endTime").lean() as unknown as Array<{
         clientId: unknown;startTime:string;endTime:string
       }>;
-    const windows = new Map<string,Set<string>>();
-    for(const nap of napDocuments) {
-      const id=String(nap.clientId);
-      const allowed=getSlotsInsideTimeRange(nap.startTime,nap.endTime);
-      const set=windows.get(id)??new Set<string>();
-      for(const t of allowed)set.add(t);
-      windows.set(id,set);
-    }
-    dayData.input.clients=dayData.input.clients.map(c=>{
-      const napSlots=[...(windows.get(c.id)??new Set<string>())].filter(t=>c.requiredSlots.includes(t)).sort();
-      return {...c,napSlots,
-        requiredSlots:[...new Set([...c.requiredSlots,...c.speechSlots,...napSlots])].sort()};
-    });
+    // Use the same saved-event and attendance-aware 30-minute nap resolver
+    // as Auto Generate. A flexible nap WINDOW must not become several naps.
+    const fixedNap = await applyFixedNapSessions(locationId,date,dayData.input);
+    dayData.input = {
+      ...fixedNap.input,
+      clients: fixedNap.input.clients.map(client => ({
+        ...client,
+        // AI choice columns include one cell per required 1:1, nap and speech.
+        // Mandatory nap/speech events replace 1:1 in the selected cell.
+        requiredSlots:[...new Set([
+          ...client.requiredSlots,
+          ...client.napSlots,
+          ...client.speechSlots
+        ])].sort()
+      }))
+    };
     // A specialized OpenAI scheduling prompt operates only on pseudonymous IDs.
     // Database credentials and staff/client names never leave the application.
     // Learn from date-safe imported workbook records already stored in MongoDB.

@@ -80,3 +80,18 @@ export function createSchedulerPrivacy(entities: SchedulerPrivateEntity[]) {
 }
 
 export type SchedulerPrivacy = ReturnType<typeof createSchedulerPrivacy>;
+
+/**
+ * Preserve only the validated conversational data the model may receive.
+ * Attachment filenames and prior image analysis are deliberately never sent.
+ * Do NOT pass history through the generic privacy.encode object scrubber:
+ * omitted array fields become a string sentinel and previously crashed the
+ * conversation renderer when it expected .join().
+ */
+export function encodeSafeSchedulerHistory<T extends {
+  role: "user" | "assistant"; text: string; effectiveDate?: string
+}>(history: T[], encodeText: (value: string) => string) {
+  return history.map(({role,text,effectiveDate}) => ({
+    role, text: encodeText(text), effectiveDate
+  }));
+}

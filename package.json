@@ -23,7 +23,7 @@
     "test:dead-code": "tsc --noEmit --noUnusedLocals --noUnusedParameters",
     "test:native-ai-isolation": "tsx scripts/test-scheduler-ai-provider-modes.ts",
     "test:ai-generate": "tsx scripts/test-direct-ai-generate.ts",
-    "test:openai": "tsx scripts/test-openai-integration.ts && tsx scripts/test-fixed-ai-planning.ts && tsx scripts/test-ai-partial-coverage.ts",
+    "test:openai": "tsx scripts/test-openai-integration.ts && tsx scripts/test-fixed-ai-planning.ts && tsx scripts/test-ai-partial-coverage.ts && tsx scripts/test-scheduler-ai-privacy.ts",
     "test:ai-privacy": "tsx scripts/test-scheduler-ai-privacy.ts",
     "test:paid-readonly": "tsx scripts/test-paid-ai-readonly.ts",
     "test:fixed-ai": "tsx scripts/test-fixed-ai-planning.ts"

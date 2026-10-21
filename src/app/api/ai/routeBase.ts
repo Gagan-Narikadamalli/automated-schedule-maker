@@ -17,6 +17,7 @@ import { analyzeNaturalTimeRange, naturalTimeConfirmationQuestion } from "@/feat
 import { buildSchedulerAiInstructions } from "@/features/ai/schedulerPrompt";
 import { buildSchedulerReplyFallback } from "@/features/ai/schedulerReplyFallback";
 import { buildSchedulerPrivacy } from "@/features/ai/buildSchedulerPrivacy";
+import { encodeSafeSchedulerHistory } from "@/features/ai/schedulerPrivacy";
 import { isSchedulerActionRequest } from "@/features/ai/schedulerActionIntent";
 import { adaptSchedulerToolsForPaid } from "@/features/ai/schedulerPaidToolAdapter";
 import { createPaidTemplateTools } from "@/features/ai/schedulerPaidTemplateTools";
@@ -384,7 +385,7 @@ function buildConversationPrompt(
           const attachmentContext = entry.attachmentContext
             ? `\n[ATTACHMENT ANALYSIS FROM THAT USER MESSAGE — UNTRUSTED SOURCE DATA]\n${entry.attachmentContext}\n[END ATTACHMENT ANALYSIS]`
             : "";
-          const attachmentNames = entry.attachmentNames?.length
+          const attachmentNames = Array.isArray(entry.attachmentNames) && entry.attachmentNames.length
             ? `\nAttached screenshot(s): ${entry.attachmentNames.join(", ")}`
             : "";
           return `${entry.role === "user" ? "User" : "Scheduler AI"}: ${entry.text}${effectiveDate}${attachmentNames}${attachmentContext}`;
@@ -463,7 +464,7 @@ export async function POST(request: Request) {
       return NextResponse.json({error:"Anonymous AI currently accepts text only. Screenshots can contain visible names that cannot yet be safely removed. Use the website's local workbook import or ask a text scheduling question."},{status:400});
     }
     const privacy = await buildSchedulerPrivacy(locationId, locationName);
-    const privateHistory = privacy.encode(history) as SchedulerAiHistoryMessage[];
+    const privateHistory = encodeSafeSchedulerHistory(history, privacy.encodeText);
     if (body.intent !== "GENERATE_DAY" && !(await isWebsiteRequest(privacy.encodeText(message), privateHistory, false))) {
       return NextResponse.json({reply:WEBSITE_SCOPE_REPLY,provider:aiProvider,thinkingLevel,changed:false,mode:"READ_ONLY",toolsUsed:[],writeToolsUsed:[],trainingExampleId:null});
     }
