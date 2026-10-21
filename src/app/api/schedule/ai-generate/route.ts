@@ -10,6 +10,8 @@ import {
 import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySchedulerInput";
 import { applyHistoricalTraining } from "@/features/scheduler/server/applyHistoricalTraining";
 import { applyFixedNapSessions } from "@/features/scheduler/server/applyFixedNapSessions";
+import { restoreAiNapWindowChoices } from "@/features/ai/aiNapWindowChoices";
+import { assessAiCandidate, compareAiCandidates } from "@/features/ai/compareScheduleCandidates";
 import { persistScheduleReplacementSafely } from "@/features/scheduler/server/persistScheduleReplacementSafely";
 import { getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
 import { connectToDatabase } from "@/lib/db";
@@ -67,22 +69,11 @@ export async function POST(request: Request) {
       .select("clientId startTime endTime").lean() as unknown as Array<{
         clientId: unknown;startTime:string;endTime:string
       }>;
-    // Use the same saved-event and attendance-aware 30-minute nap resolver
-    // as Auto Generate. A flexible nap WINDOW must not become several naps.
+    // The native event pass applies real attendance/call-outs, but its chosen
+    // nap time is only a feasibility starting point. OpenAI independently
+    // decides where within each allowed saved event window the nap belongs.
     const fixedNap = await applyFixedNapSessions(locationId,date,dayData.input);
-    dayData.input = {
-      ...fixedNap.input,
-      clients: fixedNap.input.clients.map(client => ({
-        ...client,
-        // AI choice columns include one cell per required 1:1, nap and speech.
-        // Mandatory nap/speech events replace 1:1 in the selected cell.
-        requiredSlots:[...new Set([
-          ...client.requiredSlots,
-          ...client.napSlots,
-          ...client.speechSlots
-        ])].sort()
-      }))
-    };
+    dayData.input = restoreAiNapWindowChoices(fixedNap.input,napDocuments);
     // A specialized OpenAI scheduling prompt operates only on pseudonymous IDs.
     // Database credentials and staff/client names never leave the application.
     // Learn from date-safe imported workbook records already stored in MongoDB.
@@ -172,19 +163,43 @@ export async function POST(request: Request) {
         matchedAssignments:historicalTraining.matchedRecordCount},
     };
     let plan = await designOpenAISchedule(sanitized);
-    let values = expandOpenAIPlan(plan, staffRefs, clientRefs);
-    let audit = validatePreview(roster, values);
-    if (audit.problems.length || audit.missing.length) {
-      // Feedback stays anonymized. One bounded repair attempt; never silently
-      // substitute a deterministic or third-party plan.
-      const feedback=[...audit.problems,...audit.missing.map(g=>`Missing ${clientAlias.get(g.clientId)} at ${g.startTime}`)].map(text=>{
+    let values = expandOpenAIPlan(plan,staffRefs,clientRefs);
+    let audit = validatePreview(roster,values);
+    let quality = assessAiCandidate(roster,values);
+    let proposalsCompared = 1;
+    // The model is responsible for assignments. Validation and comparing
+    // candidates never manufacture or automatically rearrange any cells.
+    const needsImprovement = audit.problems.length>0 || audit.missing.length>0 ||
+      quality.handoffs > Math.max(5,roster.clients.length) ||
+      quality.shortRuns > Math.max(8,roster.clients.length);
+    if (needsImprovement) {
+      const feedback=[
+        ...audit.problems,
+        ...audit.missing.map(g=>`Uncovered required client ${clientAlias.get(g.clientId)} at ${g.startTime}; only assign eligible available staff, otherwise UNPLACED.`),
+        `Independent review of previous proposal: covered ${quality.covered}/${quality.required}; ${quality.handoffs} handoffs; ${quality.shortRuns} short runs. Improve client coverage first, then reduce needless switches while retaining nap-linked breaks and staff eligibility.`,
+      ].map(text=>{
         for(const [id,alias] of staffAlias) text=text.replaceAll(id,alias);
         for(const [id,alias] of clientAlias) text=text.replaceAll(id,alias);
         return text;
       });
-      plan=await designOpenAISchedule({...sanitized,previousProposal:plan.fixedChoices??plan},feedback.slice(0,120));
-      values=expandOpenAIPlan(plan,staffRefs,clientRefs);
-      audit=validatePreview(roster,values);
+      try {
+        const revisedPlan=await designOpenAISchedule(
+          {...sanitized,previousProposal:plan.fixedChoices??plan},feedback.slice(0,120)
+        );
+        const revisedValues=expandOpenAIPlan(revisedPlan,staffRefs,clientRefs);
+        const revisedQuality=assessAiCandidate(roster,revisedValues);
+        proposalsCompared++;
+        if (compareAiCandidates(quality,revisedQuality)==="next") {
+          plan=revisedPlan;
+          values=revisedValues;
+          quality=revisedQuality;
+          audit=validatePreview(roster,values);
+        }
+      } catch(error) {
+        // Never discard a safe first plan if a later model retry fails.
+        if (!quality.valid) throw error;
+        console.warn("AI optional schedule improvement failed; keeping validated first proposal.");
+      }
     }
     const describe=(text:string)=>text.replace(/\b(?:Staff|Client)\d+\b/g,alias=>{
       const staffId=staffRefs.get(alias),clientId=clientRefs.get(alias);
@@ -271,8 +286,10 @@ export async function POST(request: Request) {
       unplacedCount,
       placementIssues,
       breakIssues,
+      optimization:{proposalsCompared,selectedQuality:quality},
       managerSummary:{
         status:statusLabel,saved,requiredClientSlots:audit.required,coveredClientSlots:audit.covered,
+        modelProposalsCompared:proposalsCompared,quality:{handoffs:quality.handoffs,shortRuns:quality.shortRuns,preferredPairs:quality.preferredPairs,sameTeam:quality.sameTeam,frontline1to1:quality.frontline1to1,referenceMatches:quality.templateMatches},
         unplacedClientSlots:placementIssues.length,unplacedCreated:unplacedCount,
         unplaced:placementIssues.slice(0,40),unresolvedMandatoryEvents:breakIssues,
         summary:complete?"All required client and event blocks placed and independently validated.":
