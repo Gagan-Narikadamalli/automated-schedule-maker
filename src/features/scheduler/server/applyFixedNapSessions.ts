@@ -96,8 +96,21 @@ export async function applyFixedNapSessions(
       .filter((session) => {
         const startTime = String(session.startTime ?? "");
         const endTime = String(session.endTime ?? "");
-        return Boolean(startTime && endTime && endTime > startTime);
+        return Boolean(startTime && endTime && endTime >= startTime) &&
+          // A saved 30-minute start window is inclusive, but the client
+          // must be present for the complete 30-minute event slot.
+          (eligibleSlotsByClient.get(client.id)??[]).some(time=>
+            time>=startTime&&time<=endTime);
       })
+      .sort((left,right)=>
+        Number(String(left.priorityCategory)==="YOUNGER" ? 0 : 1)-
+        Number(String(right.priorityCategory)==="YOUNGER" ? 0 : 1) ||
+        String(left.startTime).localeCompare(String(right.startTime))
+      )
+      // Old databases may contain overlapping recurring and single-day nap
+      // records. A child still receives ONE 30-minute nap per date, not
+      // one nap per duplicate record. Keep the highest-priority eligible one.
+      .slice(0,1)
       .map((session, index) => ({
         key: `fixed-nap-${String(session._id ?? index)}`,
         clientId: client.id,

@@ -10,6 +10,7 @@ import {
 
 import { auditFinalCoverage } from "@/features/scheduler/engine/auditFinalCoverage";
 import { auditLinkedNapBreakRules } from "@/features/scheduler/engine/auditLinkedNapBreakRules";
+import { explainUnmetEventRules } from "@/features/scheduler/engine/explainUnmetEventRules";
 import { getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
 import { generateSchedule } from "@/features/scheduler/engine/generateSchedule";
 import { placeStaffBreaksAfterCoverage } from "@/features/scheduler/engine/placeStaffBreaks";
@@ -180,7 +181,23 @@ export async function POST(request: Request) {
       const pinned = templatePinning.pinned.find(item =>
         item.staffId === assignment.staffId && item.startTime === assignment.startTime
       );
-      return pinned ? {...assignment, assignmentType:pinned.assignmentType, clientId:pinned.clientId} : assignment;
+      // Workbook break/nap cells are historical preferences, not authority
+      // to override a date-specific saved event or a new valid assignment.
+      // A stale pinned BREAK_NAP previously removed real client coverage and
+      // caused the "missing Break/Nap" warnings reported by managers.
+      if(!pinned)return assignment;
+      if(pinned.assignmentType==="BREAK_NAP" &&
+        !schedulerInput.clients.some(client=>
+          client.id===pinned.clientId&&client.napSlots.includes(assignment.startTime)))
+        return assignment;
+      if(pinned.assignmentType==="BREAK_SPEECH" &&
+        !schedulerInput.clients.some(client=>
+          client.id===pinned.clientId&&client.speechSlots.includes(assignment.startTime)))
+        return assignment;
+      if(pinned.assignmentType.startsWith("BREAK") &&
+         !assignment.assignmentType.startsWith("BREAK"))
+        return assignment;
+      return {...assignment,assignmentType:pinned.assignmentType,clientId:pinned.clientId};
     });
     const eventEnrichedAssignments = enrichBreakAssignmentsWithFixedEvents(
       enrichedAssignments,
@@ -191,8 +208,19 @@ export async function POST(request: Request) {
       schedulerInput.staff.filter(s=>!schedulerInput.callOutStaffIds.includes(s.id)),
       dayData.extendedRules.breakWindowStart,dayData.extendedRules.breakWindowEnd);
     if(linkedEventProblems.length) {
+      const eventDiagnostics=explainUnmetEventRules({
+        problems:linkedEventProblems,clients:schedulerInput.clients,
+        staff:schedulerInput.staff,assignments:eventEnrichedAssignments,
+        calledOutStaffIds:schedulerInput.callOutStaffIds
+      });
       return NextResponse.json({
-        error:"Generated schedule contains inconsistent nap/break assignments; no schedules were overwritten.",
+        error:"Auto Generate could not fit every required nap and staff break safely. No previous schedule was overwritten. Review the specific coverage and break conflicts below.",
+        eventDiagnostics:eventDiagnostics.map(problem=>{
+          let label=problem;
+          for(const client of schedulerInput.clients)label=label.replaceAll(client.id,client.displayCode);
+          for(const member of schedulerInput.staff)label=label.replaceAll(member.id,member.name);
+          return label;
+        }),
         violations:linkedEventProblems.map(problem => {
           let label = problem;
           for (const client of schedulerInput.clients) label = label.replaceAll(client.id, client.displayCode);

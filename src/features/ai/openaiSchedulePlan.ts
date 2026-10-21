@@ -2,13 +2,20 @@ import { generateText, Output, jsonSchema } from "ai";
 import { getSchedulerModel, schedulerModelOptions } from "./schedulerModelProvider";
 import { getSlotsInsideTimeRange, getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
 import { buildFixedScheduleChoices,decodeFixedScheduleChoices,type FixedScheduleSnapshot,type FixedScheduleChoices } from "./fixedScheduleChoices";
+import { designFixedDayInBatches } from "./openaiBatchedDayPlanner";
 
 export type OpenAIPlanSegment = {staff:string;client:string|null;startTime:string;endTime:string;type:"CLIENT_1_TO_1"|"SPEECH"|"BREAK"|"BREAK_NAP"|"BREAK_SPEECH"};
-export type OpenAISchedulePlan = {segments:OpenAIPlanSegment[];explanation:string;decisions:string[];tradeoffs:string[];fixedChoices?:FixedScheduleChoices};
+export type OpenAISchedulePlan = {segments:OpenAIPlanSegment[];explanation:string;decisions:string[];tradeoffs:string[];fixedChoices?:FixedScheduleChoices;batched?:boolean;planningBatches?:number};
 export async function designOpenAISchedule(snapshot:unknown, corrections?:string[]) {
   const effort = "high" as const;
   const fixed=snapshot&&typeof snapshot==="object"&&"useFixedCells" in snapshot&&snapshot.useFixedCells===true
     ? buildFixedScheduleChoices(snapshot as unknown as FixedScheduleSnapshot):null;
+  // A full Livingston day can contain 260+ required 30-minute cells.
+  // A single enormous structured response repeatedly reached the 120-second
+  // model timeout. Ask for fixed event choices once, then plan six consecutive
+  // half-hour columns at a time, preserving prior model choices and continuity.
+  if (fixed && Object.keys(fixed.grid).length > 8)
+    return designFixedDayInBatches(snapshot as FixedScheduleSnapshot,corrections);
   const result=await generateText({
     model:getSchedulerModel(),providerOptions:schedulerModelOptions(true,effort),
     reasoning:fixed?"medium":effort,maxOutputTokens:fixed?17000:24000,maxRetries:0,timeout:{totalMs:120000},

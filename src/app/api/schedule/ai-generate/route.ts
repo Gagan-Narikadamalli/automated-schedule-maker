@@ -169,9 +169,14 @@ export async function POST(request: Request) {
     let proposalsCompared = 1;
     // The model is responsible for assignments. Validation and comparing
     // candidates never manufacture or automatically rearrange any cells.
-    const needsImprovement = audit.problems.length>0 || audit.missing.length>0 ||
+    // The large-day batched planner has already asked OpenAI for every cell.
+    // Repeating ALL planning batches to polish soft preferences can double
+    // latency and hit server timeouts; keep safe decisions instead.
+    const needsImprovement = !plan.batched && (
+      audit.problems.length>0 || audit.missing.length>0 ||
       quality.handoffs > Math.max(5,roster.clients.length) ||
-      quality.shortRuns > Math.max(8,roster.clients.length);
+      quality.shortRuns > Math.max(8,roster.clients.length)
+    );
     if (needsImprovement) {
       const feedback=[
         ...audit.problems,
@@ -286,10 +291,10 @@ export async function POST(request: Request) {
       unplacedCount,
       placementIssues,
       breakIssues,
-      optimization:{proposalsCompared,selectedQuality:quality},
+      optimization:{proposalsCompared,planningBatches:plan.planningBatches??1,selectedQuality:quality},
       managerSummary:{
         status:statusLabel,saved,requiredClientSlots:audit.required,coveredClientSlots:audit.covered,
-        modelProposalsCompared:proposalsCompared,quality:{handoffs:quality.handoffs,shortRuns:quality.shortRuns,preferredPairs:quality.preferredPairs,sameTeam:quality.sameTeam,frontline1to1:quality.frontline1to1,referenceMatches:quality.templateMatches},
+        modelProposalsCompared:proposalsCompared,planningBatches:plan.planningBatches??1,quality:{handoffs:quality.handoffs,shortRuns:quality.shortRuns,preferredPairs:quality.preferredPairs,sameTeam:quality.sameTeam,frontline1to1:quality.frontline1to1,referenceMatches:quality.templateMatches},
         unplacedClientSlots:placementIssues.length,unplacedCreated:unplacedCount,
         unplaced:placementIssues.slice(0,40),unresolvedMandatoryEvents:breakIssues,
         summary:complete?"All required client and event blocks placed and independently validated.":
@@ -323,7 +328,8 @@ export async function POST(request: Request) {
     if(status===404)return invalid("OpenAI could not find the configured model. Check OPENAI_SCHEDULER_MODEL; saved schedule unchanged.",503);
     if(status===429)return invalid("OpenAI quota or rate limit reached. Check usage and retry later; saved schedule unchanged.",503);
     if(status!==undefined&&status>=500)return invalid("OpenAI service is temporarily unavailable. Saved schedule unchanged.",503);
-    if(error instanceof Error&&/timeout|abort/i.test(error.name))return invalid("AI planning took too long. Please try again; the saved schedule was not changed.",504);
+    if(error instanceof Error&&/timeout|abort/i.test(error.name+" "+error.message))
+      return invalid("A timed OpenAI planning batch did not finish. No partial database changes were saved. Retry AI Generate or try a less busy model; earlier successful planning batches were held only in memory.",504);
     const issue=error instanceof Error?error.message:"";
     return invalid(/schema|json|output.*parse|no output|too many segments|unknown staff\/client alias/i.test(issue)
       ?"OpenAI did not produce a valid structured schedule. No schedule was changed; retry generation."
