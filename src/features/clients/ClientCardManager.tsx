@@ -6,6 +6,7 @@ import cardStyles from "@/components/ManagementCards.module.css";
 import { useActionConfirmDialog } from "@/components/ActionConfirmDialog";
 import { ManagementModal } from "@/components/ManagementModal";
 import {
+  applyWeeklyQuickSelection,
   createWeeklySchedule,
   patternsFromWeeklySchedule,
   validateWeeklySchedule,
@@ -237,6 +238,7 @@ export function ClientCardManager() {
   const [query, setQuery] = useState("");
   const [form, setForm] = useState<ClientForm>(emptyClientForm);
   const [attendanceDraft, setAttendanceDraft] = useState<TimePattern>(emptyAttendance);
+  const [keepOtherAttendanceDays, setKeepOtherAttendanceDays] = useState(false);
   const [weeklyAttendanceSchedule, setWeeklyAttendanceSchedule] =
     useState<WeeklySchedule>(() =>
       createWeeklySchedule("08:00", "16:00", false)
@@ -379,6 +381,7 @@ export function ClientCardManager() {
     setEditingId(null);
     setForm(emptyClientForm());
     setAttendanceDraft(emptyAttendance());
+    setKeepOtherAttendanceDays(false);
     setWeeklyAttendanceSchedule(
       createWeeklySchedule("08:00", "16:00", false)
     );
@@ -417,6 +420,7 @@ export function ClientCardManager() {
       restrictedStaffIds,
     });
     setAttendanceDraft(emptyAttendance());
+    setKeepOtherAttendanceDays(false);
     setWeeklyAttendanceSchedule(
       weeklyScheduleFromPatterns(
         client.attendancePatterns ?? [],
@@ -436,6 +440,7 @@ export function ClientCardManager() {
     setEditingId(null);
     setForm(emptyClientForm());
     setAttendanceDraft(emptyAttendance());
+    setKeepOtherAttendanceDays(false);
     setWeeklyAttendanceSchedule(
       createWeeklySchedule("08:00", "16:00", false)
     );
@@ -465,21 +470,17 @@ export function ClientCardManager() {
       return;
     }
 
-    setWeeklyAttendanceSchedule((current) => {
-      const next = { ...current };
-
-      for (const day of attendanceDraft.days) {
-        next[day] = {
-          enabled: true,
-          startTime: attendanceDraft.startTime,
-          endTime: attendanceDraft.endTime,
-        };
-      }
-
-      return next;
-    });
+    setWeeklyAttendanceSchedule((current) =>
+      applyWeeklyQuickSelection(
+        current, attendanceDraft.days, attendanceDraft.startTime,
+        attendanceDraft.endTime, keepOtherAttendanceDays
+      )
+    );
     setMessage(
-      `Applied ${attendanceDraft.startTime}-${attendanceDraft.endTime} attendance to the selected weekdays.`
+      `Applied ${attendanceDraft.startTime}-${attendanceDraft.endTime} attendance to ${attendanceDraft.days.length} selected weekday(s).` +
+      (keepOtherAttendanceDays
+        ? " Previously configured other days were kept."
+        : " All unselected weekdays are now unchecked.")
     );
   }
 
@@ -989,8 +990,9 @@ export function ClientCardManager() {
           <div className={cardStyles.quickSchedule}>
             <strong>Quick Apply</strong>
             <span>
-              Example: apply 09:00-17:00 to Mon, Tue, Wed, then apply
-              08:00-16:00 to Thu and Fri.
+              By default, applying will also uncheck any weekday that is
+              not selected. Turn on Keep other days to add another group of
+              attendance hours without removing earlier days.
             </span>
 
             <div className="form-grid">
@@ -1040,6 +1042,15 @@ export function ClientCardManager() {
                 </label>
               ))}
             </div>
+
+            <label className="checkbox-card">
+              <input
+                type="checkbox"
+                checked={keepOtherAttendanceDays}
+                onChange={(event) => setKeepOtherAttendanceDays(event.target.checked)}
+              />
+              <span>Keep other days already configured (add another attendance group)</span>
+            </label>
 
             <button
               type="button"

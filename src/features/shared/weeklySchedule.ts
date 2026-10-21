@@ -91,6 +91,35 @@ export function weeklyScheduleFromPatterns(
   return schedule;
 }
 
+
+/**
+ * Quick Apply synchronizes selected weekdays by default: unchecked quick
+ * selections become disabled in the detailed editor. Keeping other days is an
+ * explicit opt-in for building multi-pattern (e.g. Mon-Wed / Thu-Fri) shifts.
+ * Disabled days retain their previous time inputs for convenient re-enabling.
+ */
+export function applyWeeklyQuickSelection(
+  current: WeeklySchedule,
+  selectedDays: readonly string[],
+  startTime: string,
+  endTime: string,
+  keepOtherDays = false
+): WeeklySchedule {
+  const selected = new Set(selectedDays);
+  const next: WeeklySchedule = { ...current };
+  for (const day of WEEKDAY_VALUES) {
+    if (selected.has(day)) {
+      next[day] = { enabled: true, startTime, endTime };
+    } else if (!keepOtherDays) {
+      next[day] = {
+        ...(current[day] ?? { startTime, endTime }),
+        enabled: false,
+      };
+    }
+  }
+  return next;
+}
+
 export function patternsFromWeeklySchedule(
   schedule: WeeklySchedule,
   namePrefix: string

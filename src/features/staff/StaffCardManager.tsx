@@ -8,6 +8,7 @@ import cardStyles from "@/components/ManagementCards.module.css";
 import { useActionConfirmDialog } from "@/components/ActionConfirmDialog";
 import { ManagementModal } from "@/components/ManagementModal";
 import {
+  applyWeeklyQuickSelection,
   createWeeklySchedule,
   patternsFromWeeklySchedule,
   validateWeeklySchedule,
@@ -201,6 +202,7 @@ export function StaffCardManager() {
   const [query, setQuery] = useState("");
   const [form, setForm] = useState<StaffForm>(emptyForm);
   const [shiftDraft, setShiftDraft] = useState<ShiftPattern>(emptyShift);
+  const [keepOtherShiftDays, setKeepOtherShiftDays] = useState(false);
   const [weeklyShiftSchedule, setWeeklyShiftSchedule] =
     useState<WeeklySchedule>(() =>
       createWeeklySchedule("08:00", "17:00", true)
@@ -308,6 +310,7 @@ export function StaffCardManager() {
     setEditingId(null);
     setForm(emptyForm());
     setShiftDraft(emptyShift());
+    setKeepOtherShiftDays(false);
     setWeeklyShiftSchedule(
       createWeeklySchedule("08:00", "17:00", false)
     );
@@ -338,6 +341,7 @@ export function StaffCardManager() {
       })),
     });
     setShiftDraft(emptyShift());
+    setKeepOtherShiftDays(false);
     setWeeklyShiftSchedule(
       weeklyScheduleFromPatterns(
         staffMember.shiftPatterns ?? [],
@@ -358,6 +362,7 @@ export function StaffCardManager() {
     setEditingId(null);
     setForm(emptyForm());
     setShiftDraft(emptyShift());
+    setKeepOtherShiftDays(false);
     setWeeklyShiftSchedule(
       createWeeklySchedule("08:00", "17:00", false)
     );
@@ -383,21 +388,17 @@ export function StaffCardManager() {
       return;
     }
 
-    setWeeklyShiftSchedule((current) => {
-      const next = { ...current };
-
-      for (const day of shiftDraft.days) {
-        next[day] = {
-          enabled: true,
-          startTime: shiftDraft.startTime,
-          endTime: shiftDraft.endTime,
-        };
-      }
-
-      return next;
-    });
+    setWeeklyShiftSchedule((current) =>
+      applyWeeklyQuickSelection(
+        current, shiftDraft.days, shiftDraft.startTime,
+        shiftDraft.endTime, keepOtherShiftDays
+      )
+    );
     setMessage(
-      `Applied ${shiftDraft.startTime}-${shiftDraft.endTime} to the selected weekdays.`
+      `Applied ${shiftDraft.startTime}-${shiftDraft.endTime} to ${shiftDraft.days.length} selected weekday(s).` +
+      (keepOtherShiftDays
+        ? " Previously configured other days were kept."
+        : " All unselected weekdays are now unchecked.")
     );
   }
 
@@ -988,8 +989,9 @@ export function StaffCardManager() {
           <div className={cardStyles.quickSchedule}>
             <strong>Quick Apply</strong>
             <span>
-              Example: select Mon, Tue, Wed and apply 09:00-17:00, then select
-              Thu, Fri and apply 08:00-16:00.
+              Selecting weekdays and applying will also uncheck the other days
+              below. For multiple shift patterns, turn on Keep other days
+              before applying the next group.
             </span>
 
             <div className="form-grid">
@@ -1033,6 +1035,15 @@ export function StaffCardManager() {
                 </label>
               ))}
             </div>
+
+            <label className="checkbox-card">
+              <input
+                type="checkbox"
+                checked={keepOtherShiftDays}
+                onChange={(event) => setKeepOtherShiftDays(event.target.checked)}
+              />
+              <span>Keep other days already configured (add another shift group)</span>
+            </label>
 
             <button
               type="button"
