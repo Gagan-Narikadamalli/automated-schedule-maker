@@ -79,7 +79,7 @@ export function validateOpenAIPlan(input: SchedulerInput, values: Candidate[]) {
     if(row.assignmentType==="NAP")problems.push(`Standalone nap is not a linked staff break: ${row.clientId} at ${row.startTime}`);
   }
   for (const person of input.staff) {
-    if (calledOut.has(person.id) || person.availableSlots.length === 0) continue;
+    if (calledOut.has(person.id) || !person.availableSlots.some(time=>time >= "11:00" && time < "14:00")) continue;
     const count = breakCount.get(person.id) ?? 0;
     if (count !== 1) problems.push(`Staff requires exactly one 30-minute break: ${person.id} (${count})`);
   }

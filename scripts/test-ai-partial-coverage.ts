@@ -31,4 +31,8 @@ const unsafe=validateOpenAIPlan(input,[...rows,
 ]);
 assert.ok(unsafe.problems.some(p=>p.includes("double-booked")));
 assert.ok(unsafe.problems.some(p=>p.includes("Hard relationship restriction")));
+const morningOnly={...input,staff:[...input.staff,
+  {id:"s3",name:"Short shift",role:"BT" as const,availableSlots:["08:00","08:30"]}]};
+assert.deepEqual(validateOpenAIPlan(morningOnly,rows).problems,[],
+  "Staff not present during the 11:00–14:00 break window must not be given an impossible break requirement");
 console.log("PASS AI partial coverage and evidence-based unplaced reasons; hard conflicts still block saving.");
