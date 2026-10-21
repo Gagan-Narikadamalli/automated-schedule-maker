@@ -93,7 +93,7 @@ async function mockPlan(invalid=false){
     assert.equal(result.missing.length,invalid?1:0);
     assert.equal(rows.some(r=>r.clientId==="c1"&&r.startTime==="12:00"&&r.assignmentType==="BREAK_NAP"),true);
     assert.equal(rows.some(r=>r.staffId==="s2"&&r.startTime==="13:00"&&r.assignmentType==="BREAK"),true);
-    assert.ok(rows.length>=22);
+    assert.equal(rows.length,invalid?21:22,"One deliberately unplaced client cell reduces the emitted assignment count.");
     return plan;
   }finally{
     globalThis.fetch=originalFetch;
