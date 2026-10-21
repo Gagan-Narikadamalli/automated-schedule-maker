@@ -12,6 +12,7 @@ import { auditFinalCoverage } from "@/features/scheduler/engine/auditFinalCovera
 import { auditLinkedNapBreakRules } from "@/features/scheduler/engine/auditLinkedNapBreakRules";
 import { explainUnmetEventRules } from "@/features/scheduler/engine/explainUnmetEventRules";
 import { classifyEventAuditForPartialSave, auditPartialAssignmentSafety } from "@/features/scheduler/engine/classifyEventAuditForPartialSave";
+import { refillCoverageAfterBreakAlignment } from "@/features/scheduler/engine/refillCoverageAfterBreakAlignment";
 import { getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
 import { generateSchedule } from "@/features/scheduler/engine/generateSchedule";
 import { placeStaffBreaksAfterCoverage } from "@/features/scheduler/engine/placeStaffBreaks";
@@ -205,7 +206,15 @@ export async function POST(request: Request) {
       schedulerInput.clients,
       dayData.extendedRules.slotLengthMinutes
     );
-    const linkedEventProblems = auditLinkedNapBreakRules(eventEnrichedAssignments,schedulerInput.clients,
+    // A moved staff break (e.g. 13:30 -> linked 13:00 client nap)
+    // makes its former time available. Give newly free time to uncovered
+    // 1:1 clients without moving or replacing ANY existing valid assignment.
+    const finalPass=refillCoverageAfterBreakAlignment(
+      {...schedulerInput,referenceAssignments:freshReferences},
+      eventEnrichedAssignments
+    );
+    const finalAssignments=finalPass.assignments;
+    const linkedEventProblems = auditLinkedNapBreakRules(finalAssignments,schedulerInput.clients,
       schedulerInput.staff.filter(s=>!schedulerInput.callOutStaffIds.includes(s.id)),
       dayData.extendedRules.breakWindowStart,dayData.extendedRules.breakWindowEnd);
     // Unplaced client naps / staff breaks are NOT the same as an unsafe
@@ -213,13 +222,13 @@ export async function POST(request: Request) {
     // Unplaced. Do not save actual double-booking or availability violations.
     const eventStatus=classifyEventAuditForPartialSave({
       issues:linkedEventProblems,clients:schedulerInput.clients,
-      staff:schedulerInput.staff,assignments:eventEnrichedAssignments,
+      staff:schedulerInput.staff,assignments:finalAssignments,
       breakWindowStart:dayData.extendedRules.breakWindowStart,
       breakWindowEnd:dayData.extendedRules.breakWindowEnd
     });
     const dangerous=[...eventStatus.conflicts,
       ...auditPartialAssignmentSafety({
-        assignments:eventEnrichedAssignments,clients:schedulerInput.clients,
+        assignments:finalAssignments,clients:schedulerInput.clients,
         staff:schedulerInput.staff,calledOutStaffIds:schedulerInput.callOutStaffIds
       })];
     if(dangerous.length) {
@@ -231,7 +240,7 @@ export async function POST(request: Request) {
     const unresolvedEventDiagnostics=explainUnmetEventRules({
       problems:eventStatus.unresolvedWarnings,
       clients:schedulerInput.clients,staff:schedulerInput.staff,
-      assignments:eventEnrichedAssignments,
+      assignments:finalAssignments,
       calledOutStaffIds:schedulerInput.callOutStaffIds
     }).map(problem=>{
       let label=problem;
@@ -241,7 +250,7 @@ export async function POST(request: Request) {
     });
     const finalCoverage = auditFinalCoverage(
       schedulerInput.clients,
-      eventEnrichedAssignments,
+      finalAssignments,
       coverageResult.metrics,
       dayData.extendedRules.slotLengthMinutes,
       coverageResult.uncoveredRequirements
@@ -251,25 +260,12 @@ export async function POST(request: Request) {
       breakPlan.reservedBreaks.length,
       dayData.extendedRules.slotLengthMinutes
     );
-    const initialUncoveredKeys = new Set(
-      coverageResult.uncoveredRequirements.map(
-        (requirement) =>
-          `${requirement.clientId}|${requirement.startTime}`
-      )
-    );
-    const finalOnlyWarnings = finalCoverage.uncoveredRequirements
-      .filter(
-        (requirement) =>
-          !initialUncoveredKeys.has(
-            `${requirement.clientId}|${requirement.startTime}`
-          )
-      )
-      .map((requirement) => ({
-        code: "NO_ELIGIBLE_STAFF" as const,
-        message: `${requirement.clientCode} is uncovered at ${requirement.startTime} in the final schedule after break placement.`,
-      }));
+    const finalOnlyWarnings = finalCoverage.uncoveredRequirements.map(requirement=>({
+      code:"NO_ELIGIBLE_STAFF" as const,
+      message:`${requirement.clientCode} remains uncovered at ${requirement.startTime} after final break alignment and available-slot refill.`
+    }));
     const warnings = [
-      ...coverageResult.warnings,
+      ...coverageResult.warnings.filter(warning=>warning.code!=="NO_ELIGIBLE_STAFF"),
       ...finalOnlyWarnings,
       ...unresolvedEventDiagnostics.map(message=>({
         code:"NO_ELIGIBLE_STAFF" as const,message
@@ -278,7 +274,7 @@ export async function POST(request: Request) {
 
     await connectToDatabase();
 
-    const autoAssignments = eventEnrichedAssignments;
+    const autoAssignments = finalAssignments;
     const generatedRecords = autoAssignments.map((assignment) => ({
       locationId,
       date,
@@ -315,7 +311,7 @@ export async function POST(request: Request) {
       locationId,
       date,
       finalCoverage.uncoveredRequirements,
-      eventEnrichedAssignments,
+      finalAssignments,
       eventStatus.unplacedEvents
     );
 
@@ -323,7 +319,7 @@ export async function POST(request: Request) {
     const completeCoverage = metrics.uncoveredClientSlots === 0 && unresolvedEventCount===0;
     const partialBuild = !completeCoverage;
     const coverageByRole = buildCoverageByRole(
-      eventEnrichedAssignments,
+      finalAssignments,
       schedulerInput.staff,
       dayData.extendedRules.slotLengthMinutes
     );
@@ -343,6 +339,7 @@ export async function POST(request: Request) {
         uncoveredRequirements: finalCoverage.uncoveredRequirements,
         managerGapCount,
         unresolvedEventCount,
+        recoveredCoverageAfterBreakMove:finalPass.addedCount,
         unresolvedEventDiagnostics,
         warningCount: warnings.length,
         reservedBreakCount: breakPlan.reservedBreaks.length,
@@ -394,6 +391,7 @@ export async function POST(request: Request) {
       uncoveredRequirements: finalCoverage.uncoveredRequirements,
       managerGapCount,
       unresolvedEventCount,
+      recoveredCoverageAfterBreakMove:finalPass.addedCount,
       unresolvedEventDiagnostics,
       unplacedEvents:eventStatus.unplacedEvents,
       templateMatchedBlocks: templatePinning.pinned.length,
