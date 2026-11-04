@@ -742,7 +742,7 @@ function sortRequirementsForClinicFlow(
     // decide the assignment.
     const exactReferenceMatchAvailable = (
       requirement: ClientRequirement,
-      source: "COPIED" | "TEMPLATE"
+      source: "COPIED"
     ): boolean =>
       input.referenceAssignments.some((reference) => {
         if (
@@ -774,11 +774,9 @@ function sortRequirementsForClinicFlow(
       return leftPreviousWeek ? -1 : 1;
     }
 
-    const leftTemplate = exactReferenceMatchAvailable(left, "TEMPLATE");
-    const rightTemplate = exactReferenceMatchAvailable(right, "TEMPLATE");
-    if (leftTemplate !== rightTemplate) {
-      return leftTemplate ? -1 : 1;
-    }
+    // Weekday template pairings are evaluated as soft scores, not as a
+    // requirement-order override. Scarce BT eligibility and client continuity
+    // take precedence over an exact but potentially fragmented template cell.
 
     // First preserve clients that already have a real staff pairing from the
     // immediately previous coverage segment (including across a protected Nap
