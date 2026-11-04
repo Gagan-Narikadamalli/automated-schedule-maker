@@ -236,6 +236,30 @@ function findFixedEventForStaffSlot(
   return candidates[0] ?? null;
 }
 
+function findAdjacentNapForClientSlot(
+  client: SchedulerClient,
+  startTime: string,
+  slotLengthMinutes: number
+): FixedEventCandidate | null {
+  const adjacentNapSlot = [
+    shiftTime(startTime, -slotLengthMinutes),
+    shiftTime(startTime, slotLengthMinutes),
+  ].find(
+    (slot): slot is string => Boolean(slot) && client.napSlots.includes(slot)
+  );
+
+  if (!adjacentNapSlot) return null;
+
+  return {
+    client,
+    assignmentType: "BREAK_NAP",
+    priority: client.napPriorityCategory === "YOUNGER" ? 10 : 20,
+    eventStartTime: adjacentNapSlot,
+    eventEndTime:
+      shiftTime(adjacentNapSlot, slotLengthMinutes) ?? adjacentNapSlot,
+  };
+}
+
 function countReferenceBreaks(
   staffId: string,
   startTime: string,
@@ -500,6 +524,41 @@ function findReliefSwap(
         assignment.startTime <= rules.breakWindowEnd
     )
     .sort((left, right) => {
+      const leftClient = clients.find(
+        (client) => client.id === left.assignment.clientId
+      );
+      const rightClient = clients.find(
+        (client) => client.id === right.assignment.clientId
+      );
+      const leftAdjacentNap = leftClient
+        ? findAdjacentNapForClientSlot(
+            leftClient,
+            left.assignment.startTime,
+            rules.slotLengthMinutes
+          )
+        : null;
+      const rightAdjacentNap = rightClient
+        ? findAdjacentNapForClientSlot(
+            rightClient,
+            right.assignment.startTime,
+            rules.slotLengthMinutes
+          )
+        : null;
+
+      // First choose a client block immediately before/after that client's
+      // 30-minute nap. Moving this one block to relief lets the BT's break
+      // sit directly beside the nap and creates one continuous hour away.
+      if (Boolean(leftAdjacentNap) !== Boolean(rightAdjacentNap)) {
+        return leftAdjacentNap ? -1 : 1;
+      }
+      if (
+        leftAdjacentNap &&
+        rightAdjacentNap &&
+        leftAdjacentNap.priority !== rightAdjacentNap.priority
+      ) {
+        return leftAdjacentNap.priority - rightAdjacentNap.priority;
+      }
+
       const leftHistory = countReferenceBreaks(
         staffMember.id,
         left.assignment.startTime,
@@ -612,7 +671,11 @@ function findReliefSwap(
       breakAssignment: createBreakAssignment(
         staffMember,
         assignment.startTime,
-        null
+        findAdjacentNapForClientSlot(
+          client,
+          assignment.startTime,
+          rules.slotLengthMinutes
+        )
       ),
     };
   }
