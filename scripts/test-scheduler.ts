@@ -238,6 +238,49 @@ function testScarceBtIsReservedForClientWithFewestBtOptions() {
   );
 }
 
+function testBtIsReservedForFutureClientWithNoOtherBtOption() {
+  const times = ["08:00", "08:30", "09:00"];
+  const bt = createStaff("only-bt", "Only Eligible BT", "BT", times);
+  const manager = createStaff("manager", "Relief Manager", "OFFICE_MANAGER", times);
+  const flexibleClient = createClient(
+    "flexible-client",
+    "FlCl",
+    times
+  );
+  const constrainedClient = createClient(
+    "constrained-client",
+    "CoCl",
+    ["09:00"],
+    {
+      staffRelationships: {
+        manager: "HARD_RESTRICTION",
+      },
+    }
+  );
+
+  const result = generateSchedule(
+    createInput([bt, manager], [flexibleClient, constrainedClient])
+  );
+  const flexibleAssignments = clientAssignments(result.assignments).filter(
+    (assignment) => assignment.clientId === flexibleClient.id
+  );
+  const constrainedAssignment = clientAssignments(result.assignments).find(
+    (assignment) => assignment.clientId === constrainedClient.id
+  );
+
+  assert.equal(flexibleAssignments.length, times.length);
+  assert.ok(
+    flexibleAssignments.every((assignment) => assignment.staffId === manager.id),
+    "An auxiliary role should cover the flexible client while the only eligible BT is needed for a later constrained client."
+  );
+  assert.equal(
+    constrainedAssignment?.staffId,
+    bt.id,
+    "The only eligible BT must remain available for the client who has no other BT option."
+  );
+  assert.equal(result.uncoveredRequirements.length, 0);
+}
+
 function testTemplateReferenceDoesNotForceShortIsolatedHandoff() {
   const times = ["08:00", "08:30", "09:00", "09:30"];
   const staff = [
@@ -1513,6 +1556,7 @@ function testFourHourPreferenceWithFinalHourExtension() {
 function runSchedulerRegressionScenarios() {
   testRoleCoverageOrder();
   testScarceBtIsReservedForClientWithFewestBtOptions();
+  testBtIsReservedForFutureClientWithNoOtherBtOption();
   testTemplateReferenceDoesNotForceShortIsolatedHandoff();
   testFourHourPreferenceWithFinalHourExtension();
   testAvailableBTWinsOverNonBTTemplateCoverage();
