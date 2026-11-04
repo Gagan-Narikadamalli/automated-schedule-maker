@@ -276,8 +276,8 @@ function buildPreferredContinuousPairingPlan(
   );
 
   // Once a new staff/client session starts, fill as much of that client's
-  // uninterrupted attendance segment as safely possible (up to the clinic's
-  // four-hour maximum). Nap, Speech, staff availability, protected cells, or
+  // uninterrupted attendance segment as safely possible (up to the configured
+  // maximum). Nap, Speech, staff availability, protected cells, or
   // another hard constraint naturally stop the run. This makes the schedule
   // visually readable as long blocks instead of re-solving the pairing every
   // 30 minutes.
@@ -840,10 +840,9 @@ function sortRequirementsForClinicFlow(
       return leftEligibleBtCount - rightEligibleBtCount;
     }
 
-    // Reproduce the immediately previous same-weekday schedule first. If that
-    // exact pairing is not feasible, give the current weekday template the next
-    // claim. Only after both reusable references fail do normal scheduler rules
-    // decide the assignment.
+    // Previous-week exact pairings can guide requirement ordering when valid.
+    // Weekday templates do not control ordering; coherent template runs are
+    // considered later as soft staff-selection preferences.
     const exactReferenceMatchAvailable = (
       requirement: ClientRequirement,
       source: "COPIED"
@@ -1057,8 +1056,8 @@ function findBestStaffMember(
     )
     .sort((left, right) => {
       // Coverage-role eligibility is a clinic safety boundary before reusable
-      // schedule preferences. Last-week/template matching only competes inside
-      // the same coverage tier (BT/RBT first, then auxiliary roles).
+      // schedule preferences. Previous-week matches and coherent template runs
+      // compete only inside the same coverage tier (BT/RBT first, then auxiliary roles).
       const roleDifference =
         coverageRoleTier(left.staffMember) -
         coverageRoleTier(right.staffMember);
@@ -1331,9 +1330,9 @@ function findBestSwap(
       currentAssignment.assignmentType !== "CLIENT_1_TO_1" ||
       (!allowProtectedAssignments &&
         (currentAssignment.locked || currentAssignment.source !== "AUTO")) ||
-      // A pinned previous-week or weekday-template match is never a movable
-      // repair candidate. Otherwise the coverage repair pass can silently
-      // undo the exact reference blocks placed at the start of generation.
+      // A previous-week exact pairing is protected from opportunistic repair.
+      // Weekday templates remain movable soft references so the repair pass can
+      // remove fragmented or otherwise inconsistent template-driven handoffs.
       (currentAssignment.source === "AUTO" &&
         input.referenceAssignments.some((reference) =>
           reference.assignmentType === "CLIENT_1_TO_1" &&
