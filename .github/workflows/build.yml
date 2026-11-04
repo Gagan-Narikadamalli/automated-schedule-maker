@@ -34,6 +34,9 @@ jobs:
       - name: Test flexible 30-minute nap placement
         run: npx tsx scripts/test-nap-window-placement.ts
 
+      - name: Test protected assignments in day and week generation
+        run: npx tsx scripts/test-generation-protection.ts
+
       - name: Test BT break priority and nap alignment
         run: npx tsx scripts/test-break-eligibility.ts
 
