@@ -223,9 +223,11 @@ function testClientNapCannotBeClaimedByTwoStaffBreaks() {
     "Automatic breaks must never claim a client nap"
   );
   assert.equal(
-    automaticBreaks.filter((a) => a.note?.includes("Aligned with nap for ZiBo.")).length,
+    automaticBreaks.filter((a) =>
+      a.note?.includes("[fixed-event:BREAK_NAP:ZiBo:12:00-13:00]")
+    ).length,
     1,
-    "Only one caregiver break may be explicitly linked to the same client nap slot."
+    "Only one caregiver break may be linked to the complete client nap event."
   );
 }
 
