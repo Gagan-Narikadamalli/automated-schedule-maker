@@ -300,6 +300,11 @@ export function OverviewDashboard() {
         <article className="metric-card">
           <span>Staff client hours scheduled</span>
           <strong>{overviewValues.staffHoursScheduled.toFixed(1)}</strong>
+          <small>
+            {viewMode === "weekly"
+              ? "Weekly total is capped at 40 hours per staff member."
+              : "Daily total reflects actual scheduled client hours."}
+          </small>
         </article>
         <article className="metric-card">
           <span>Uncovered client hours</span>
