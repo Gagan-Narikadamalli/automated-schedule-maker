@@ -317,11 +317,16 @@ function findBestFreeBreaks(
         );
         // A single client's nap can be linked to at most one staff break
         // per slot. Other employees may still take an ordinary break.
-        const alreadyLinked = fixedEvent?.assignmentType === "BREAK_NAP" &&
-          assignments.some((assignment) =>
-            assignment.assignmentType === "BREAK_NAP" &&
-            assignment.clientId === fixedEvent.client.id &&
-            assignment.startTime === slotTime);
+        const alreadyLinked =
+          fixedEvent?.assignmentType === "BREAK_NAP" &&
+          assignments.some(
+            (assignment) =>
+              assignment.assignmentType === "BREAK" &&
+              assignment.startTime === slotTime &&
+              assignment.note?.includes(
+                `Aligned with nap for ${fixedEvent.client.displayCode}.`
+              )
+          );
         const availableEvent = alreadyLinked ? null : fixedEvent;
         const isBtStaff =
           staffMember.role === "BT" || staffMember.role === "RBT";
