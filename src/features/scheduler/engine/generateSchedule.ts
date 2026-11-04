@@ -226,14 +226,16 @@ function buildPreferredContinuousPairingPlan(
   staffMember: SchedulerStaff,
   input: SchedulerInput,
   assignments: SchedulerAssignment[],
-  callOutStaffIds: Set<string>
+  callOutStaffIds: Set<string>,
+  allowSameDayPairRepeat = false
 ): SchedulerAssignment[] | null {
   const minimumPlan = buildMinimumPairingPlan(
     requirement,
     staffMember,
     input,
     assignments,
-    callOutStaffIds
+    callOutStaffIds,
+    allowSameDayPairRepeat
   );
 
   if (!minimumPlan) {
@@ -322,6 +324,7 @@ function buildPreferredContinuousPairingPlan(
       assignments: simulated,
       callOutStaffIds,
       rules: input.rules,
+      allowSameDayPairRepeat,
     });
 
     if (!check.allowed) {
@@ -1089,7 +1092,8 @@ function findBestStaffMember(
         staffMember,
         input,
         assignments,
-        callOutStaffIds
+        callOutStaffIds,
+        allowSameDayPairRepeat
       );
 
       if (!preferredPlan) {
