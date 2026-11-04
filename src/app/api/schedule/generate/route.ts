@@ -138,7 +138,10 @@ export async function POST(request: Request) {
     // Fresh generation starts from workbook pins, not previously generated/manual cells.
     // Repair mode is a separate action and retains the saved schedule.
     const templatePinning = pinWorkbookTemplates(schedulerInput);
-    const protectedAssignments = templatePinning.pinned;
+    // Valid template cells are advisory references, not locked assignments.
+    // The generator may follow them when they produce a coherent schedule,
+    // but it must be free to improve fragmented blocks and break placement.
+    const protectedAssignments: SchedulerAssignment[] = [];
 
 
     // Coverage is built first. Fixed nap and speech windows have already been
@@ -151,9 +154,21 @@ export async function POST(request: Request) {
     // Auto Generate must NEVER learn from the schedule already saved for the
     // target date. Workbook references are independent of existing day cells.
     const existingDayIds = new Set(schedulerInput.existingAssignments.map(item => item.id));
-    const freshReferences = schedulerInput.referenceAssignments.filter(reference =>
-      !existingDayIds.has(reference.id) && reference.source !== "AUTO"
+    const acceptedTemplateKeys = new Set(
+      templatePinning.pinned.map(reference =>
+        `${reference.staffId}|${reference.clientId ?? ""}|${reference.startTime}|${reference.assignmentType}`
+      )
     );
+    const freshReferences = schedulerInput.referenceAssignments.filter(reference => {
+      if (existingDayIds.has(reference.id) || reference.source === "AUTO") {
+        return false;
+      }
+      if (reference.source !== "TEMPLATE") {
+        return true;
+      }
+      const key = `${reference.staffId}|${reference.clientId ?? ""}|${reference.startTime}|${reference.assignmentType}`;
+      return acceptedTemplateKeys.has(key);
+    });
     const coverageResult = generateSchedule({
       ...schedulerInput,
       referenceAssignments: freshReferences,
@@ -178,13 +193,10 @@ export async function POST(request: Request) {
       schedulerRules: schedulerInput.rules,
     });
 
-    const enrichedAssignments = breakPlan.assignments.map(assignment => {
-      // Workbook BREAK, BREAK_NAP and BREAK_SPEECH must remain exactly as saved.
-      const pinned = templatePinning.pinned.find(item =>
-        item.staffId === assignment.staffId && item.startTime === assignment.startTime
-      );
-      return pinned ? {...assignment, assignmentType:pinned.assignmentType} : assignment;
-    });
+    // Break records are generated from the selected date's live nap/speech
+    // windows and coverage plan. A template's old break label is only a
+    // preference and must not overwrite the newly validated assignment type.
+    const enrichedAssignments = breakPlan.assignments;
     const finalCoverage = auditFinalCoverage(
       schedulerInput.clients,
       enrichedAssignments,
