@@ -238,6 +238,35 @@ function testScarceBtIsReservedForClientWithFewestBtOptions() {
   );
 }
 
+function testTemplateReferenceDoesNotForceShortIsolatedHandoff() {
+  const times = ["08:00", "08:30", "09:00", "09:30"];
+  const staff = [
+    createStaff("primary-bt", "Primary BT", "BT", times),
+    createStaff("template-bt", "Template BT", "BT", times),
+  ];
+  const client = createClient("continuous-client", "CoCl", times);
+  const references: SchedulerAssignment[] = times.map((startTime, index) => ({
+    id: `template-fragment-${startTime}`,
+    staffId: index === 3 ? "template-bt" : "primary-bt",
+    clientId: client.id,
+    startTime,
+    assignmentType: "CLIENT_1_TO_1",
+    source: "TEMPLATE",
+    locked: false,
+  }));
+
+  const result = generateSchedule(createInput(staff, [client], [], references));
+  const coverage = clientAssignments(result.assignments)
+    .filter((assignment) => assignment.clientId === client.id)
+    .sort((left, right) => left.startTime.localeCompare(right.startTime));
+
+  assert.equal(coverage.length, times.length);
+  assert.ok(
+    coverage.every((assignment) => assignment.staffId === "primary-bt"),
+    "A single isolated 30-minute template handoff must not interrupt a feasible continuous client block."
+  );
+}
+
 function testHistoricalPreferenceCannotJumpRoleTier() {
   const staff = [
     createStaff("bt-1", "Primary BT", "BT", ["08:00"]),
@@ -1484,6 +1513,7 @@ function testFourHourPreferenceWithFinalHourExtension() {
 function runSchedulerRegressionScenarios() {
   testRoleCoverageOrder();
   testScarceBtIsReservedForClientWithFewestBtOptions();
+  testTemplateReferenceDoesNotForceShortIsolatedHandoff();
   testFourHourPreferenceWithFinalHourExtension();
   testAvailableBTWinsOverNonBTTemplateCoverage();
   testContiguousClientCoverageAndNoDoubleBooking();
