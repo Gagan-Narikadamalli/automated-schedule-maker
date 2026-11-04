@@ -136,7 +136,7 @@ assert.match(paidModelSelection, /SCHEDULER_AI_PAID_MODEL/);
 assert.match(paidModelSelection, /DEFAULT_SCHEDULER_AI_PAID_MODEL/);
 assert.doesNotMatch(
   paidModelSelection,
-  /process\\.env\\.SCHEDULER_AI_MODEL/
+  /process\.env\.SCHEDULER_AI_MODEL/
 );
 assert.match(paidBase, /reasoning: "high"/);
 assert.match(paidBase, /adaptSchedulerToolsForPaid/);
