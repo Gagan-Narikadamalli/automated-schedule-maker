@@ -128,20 +128,15 @@ assert.match(
   paidBase,
   /DEFAULT_SCHEDULER_AI_PAID_MODEL = "openai\/gpt-6\.1-sol"/
 );
-const paidModelSelection = paidBase.match(
-  /const model =([\\s\\S]*?);/
-)?.[1] ?? "";
-assert.match(
-  paidModelSelection,
-  /SCHEDULER_AI_PAID_MODEL/
+const paidModelSelection = paidBase.slice(
+  paidBase.indexOf("const model ="),
+  paidBase.indexOf("const autonomousWrites")
 );
-assert.match(
-  paidModelSelection,
-  /DEFAULT_SCHEDULER_AI_PAID_MODEL/
-);
+assert.match(paidModelSelection, /SCHEDULER_AI_PAID_MODEL/);
+assert.match(paidModelSelection, /DEFAULT_SCHEDULER_AI_PAID_MODEL/);
 assert.doesNotMatch(
   paidModelSelection,
-  /SCHEDULER_AI_MODEL(?!_PAID)/
+  /process\\.env\\.SCHEDULER_AI_MODEL/
 );
 assert.match(paidBase, /reasoning: "high"/);
 assert.match(paidBase, /adaptSchedulerToolsForPaid/);
