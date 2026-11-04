@@ -701,10 +701,22 @@ function staffReservedForAnotherExactReferenceClient(
     const referencedClient = input.clients.find(
       (client) => client.id === reference.clientId
     );
-
     if (
       !referencedClient ||
       !referencedClient.requiredSlots.includes(startTime)
+    ) {
+      continue;
+    }
+
+    if (
+      source === "TEMPLATE" &&
+      !isValidTemplatePairReference(
+        staffId,
+        referencedClient.id,
+        startTime,
+        input.referenceAssignments,
+        input.rules.slotLengthMinutes
+      )
     ) {
       continue;
     }
@@ -715,15 +727,38 @@ function staffReservedForAnotherExactReferenceClient(
         assignment.clientId === referencedClient.id &&
         assignment.startTime === startTime
     );
+    if (alreadyCovered) continue;
 
-    if (!alreadyCovered) {
-      return true;
+    // A template must not reserve the only BT for a more constrained client.
+    if (source === "TEMPLATE") {
+      const proposedClient = input.clients.find(
+        (client) => client.id === proposedClientId
+      );
+      if (proposedClient) {
+        const callOutStaffIds = new Set(input.callOutStaffIds);
+        const proposedBtOptions = countEligibleBtStaff(
+          { client: proposedClient, startTime },
+          input,
+          assignments,
+          callOutStaffIds
+        );
+        const referencedBtOptions = countEligibleBtStaff(
+          { client: referencedClient, startTime },
+          input,
+          assignments,
+          callOutStaffIds
+        );
+        if (proposedBtOptions < referencedBtOptions) {
+          continue;
+        }
+      }
     }
+
+    return true;
   }
 
   return false;
 }
-
 function coverageRoleTier(staffMember: SchedulerStaff): number {
   switch (staffMember.role) {
     case "BT":
@@ -1078,9 +1113,34 @@ function findBestStaffMember(
         return leftReservedForOtherPreviousWeek ? 1 : -1;
       }
 
-      // Weekday templates remain soft preferences in scoreCandidate. They
-      // must not reserve a staff member or defeat continuous coverage.
+      const leftReservedForOtherTemplate =
+        staffReservedForAnotherExactReferenceClient(
+          left.staffMember.id,
+          requirement.client.id,
+          requirement.startTime,
+          input,
+          assignments,
+          "TEMPLATE"
+        );
+      const rightReservedForOtherTemplate =
+        staffReservedForAnotherExactReferenceClient(
+          right.staffMember.id,
+          requirement.client.id,
+          requirement.startTime,
+          input,
+          assignments,
+          "TEMPLATE"
+        );
 
+      if (
+        leftReservedForOtherTemplate !== rightReservedForOtherTemplate
+      ) {
+        return leftReservedForOtherTemplate ? 1 : -1;
+      }
+
+      // A coherent template run is a soft preference: it may preserve a
+      // deliberate multi-block handoff, but an isolated one-slot fragment
+      // cannot interrupt a longer feasible continuous block.
       const leftTemplateStrength = exactReferenceMatchStrength(
         left.staffMember.id,
         requirement.client.id,
