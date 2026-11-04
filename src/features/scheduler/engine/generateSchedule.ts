@@ -1790,15 +1790,11 @@ export function generateSchedule(input: SchedulerInput): SchedulerResult {
     ),
   ].sort();
 
-  // Reserve feasible exact reusable coverage BEFORE long continuity runs can
-  // claim those staff/time cells. The order is deliberate:
-  //   1. immediately previous same-weekday schedule (COPIED)
-  //   2. current weekday template (TEMPLATE)
-  // If the first reference cannot be used because of attendance, availability,
-  // eligibility, or an already occupied cell, the second reference may fill it.
-  // Only BT/RBT coverage is pinned here; auxiliary-role references remain soft
-  // preferences so the normal clinic coverage-role boundary is preserved.
-  for (const source of ["COPIED", "TEMPLATE"] as const) {
+  // Reserve only the immediately previous same-weekday BT/RBT coverage
+  // before long continuity runs can claim those staff/time cells. Weekday
+  // templates are deliberately excluded: they remain soft scoring references
+  // and must never pin a fragmented client handoff into the generated day.
+  for (const source of ["COPIED"] as const) {
     for (const reference of input.referenceAssignments
       .filter(
         (assignment) =>
