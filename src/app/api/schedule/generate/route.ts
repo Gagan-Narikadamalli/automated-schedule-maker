@@ -23,6 +23,10 @@ import { applyHistoricalTraining } from "@/features/scheduler/server/applyHistor
 import { applyLivingstonWorkbookTrial } from "@/features/scheduler/server/applyLivingstonWorkbookTrial";
 import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySchedulerInput";
 import { persistScheduleReplacementSafely } from "@/features/scheduler/server/persistScheduleReplacementSafely";
+import {
+  AUTO_REPLACEABLE_ASSIGNMENT_FILTER,
+  shouldKeepExistingAssignment,
+} from "@/features/scheduler/server/schedulePersistencePolicy";
 import { syncAutoUnplacedGaps } from "@/features/scheduler/server/syncAutoUnplacedGaps";
 import { writeAuditLog } from "@/lib/api/audit";
 import { connectToDatabase } from "@/lib/db";
@@ -142,7 +146,11 @@ export async function POST(request: Request) {
     // Valid template cells are advisory references, not locked assignments.
     // The generator may follow them when they produce a coherent schedule,
     // but it must be free to improve fragmented blocks and break placement.
-    const protectedAssignments: SchedulerAssignment[] = [];
+    // Preserve locked/manual/fixed-event cells during a fresh daily rebuild.
+    // Unlocked automatic/template/copied work is regenerated from current data.
+    const protectedAssignments = schedulerInput.existingAssignments.filter(
+      shouldKeepExistingAssignment
+    );
 
 
     // Coverage is built first. Fixed nap and speech windows have already been
@@ -234,7 +242,9 @@ export async function POST(request: Request) {
 
     await connectToDatabase();
 
-    const autoAssignments = enrichedAssignments;
+    const autoAssignments = enrichedAssignments.filter(
+      (assignment) => assignment.source === "AUTO" && !assignment.locked
+    );
     const generatedRecords = autoAssignments.map((assignment) => ({
       locationId,
       date,
@@ -253,7 +263,7 @@ export async function POST(request: Request) {
       locationId,
       date,
       replacements: generatedRecords,
-      replaceableFilter: {},
+      replaceableFilter: AUTO_REPLACEABLE_ASSIGNMENT_FILTER,
     });
 
     if (persistence.blockedEmptyReplacement) {
