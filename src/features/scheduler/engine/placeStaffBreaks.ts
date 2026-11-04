@@ -140,42 +140,65 @@ function findFixedEventForStaffSlot(
   clients: SchedulerClient[],
   slotLengthMinutes: number
 ): FixedEventCandidate | null {
-  const previousTime = shiftTime(startTime, -slotLengthMinutes);
-  const nextTime = shiftTime(startTime, slotLengthMinutes);
-  const adjacentClientIds = assignments
-    .filter(
-      (assignment) =>
-        assignment.staffId === staffId &&
-        assignment.assignmentType === "CLIENT_1_TO_1" &&
-        Boolean(assignment.clientId) &&
-        (assignment.startTime === previousTime || assignment.startTime === nextTime)
-    )
-    .map((assignment) => assignment.clientId as string);
-
   const candidates: FixedEventCandidate[] = [];
 
-  for (const clientId of new Set(adjacentClientIds)) {
-    const client = clients.find((candidate) => candidate.id === clientId);
-
-    if (!client) {
-      continue;
-    }
-
-    if (client.speechSlots.includes(startTime)) {
-      candidates.push({
-        client,
-        assignmentType: "BREAK_SPEECH",
+  for (const client of clients) {
+    const eventTypes = [
+      {
+        slots: client.speechSlots,
+        assignmentType: "BREAK_SPEECH" as const,
         priority: 0,
-      });
-      continue;
-    }
-
-    if (client.napSlots.includes(startTime)) {
-      candidates.push({
-        client,
-        assignmentType: "BREAK_NAP",
+      },
+      {
+        slots: client.napSlots,
+        assignmentType: "BREAK_NAP" as const,
         priority: client.napPriorityCategory === "YOUNGER" ? 10 : 20,
-      });
+      },
+    ];
+
+    for (const event of eventTypes) {
+      const fixedSlots = new Set(event.slots);
+      if (!fixedSlots.has(startTime)) continue;
+
+      // Treat a multi-slot nap as one continuous event. A caregiver assigned
+      // immediately before or after the complete nap may take their break in
+      // any slot inside it; checking only the neighboring half-hour misses
+      // the middle of longer naps.
+      let firstEventSlot = startTime;
+      let lastEventSlot = startTime;
+
+      while (true) {
+        const previousSlot = shiftTime(firstEventSlot, -slotLengthMinutes);
+        if (!previousSlot || !fixedSlots.has(previousSlot)) break;
+        firstEventSlot = previousSlot;
+      }
+
+      while (true) {
+        const nextSlot = shiftTime(lastEventSlot, slotLengthMinutes);
+        if (!nextSlot || !fixedSlots.has(nextSlot)) break;
+        lastEventSlot = nextSlot;
+      }
+
+      const eventBoundarySlots = new Set([
+        shiftTime(firstEventSlot, -slotLengthMinutes),
+        shiftTime(lastEventSlot, slotLengthMinutes),
+      ]);
+
+      const caregiverIsAssignedAtEventBoundary = assignments.some(
+        (assignment) =>
+          assignment.staffId === staffId &&
+          assignment.clientId === client.id &&
+          assignment.assignmentType === "CLIENT_1_TO_1" &&
+          eventBoundarySlots.has(assignment.startTime)
+      );
+
+      if (caregiverIsAssignedAtEventBoundary) {
+        candidates.push({
+          client,
+          assignmentType: event.assignmentType,
+          priority: event.priority,
+        });
+      }
     }
   }
 
@@ -206,11 +229,15 @@ function countReferenceBreaks(
 function createBreakAssignment(
   staffMember: SchedulerStaff,
   startTime: string,
-  _fixedEvent: FixedEventCandidate | null
+  fixedEvent: FixedEventCandidate | null
 ): SchedulerAssignment {
-  // Automatic generation only creates a plain staff BREAK. Nap and other
-  // client events are managed separately in Manual mode and must not be
-  // encoded into the staff break record.
+  // Keep automatic breaks as plain staff BREAK records. The note retains
+  // which fixed client event made this time suitable without turning the
+  // client's nap/speech appointment into a staff assignment.
+  const eventNote = fixedEvent
+    ? ` Aligned with ${fixedEvent.assignmentType === "BREAK_NAP" ? "nap" : "speech"} for ${fixedEvent.client.displayCode}.`
+    : "";
+
   return {
     id: `break-${staffMember.id}-${startTime}`,
     staffId: staffMember.id,
@@ -218,7 +245,7 @@ function createBreakAssignment(
     assignmentType: "BREAK",
     source: "AUTO",
     locked: true,
-    note: "Automatically reserved staff break.",
+    note: `Automatically reserved staff break.${eventNote}`,
   };
 }
 
@@ -296,15 +323,29 @@ function findBestFreeBreaks(
             assignment.clientId === fixedEvent.client.id &&
             assignment.startTime === slotTime);
         const availableEvent = alreadyLinked ? null : fixedEvent;
-        const insideNormalWindow =
-          slotTime >= rules.breakWindowStart &&
-          slotTime < rules.breakWindowEnd;
+        const isBtStaff =
+          staffMember.role === "BT" || staffMember.role === "RBT";
+        const reliefWindowStart = shiftTime(rules.breakWindowStart, -60) ??
+          rules.breakWindowStart;
+        const reliefWindowEnd = shiftTime(rules.breakWindowEnd, 60) ??
+          rules.breakWindowEnd;
+        const allowedWindowStart = isBtStaff
+          ? rules.breakWindowStart
+          : reliefWindowStart;
+        const allowedWindowEnd = isBtStaff
+          ? rules.breakWindowEnd
+          : reliefWindowEnd;
+        // The BT lunch window's end is the latest permitted break START.
+        // A 2:00 PM BT break therefore occupies 2:00-2:30 PM.
+        const insideRoleWindow =
+          slotTime >= allowedWindowStart &&
+          slotTime <= allowedWindowEnd;
         const insideNapExtension =
           availableEvent?.assignmentType === "BREAK_NAP" &&
           slotTime >= rules.breakWindowStart &&
-          slotTime < NAP_BREAK_WINDOW_END;
+          slotTime <= NAP_BREAK_WINDOW_END;
 
-        if (!insideNormalWindow && !insideNapExtension) {
+        if (!insideRoleWindow && !insideNapExtension) {
           return null;
         }
 
@@ -337,9 +378,28 @@ function findBestFreeBreaks(
           detail.fixedEvent ? detail.fixedEvent.priority : 100
         )
       );
+      const isBtStaff =
+        staffMember.role === "BT" || staffMember.role === "RBT";
+      const startMinutes = Number(startTime.slice(0, 2)) * 60 +
+        Number(startTime.slice(3, 5));
+      const preferredReliefDistance = Math.min(
+        Math.abs(startMinutes - (10 * 60 + 30)),
+        Math.abs(startMinutes - (14 * 60 + 30))
+      );
+      const overlapsBtLunchWindow = details.some(
+        (detail) =>
+          detail.slotTime >= rules.breakWindowStart &&
+          detail.slotTime <= rules.breakWindowEnd
+      );
+      // Managers, BCBAs, interns, and other non-BT staff are relief capacity
+      // during BT lunch. Prefer their breaks just before or after that window,
+      // while still allowing an in-window fallback when no alternative exists.
+      const reliefWindowPenalty =
+        !isBtStaff && overlapsBtLunchWindow ? 10_000 : 0;
       const score =
         eventPriority * 10 +
-        timeDistanceFromNoon(startTime) -
+        (isBtStaff ? timeDistanceFromNoon(startTime) : preferredReliefDistance) +
+        reliefWindowPenalty -
         Math.min(historicalCount, 4) * historicalPriority;
 
       return {
@@ -408,7 +468,7 @@ function findReliefSwap(
           (assignment.source === "AUTO" && !assignment.locked)) &&
         Boolean(assignment.clientId) &&
         assignment.startTime >= rules.breakWindowStart &&
-        assignment.startTime < rules.breakWindowEnd
+        assignment.startTime <= rules.breakWindowEnd
     )
     .sort((left, right) => {
       const leftHistory = countReferenceBreaks(
@@ -820,21 +880,32 @@ export function placeStaffBreaksAfterCoverage({
       continue;
     }
 
+    const isBtStaff =
+      staffMember.role === "BT" || staffMember.role === "RBT";
+    const earliestBreakStart = isBtStaff
+      ? rules.breakWindowStart
+      : shiftTime(rules.breakWindowStart, -60) ?? rules.breakWindowStart;
+    const latestBreakStart = isBtStaff
+      ? rules.breakWindowEnd
+      : shiftTime(rules.breakWindowEnd, 60) ?? rules.breakWindowEnd;
+    const availableHours =
+      (staffMember.availableSlots.length * rules.slotLengthMinutes) / 60;
     const hasBreakWindowAvailability = staffMember.availableSlots.some(
       (slot) =>
-        slot >= rules.breakWindowStart &&
-        slot < rules.breakWindowEnd
+        slot >= earliestBreakStart &&
+        slot <= latestBreakStart
     );
 
-    if (!hasBreakWindowAvailability) {
+    if (
+      !hasBreakWindowAvailability ||
+      availableHours < rules.breakEligibilityHours
+    ) {
       continue;
     }
 
-    // Every scheduled staff member who is present during the clinic break
-    // window is owed one break. The old
-    // shift-length threshold is intentionally not used here; if the person has
-    // a legal 11:00 AM-2:00 PM break opportunity, Auto Generate must try to
-    // place it.
+    // BT/RBT lunch is protected for 11:00 AM through a latest 2:00 PM
+    // break start. Non-BT staff receive a wider 10:00 AM-3:00 PM window and
+    // are preferentially kept available throughout BT lunch for relief.
 
     if (staffAlreadyHasBreak(staffMember.id, assignments)) {
       continue;
@@ -854,10 +925,13 @@ export function placeStaffBreaksAfterCoverage({
       continue;
     }
 
-    // Multi-block breaks must be placed as one contiguous free window. The
-    // single-block relief swap remains available for the normal 30-minute
-    // clinic break.
-    if (rules.defaultBreakMinutes !== rules.slotLengthMinutes) {
+    // Multi-block breaks must be placed as one contiguous free window.
+    // Only BT/RBT lunch may use a relief swap: non-BT staff are deliberately
+    // retained as coverage during the BT lunch window.
+    if (
+      rules.defaultBreakMinutes !== rules.slotLengthMinutes ||
+      !isBtStaff
+    ) {
       unplacedBreakStaffIds.push(staffMember.id);
       continue;
     }
