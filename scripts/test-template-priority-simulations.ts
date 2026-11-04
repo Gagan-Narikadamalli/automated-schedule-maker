@@ -509,8 +509,9 @@ assert.ok(
 );
 
 
-// Two saved templates of equal source priority are processed in their declared
-// order; the second must never overwrite the first at an already claimed slot.
+// A one-slot fragment from the first template must not override a coherent
+// two-slot client block from the second template. Continuity is more important
+// than raw reference order when the first reference would create a handoff.
 const firstLayer = [templateReference("layer-first", "previous-staff", "priority-client", SLOTS[0])];
 const secondLayer = [
   templateReference("layer-second-conflict", "template-staff", "priority-client", SLOTS[0]),
@@ -529,10 +530,10 @@ const twoLayerResult = generateSchedule({
   rules: {...RULES},
 });
 const twoLayerAssignments = twoLayerResult.assignments.filter(a=>a.assignmentType==="CLIENT_1_TO_1");
-assert.equal(twoLayerAssignments.find(a=>a.startTime===SLOTS[0])?.staffId,"previous-staff",
-  "Second layer must not displace a successfully placed first-layer block.");
+assert.equal(twoLayerAssignments.find(a=>a.startTime===SLOTS[0])?.staffId,"template-staff",
+  "A coherent two-slot template block should replace an isolated one-slot fragment.");
 assert.equal(twoLayerAssignments.find(a=>a.startTime===SLOTS[1])?.staffId,"template-staff",
-  "Second layer must fill available client/staff cells.");
+  "The same staff member should keep the client through the coherent block.");
 assert.equal(twoLayerResult.metrics.coveragePercent,100);
 assert.equal(new Set(twoLayerAssignments.map(a=>a.clientId+"|"+a.startTime)).size,twoLayerAssignments.length,
   "Layered templates may not double-book clients.");
