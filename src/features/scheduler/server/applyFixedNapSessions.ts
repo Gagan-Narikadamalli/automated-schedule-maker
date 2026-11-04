@@ -1,5 +1,4 @@
 import { getSlotsInsideTimeRange } from "@/features/scheduler/engine/dateUtils";
-import { resolveFlexibleEventWindows } from "@/features/scheduler/engine/flexibleEventWindows";
 import type {
   NapPriorityCategory,
   SchedulerInput,
@@ -65,40 +64,100 @@ export async function applyFixedNapSessions(
 
   // Every eligible nap window must originate in a saved Nap event for
   // this exact date. Clients without an event receive no nap slots.
-  const napWindows = input.clients.flatMap((client) =>
-    (sessionsByClient.get(client.id) ?? [])
-      .filter((session) => {
-        const startTime = String(session.startTime ?? "");
-        const endTime = String(session.endTime ?? "");
-        return Boolean(startTime && endTime && endTime > startTime);
-      })
-      .map((session, index) => ({
-        key: `fixed-nap-${String(session._id ?? index)}`,
-        clientId: client.id,
-        startTime: String(session.startTime),
-        endTime: String(session.endTime),
-        allowedSlots: [...client.requiredSlots],
-        priority: String(session.priorityCategory ?? "OLDER") === "YOUNGER" ? 10 : 20,
-      }))
-  );
-
-  const resolvedNapSlots = resolveFlexibleEventWindows(napWindows, {
-    enabled: input.rules.napDurationRulesEnabled ?? true,
-    durationMinutes: input.rules.napPreferredMinutes ?? 30,
-    slotLengthMinutes: input.rules.slotLengthMinutes,
-  });
-
+  // A saved nap start/end is a flexible window, not the length of the nap.
+  // Every nap is exactly 30 minutes. Choose either the first or last 30-minute
+  // portion of that window, preferring the edge with the most BT/RBT coverage
+  // immediately outside the nap so the caregiver can take their break while
+  // the child is resting.
   const napSlotsByClient = new Map<string, Set<string>>();
+  const slotLengthMinutes = input.rules.slotLengthMinutes;
+  const napSlotCount = Math.max(
+    Math.ceil(30 / Math.max(slotLengthMinutes, 1)),
+    1
+  );
+  const shiftTime = (time: string, minutes: number): string | null => {
+    const [hours, minute] = time.split(":").map(Number);
+    if (!Number.isFinite(hours) || !Number.isFinite(minute)) return null;
+    const total = hours * 60 + minute + minutes;
+    if (total < 0 || total >= 24 * 60) return null;
+    return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+  };
 
-  for (const window of napWindows) {
-    const slots =
-      napSlotsByClient.get(window.clientId) ?? new Set<string>();
+  for (const client of input.clients) {
+    const clientNapSlots = napSlotsByClient.get(client.id) ?? new Set<string>();
+    const sessionsForClient = sessionsByClient.get(client.id) ?? [];
 
-    for (const slot of resolvedNapSlots.get(window.key) ?? []) {
-      slots.add(slot);
+    for (const session of sessionsForClient) {
+      const startTime = String(session.startTime ?? "");
+      const endTime = String(session.endTime ?? "");
+      if (!startTime || !endTime || endTime <= startTime) continue;
+
+      const allowedSlots = new Set(client.requiredSlots);
+      const windowSlots = getSlotsInsideTimeRange(startTime, endTime).filter(
+        (slot) => allowedSlots.has(slot)
+      );
+      if (windowSlots.length === 0) continue;
+
+      const firstNapSlots = windowSlots.slice(0, napSlotCount);
+      const lastNapSlots = windowSlots.slice(-napSlotCount);
+      const uniqueCandidates = [
+        ...new Map(
+          [firstNapSlots, lastNapSlots].map((slots) => [
+            slots.join("|"),
+            slots,
+          ])
+        ).values(),
+      ];
+
+      const scoreCandidate = (slots: string[]) => {
+        const beforeNap = shiftTime(slots[0], -slotLengthMinutes);
+        const afterNap = shiftTime(
+          slots[slots.length - 1],
+          slotLengthMinutes
+        );
+        const boundarySlots = [beforeNap, afterNap].filter(
+          (slot): slot is string => Boolean(slot)
+        );
+        let btAvailability = 0;
+        let otherAvailability = 0;
+
+        for (const staffMember of input.staff) {
+          if (
+            !boundarySlots.some((slot) =>
+              staffMember.availableSlots.includes(slot)
+            )
+          ) {
+            continue;
+          }
+          if (
+            client.staffRelationships[staffMember.id] === "HARD_RESTRICTION"
+          ) {
+            continue;
+          }
+          if (staffMember.role === "BT" || staffMember.role === "RBT") {
+            btAvailability += 1;
+          } else {
+            otherAvailability += 1;
+          }
+        }
+
+        return btAvailability * 100 + otherAvailability;
+      };
+
+      const selectedSlots = uniqueCandidates.sort((left, right) => {
+        const scoreDifference =
+          scoreCandidate(right) - scoreCandidate(left);
+        if (scoreDifference !== 0) return scoreDifference;
+        // Deterministic tie-break: use the first 30 minutes.
+        return left[0].localeCompare(right[0]);
+      })[0];
+
+      for (const slot of selectedSlots) {
+        clientNapSlots.add(slot);
+      }
     }
 
-    napSlotsByClient.set(window.clientId, slots);
+    napSlotsByClient.set(client.id, clientNapSlots);
   }
 
   const clients = input.clients.map((client) => {
