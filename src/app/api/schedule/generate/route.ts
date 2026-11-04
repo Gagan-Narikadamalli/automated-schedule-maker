@@ -135,8 +135,9 @@ export async function POST(request: Request) {
       dayData.extendedRules
     );
 
-    // Fresh generation starts from workbook pins, not previously generated/manual cells.
-    // Repair mode is a separate action and retains the saved schedule.
+    // Fresh generation starts from validated workbook references, not hard-pinned
+    // template cells or the previous AUTO result for this date. Repair mode is
+    // a separate action and retains the saved schedule.
     const templatePinning = pinWorkbookTemplates(schedulerInput);
     // Valid template cells are advisory references, not locked assignments.
     // The generator may follow them when they produce a coherent schedule,
