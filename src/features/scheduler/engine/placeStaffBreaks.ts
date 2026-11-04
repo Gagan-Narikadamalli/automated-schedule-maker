@@ -135,6 +135,24 @@ function coverageRoleTier(role: StaffRole): number {
   }
 }
 
+function reliefRolePriority(role: StaffRole): number {
+  switch (role) {
+    case "OFFICE_MANAGER":
+      return 0;
+    case "BCBA":
+      return 1;
+    case "INTERN":
+      return 2;
+    case "OTHER":
+      return 3;
+    case "BT":
+    case "RBT":
+      return 4;
+    default:
+      return 5;
+  }
+}
+
 function findFixedEventForStaffSlot(
   staffId: string,
   startTime: string,
@@ -561,8 +579,8 @@ function findReliefSwap(
       )
       .sort((left, right) => {
         const roleDifference =
-          coverageRoleTier(left.staffMember.role) -
-          coverageRoleTier(right.staffMember.role);
+          reliefRolePriority(left.staffMember.role) -
+          reliefRolePriority(right.staffMember.role);
 
         if (roleDifference !== 0) {
           return roleDifference;
