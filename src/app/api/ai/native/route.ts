@@ -41,7 +41,7 @@ export const maxDuration = 300;
 
 const NATIVE_MODEL_NAME = "native/scheduler-v0.1";
 const MAX_MESSAGE_LENGTH = 5000;
-const MAX_HISTORY_MESSAGES = 12;
+const MAX_HISTORY_MESSAGES = 24;
 
 function cleanLocationName(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
