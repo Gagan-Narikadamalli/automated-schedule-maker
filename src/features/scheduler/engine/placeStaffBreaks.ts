@@ -245,7 +245,7 @@ function findAdjacentNapForClientSlot(
     shiftTime(startTime, -slotLengthMinutes),
     shiftTime(startTime, slotLengthMinutes),
   ].find(
-    (slot): slot is string => Boolean(slot) && client.napSlots.includes(slot)
+    (slot): slot is string => slot !== null && client.napSlots.includes(slot)
   );
 
   if (!adjacentNapSlot) return null;
