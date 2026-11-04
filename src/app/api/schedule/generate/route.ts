@@ -108,10 +108,14 @@ export async function POST(request: Request) {
     }
 
     const dayData = await buildDaySchedulerInput(locationId, date);
-    // Manager nap events do not override workbook coverage during generation.
-    // Date-specific attendance call-outs/call-ins still apply.
+    // Apply the selected date's saved nap sessions and attendance changes
+    // before calculating capacity or assigning staff. A nap removes that
+    // client's 1:1 demand for the nap window, allowing the assigned caregiver
+    // to take a break without creating an unnecessary coverage handoff.
     const fixedNapApplication = await applyFixedNapSessions(
-      locationId, date, dayData.input, { ignoreNapSessions: true }
+      locationId,
+      date,
+      dayData.input
     );
 
     const workbookTraining = await applyLivingstonWorkbookTrial(
