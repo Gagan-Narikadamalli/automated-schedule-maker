@@ -411,6 +411,26 @@ function countEligibleStaff(
   ).length;
 }
 
+function countEligibleBtStaff(
+  requirement: ClientRequirement,
+  input: SchedulerInput,
+  assignments: SchedulerAssignment[],
+  callOutStaffIds: Set<string>
+): number {
+  const btStaff = input.staff.filter(
+    (staffMember) =>
+      staffMember.role === "BT" || staffMember.role === "RBT"
+  );
+
+  return countEligibleStaff(
+    requirement,
+    btStaff,
+    assignments,
+    callOutStaffIds,
+    input
+  );
+}
+
 function explainUncoveredRequirement(
   requirement: ClientRequirement,
   input: SchedulerInput,
@@ -694,6 +714,27 @@ function sortRequirementsForClinicFlow(
 
     if (timeComparison !== 0) {
       return timeComparison;
+    }
+
+    // Protect scarce BT capacity before consulting soft template/history
+    // preferences. Clients with fewer eligible BT/RBT options get first claim;
+    // clients with no eligible BT are assigned to auxiliary staff first when
+    // possible, preserving BTs for clients who actually require them.
+    const leftEligibleBtCount = countEligibleBtStaff(
+      left,
+      input,
+      assignments,
+      callOutStaffIds
+    );
+    const rightEligibleBtCount = countEligibleBtStaff(
+      right,
+      input,
+      assignments,
+      callOutStaffIds
+    );
+
+    if (leftEligibleBtCount !== rightEligibleBtCount) {
+      return leftEligibleBtCount - rightEligibleBtCount;
     }
 
     // Reproduce the immediately previous same-weekday schedule first. If that
