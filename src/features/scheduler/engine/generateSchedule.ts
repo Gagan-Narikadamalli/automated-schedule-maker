@@ -298,7 +298,8 @@ function buildPreferredContinuousPairingPlan(
         staffMember.id,
         requirement.client.id,
         slot,
-        input.referenceAssignments
+        input.referenceAssignments,
+        input.rules.slotLengthMinutes
       )
     ) {
       break;
@@ -545,12 +546,62 @@ function supportPriority(client: SchedulerClient): number {
   return 1;
 }
 
+function isValidTemplatePairReference(
+  staffId: string,
+  clientId: string,
+  startTime: string,
+  referenceAssignments: SchedulerAssignment[],
+  slotLengthMinutes: number
+): boolean {
+  const clientTemplateReferences = referenceAssignments.filter(
+    (assignment) =>
+      assignment.source === "TEMPLATE" &&
+      assignment.assignmentType === "CLIENT_1_TO_1" &&
+      assignment.clientId === clientId
+  );
+  const matchingSlots = new Set(
+    clientTemplateReferences
+      .filter((assignment) => assignment.staffId === staffId)
+      .map((assignment) => assignment.startTime)
+  );
+
+  if (!matchingSlots.has(startTime)) return false;
+  // A single template cell can be a valid reference when it is the client's
+  // only template coverage for the day. A one-slot island inside a longer
+  // template client run is treated as a likely accidental handoff.
+  if (clientTemplateReferences.length === 1) return true;
+
+  let firstSlot = startTime;
+  let lastSlot = startTime;
+  while (true) {
+    const previous = shiftTime(firstSlot, -slotLengthMinutes);
+    if (!previous || !matchingSlots.has(previous)) break;
+    firstSlot = previous;
+  }
+  while (true) {
+    const next = shiftTime(lastSlot, slotLengthMinutes);
+    if (!next || !matchingSlots.has(next)) break;
+    lastSlot = next;
+  }
+
+  let runLength = 1;
+  let cursor = firstSlot;
+  while (cursor !== lastSlot) {
+    const next = shiftTime(cursor, slotLengthMinutes);
+    if (!next) break;
+    runLength += 1;
+    cursor = next;
+  }
+  return runLength >= 2;
+}
+
 function exactReferenceMatchStrength(
   staffId: string,
   clientId: string,
   startTime: string,
   referenceAssignments: SchedulerAssignment[],
-  source?: "TEMPLATE" | "COPIED"
+  source?: "TEMPLATE" | "COPIED",
+  slotLengthMinutes = 30
 ): number {
   return referenceAssignments.reduce((score, assignment) => {
     if (
@@ -563,11 +614,19 @@ function exactReferenceMatchStrength(
       return score;
     }
 
-    // The immediately previous same-weekday schedule is the strongest reusable
-    // instruction. The current weekday template is the fallback. Current-day
-    // AUTO output is deliberately ignored so a bad generation cannot train itself.
     if (assignment.source === "COPIED") return score + 100;
-    if (assignment.source === "TEMPLATE") return score + 1;
+    if (
+      assignment.source === "TEMPLATE" &&
+      isValidTemplatePairReference(
+        staffId,
+        clientId,
+        startTime,
+        referenceAssignments,
+        slotLengthMinutes
+      )
+    ) {
+      return score + 10;
+    }
     return score;
   }, 0);
 }
@@ -576,13 +635,23 @@ function exactReferenceConflictsWithPair(
   staffId: string,
   clientId: string,
   startTime: string,
-  referenceAssignments: SchedulerAssignment[]
+  referenceAssignments: SchedulerAssignment[],
+  slotLengthMinutes: number
 ): boolean {
   const relevant = referenceAssignments.filter(
     (assignment) =>
       assignment.assignmentType === "CLIENT_1_TO_1" &&
       assignment.startTime === startTime &&
-      assignment.source === "COPIED" &&
+      (assignment.source === "COPIED" ||
+        (assignment.source === "TEMPLATE" &&
+          Boolean(assignment.clientId) &&
+          isValidTemplatePairReference(
+            assignment.staffId,
+            assignment.clientId as string,
+            assignment.startTime,
+            referenceAssignments,
+            slotLengthMinutes
+          ))) &&
       (assignment.staffId === staffId ||
         assignment.clientId === clientId)
   );
@@ -593,7 +662,9 @@ function exactReferenceConflictsWithPair(
     staffId,
     clientId,
     startTime,
-    referenceAssignments
+    referenceAssignments,
+    undefined,
+    slotLengthMinutes
   );
 
   const strongestConflict = relevant.reduce((strength, assignment) => {
@@ -967,7 +1038,8 @@ function findBestStaffMember(
         requirement.client.id,
         requirement.startTime,
         input.referenceAssignments,
-        "COPIED"
+        "COPIED",
+        input.rules.slotLengthMinutes
       );
       const rightPreviousWeekStrength = exactReferenceMatchStrength(
         right.staffMember.id,
@@ -1011,6 +1083,29 @@ function findBestStaffMember(
 
       // Weekday templates remain soft preferences in scoreCandidate. They
       // must not reserve a staff member or defeat continuous coverage.
+
+      const leftTemplateStrength = exactReferenceMatchStrength(
+        left.staffMember.id,
+        requirement.client.id,
+        requirement.startTime,
+        input.referenceAssignments,
+        "TEMPLATE",
+        input.rules.slotLengthMinutes
+      );
+      const rightTemplateStrength = exactReferenceMatchStrength(
+        right.staffMember.id,
+        requirement.client.id,
+        requirement.startTime,
+        input.referenceAssignments,
+        "TEMPLATE",
+        input.rules.slotLengthMinutes
+      );
+
+      // Reuse a coherent template run, but never elevate an isolated one-slot
+      // fragment over the schedule's continuity and coverage constraints.
+      if (leftTemplateStrength !== rightTemplateStrength) {
+        return rightTemplateStrength - leftTemplateStrength;
+      }
 
       const previousAssignment = previousClientAssignment(
         requirement,
