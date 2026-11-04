@@ -433,6 +433,70 @@ function countEligibleBtStaff(
   );
 }
 
+function calculateFutureBtScarcityPenalty(
+  requirement: ClientRequirement,
+  staffMember: SchedulerStaff,
+  proposedPlan: SchedulerAssignment[],
+  input: SchedulerInput,
+  assignments: SchedulerAssignment[],
+  callOutStaffIds: Set<string>
+): number {
+  if (staffMember.role !== "BT" && staffMember.role !== "RBT") {
+    return 0;
+  }
+
+  const anotherRoleCanCoverCurrentClient = input.staff.some(
+    (candidate) =>
+      candidate.role !== "BT" &&
+      candidate.role !== "RBT" &&
+      canAssignStaffToClient({
+        staffMember: candidate,
+        client: requirement.client,
+        startTime: requirement.startTime,
+        assignments,
+        callOutStaffIds,
+        rules: input.rules,
+      }).allowed
+  );
+  if (!anotherRoleCanCoverCurrentClient) return 0;
+
+  const proposedSlots = new Set(
+    proposedPlan.map((assignment) => assignment.startTime)
+  );
+
+  for (const futureClient of input.clients) {
+    if (futureClient.id === requirement.client.id) continue;
+
+    for (const futureSlot of futureClient.requiredSlots) {
+      if (!proposedSlots.has(futureSlot)) continue;
+
+      const eligibleBtStaff = input.staff.filter(
+        (candidate) =>
+          (candidate.role === "BT" || candidate.role === "RBT") &&
+          canAssignStaffToClient({
+            staffMember: candidate,
+            client: futureClient,
+            startTime: futureSlot,
+            assignments,
+            callOutStaffIds,
+            rules: input.rules,
+          }).allowed
+      );
+
+      if (
+        eligibleBtStaff.length === 1 &&
+        eligibleBtStaff[0].id === staffMember.id
+      ) {
+        // Keep this BT free for a future client who has no other BT option
+        // when an auxiliary role can cover the current, more flexible client.
+        return 1;
+      }
+    }
+  }
+
+  return 0;
+}
+
 function explainUncoveredRequirement(
   requirement: ClientRequirement,
   input: SchedulerInput,
@@ -1020,21 +1084,28 @@ function findBestStaffMember(
         return null;
       }
 
-      const minimumPlan = buildMinimumPairingPlan(
+      const preferredPlan = buildPreferredContinuousPairingPlan(
         requirement,
         staffMember,
         input,
         assignments,
-        callOutStaffIds,
-        allowSameDayPairRepeat
+        callOutStaffIds
       );
 
-      if (!minimumPlan) {
+      if (!preferredPlan) {
         return null;
       }
 
       return {
         staffMember,
+        futureScarcityPenalty: calculateFutureBtScarcityPenalty(
+          requirement,
+          staffMember,
+          preferredPlan,
+          input,
+          assignments,
+          callOutStaffIds
+        ),
         score: scoreCandidate({
           staffMember,
           client: requirement.client,
@@ -1051,10 +1122,17 @@ function findBestStaffMember(
         candidate
       ): candidate is {
         staffMember: SchedulerStaff;
+        futureScarcityPenalty: number;
         score: number;
       } => candidate !== null
     )
     .sort((left, right) => {
+      // A BT reserved for a future client with no other eligible BT must not
+      // be consumed by a flexible client when an auxiliary role can cover it.
+      if (left.futureScarcityPenalty !== right.futureScarcityPenalty) {
+        return left.futureScarcityPenalty - right.futureScarcityPenalty;
+      }
+
       // Coverage-role eligibility is a clinic safety boundary before reusable
       // schedule preferences. Previous-week matches and coherent template runs
       // compete only inside the same coverage tier (BT/RBT first, then auxiliary roles).
