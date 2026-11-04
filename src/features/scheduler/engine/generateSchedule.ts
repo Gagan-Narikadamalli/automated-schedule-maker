@@ -571,27 +571,24 @@ function isValidTemplatePairReference(
   // template client run is treated as a likely accidental handoff.
   if (clientTemplateReferences.length === 1) return true;
 
-  let firstSlot = startTime;
-  let lastSlot = startTime;
-  while (true) {
-    const previous = shiftTime(firstSlot, -slotLengthMinutes);
-    if (!previous || !matchingSlots.has(previous)) break;
-    firstSlot = previous;
+  const startMinutes = timeToMinutes(startTime);
+  if (startMinutes === null) return false;
+
+  let firstMinutes = startMinutes;
+  let lastMinutes = startMinutes;
+  while (firstMinutes - slotLengthMinutes >= 0) {
+    const previous = minutesToTime(firstMinutes - slotLengthMinutes);
+    if (!matchingSlots.has(previous)) break;
+    firstMinutes -= slotLengthMinutes;
   }
-  while (true) {
-    const next = shiftTime(lastSlot, slotLengthMinutes);
-    if (!next || !matchingSlots.has(next)) break;
-    lastSlot = next;
+  while (lastMinutes + slotLengthMinutes < 24 * 60) {
+    const next = minutesToTime(lastMinutes + slotLengthMinutes);
+    if (!matchingSlots.has(next)) break;
+    lastMinutes += slotLengthMinutes;
   }
 
-  let runLength = 1;
-  let cursor = firstSlot;
-  while (cursor !== lastSlot) {
-    const next = shiftTime(cursor, slotLengthMinutes);
-    if (!next) break;
-    runLength += 1;
-    cursor = next;
-  }
+  const runLength =
+    Math.floor((lastMinutes - firstMinutes) / slotLengthMinutes) + 1;
   return runLength >= 2;
 }
 
