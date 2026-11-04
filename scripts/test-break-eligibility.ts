@@ -222,6 +222,11 @@ function testClientNapCannotBeClaimedByTwoStaffBreaks() {
     automaticBreaks.every((a) => !a.clientId),
     "Automatic breaks must never claim a client nap"
   );
+  assert.equal(
+    automaticBreaks.filter((a) => a.note?.includes("Aligned with nap for ZiBo.")).length,
+    1,
+    "Only one caregiver break may be explicitly linked to the same client nap slot."
+  );
 }
 
 function testEnrichmentNeverDuplicatesNapLink() {
