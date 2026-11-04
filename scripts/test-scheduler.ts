@@ -176,6 +176,68 @@ function testRoleCoverageOrder() {
   );
 }
 
+function testScarceBtIsReservedForClientWithFewestBtOptions() {
+  const time = "08:00";
+  const staff = [
+    createStaff("bt-a", "BT A", "BT", [time]),
+    createStaff("bt-b", "BT B", "BT", [time]),
+    createStaff("manager", "Manager", "OFFICE_MANAGER", [time]),
+    createStaff("bcba", "BCBA", "BCBA", [time]),
+  ];
+  const scarceBtClient = createClient(
+    "client-scarce-bt",
+    "ScBt",
+    [time],
+    {
+      staffRelationships: {
+        "bt-b": "HARD_RESTRICTION",
+      },
+    }
+  );
+  const flexibleClient = createClient(
+    "client-flexible-bt",
+    "FlBt",
+    [time],
+    {
+      staffRelationships: {
+        manager: "HARD_RESTRICTION",
+        bcba: "HARD_RESTRICTION",
+      },
+    }
+  );
+
+  // The flexible client has two eligible BTs (two total eligible staff).
+  // The scarce client has only one eligible BT but also has manager/BCBA
+  // alternatives (three total eligible staff). BT scarcity must win over the
+  // raw total-staff count so the manager/BCBA can take the flexible client.
+  const result = generateSchedule(
+    createInput(staff, [flexibleClient, scarceBtClient])
+  );
+  const assignments = clientAssignments(result.assignments);
+  const scarceAssignment = assignments.find(
+    (assignment) => assignment.clientId === scarceBtClient.id
+  );
+  const flexibleAssignment = assignments.find(
+    (assignment) => assignment.clientId === flexibleClient.id
+  );
+
+  assert.equal(
+    scarceAssignment?.staffId,
+    "bt-a",
+    "The client with only one eligible BT must receive that BT first."
+  );
+  assert.equal(
+    flexibleAssignment?.staffId,
+    "bt-b",
+    "The flexible client should use the remaining BT after the scarce client is covered."
+  );
+  assert.equal(
+    result.uncoveredRequirements.length,
+    0,
+    "Both clients should remain covered."
+  );
+}
+
 function testHistoricalPreferenceCannotJumpRoleTier() {
   const staff = [
     createStaff("bt-1", "Primary BT", "BT", ["08:00"]),
@@ -1421,6 +1483,7 @@ function testFourHourPreferenceWithFinalHourExtension() {
 
 function runSchedulerRegressionScenarios() {
   testRoleCoverageOrder();
+  testScarceBtIsReservedForClientWithFewestBtOptions();
   testFourHourPreferenceWithFinalHourExtension();
   testAvailableBTWinsOverNonBTTemplateCoverage();
   testContiguousClientCoverageAndNoDoubleBooking();
