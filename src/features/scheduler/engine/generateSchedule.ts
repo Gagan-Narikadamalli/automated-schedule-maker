@@ -1,4 +1,5 @@
 import { canAssignStaffToClient } from "./constraints";
+import { calculateEffectiveStaffAvailableHours } from "./capacity";
 import { scoreCandidate } from "./scoring";
 import type {
   SchedulerAssignment,
@@ -1269,16 +1270,20 @@ function calculateCapacityMetrics(
   const activeClients = input.clients.filter(
     (client) => client.requiredSlots.length > 0
   );
-  const staffAvailableSlots = workingStaff.reduce(
-    (total, staffMember) => total + staffMember.availableSlots.length,
-    0
-  );
   const breakSlots = countReservedBreakSlots(assignments);
 
   const requiredClientHours = requiredClientSlots * slotHours;
   const coveredClientHours = coveredClientSlots * slotHours;
   const uncoveredClientHours = uncoveredClientSlots * slotHours;
-  const staffAvailableHours = staffAvailableSlots * slotHours;
+  const staffAvailableHours = workingStaff.reduce(
+    (total, staffMember) =>
+      total +
+      calculateEffectiveStaffAvailableHours(
+        staffMember,
+        input.rules.slotLengthMinutes
+      ),
+    0
+  );
   const breakHoursReserved = breakSlots * slotHours;
   const netStaffCoverageHours = Math.max(
     staffAvailableHours - breakHoursReserved,
