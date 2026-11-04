@@ -44,6 +44,8 @@ type FixedEventCandidate = {
   client: SchedulerClient;
   assignmentType: "BREAK_NAP" | "BREAK_SPEECH";
   priority: number;
+  eventStartTime: string;
+  eventEndTime: string;
 };
 
 const NAP_BREAK_WINDOW_END = "14:00";
@@ -197,6 +199,9 @@ function findFixedEventForStaffSlot(
           client,
           assignmentType: event.assignmentType,
           priority: event.priority,
+          eventStartTime: firstEventSlot,
+          eventEndTime:
+            shiftTime(lastEventSlot, slotLengthMinutes) ?? lastEventSlot,
         });
       }
     }
@@ -235,7 +240,7 @@ function createBreakAssignment(
   // which fixed client event made this time suitable without turning the
   // client's nap/speech appointment into a staff assignment.
   const eventNote = fixedEvent
-    ? ` Aligned with ${fixedEvent.assignmentType === "BREAK_NAP" ? "nap" : "speech"} for ${fixedEvent.client.displayCode}.`
+    ? ` Aligned with ${fixedEvent.assignmentType === "BREAK_NAP" ? "nap" : "speech"} for ${fixedEvent.client.displayCode} (${fixedEvent.eventStartTime}-${fixedEvent.eventEndTime}). [fixed-event:${fixedEvent.assignmentType}:${fixedEvent.client.id}:${fixedEvent.eventStartTime}-${fixedEvent.eventEndTime}]`
     : "";
 
   return {
@@ -317,16 +322,17 @@ function findBestFreeBreaks(
         );
         // A single client's nap can be linked to at most one staff break
         // per slot. Other employees may still take an ordinary break.
-        const alreadyLinked =
-          fixedEvent?.assignmentType === "BREAK_NAP" &&
+        const napLinkKey = fixedEvent?.assignmentType === "BREAK_NAP"
+          ? `[fixed-event:BREAK_NAP:${fixedEvent.client.id}:${fixedEvent.eventStartTime}-${fixedEvent.eventEndTime}]`
+          : null;
+        const alreadyLinked = Boolean(
+          napLinkKey &&
           assignments.some(
             (assignment) =>
               assignment.assignmentType === "BREAK" &&
-              assignment.startTime === slotTime &&
-              assignment.note?.includes(
-                `Aligned with nap for ${fixedEvent.client.displayCode}.`
-              )
-          );
+              assignment.note?.includes(napLinkKey)
+          )
+        );
         const availableEvent = alreadyLinked ? null : fixedEvent;
         const isBtStaff =
           staffMember.role === "BT" || staffMember.role === "RBT";
