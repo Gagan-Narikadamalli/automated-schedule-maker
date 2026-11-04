@@ -567,7 +567,7 @@ function exactReferenceMatchStrength(
     // instruction. The current weekday template is the fallback. Current-day
     // AUTO output is deliberately ignored so a bad generation cannot train itself.
     if (assignment.source === "COPIED") return score + 100;
-    if (assignment.source === "TEMPLATE") return score + 10;
+    if (assignment.source === "TEMPLATE") return score + 1;
     return score;
   }, 0);
 }
@@ -582,8 +582,7 @@ function exactReferenceConflictsWithPair(
     (assignment) =>
       assignment.assignmentType === "CLIENT_1_TO_1" &&
       assignment.startTime === startTime &&
-      (assignment.source === "TEMPLATE" ||
-        assignment.source === "COPIED") &&
+      assignment.source === "COPIED" &&
       (assignment.staffId === staffId ||
         assignment.clientId === clientId)
   );
@@ -1012,51 +1011,8 @@ function findBestStaffMember(
         return leftReservedForOtherPreviousWeek ? 1 : -1;
       }
 
-      const leftTemplateStrength = exactReferenceMatchStrength(
-        left.staffMember.id,
-        requirement.client.id,
-        requirement.startTime,
-        input.referenceAssignments,
-        "TEMPLATE"
-      );
-      const rightTemplateStrength = exactReferenceMatchStrength(
-        right.staffMember.id,
-        requirement.client.id,
-        requirement.startTime,
-        input.referenceAssignments,
-        "TEMPLATE"
-      );
-
-      // Priority 2 inside the same coverage tier: use the current weekday
-      // template when last week's exact assignment is unavailable.
-      if (leftTemplateStrength !== rightTemplateStrength) {
-        return rightTemplateStrength - leftTemplateStrength;
-      }
-
-      const leftReservedForOtherTemplate =
-        staffReservedForAnotherExactReferenceClient(
-          left.staffMember.id,
-          requirement.client.id,
-          requirement.startTime,
-          input,
-          assignments,
-          "TEMPLATE"
-        );
-      const rightReservedForOtherTemplate =
-        staffReservedForAnotherExactReferenceClient(
-          right.staffMember.id,
-          requirement.client.id,
-          requirement.startTime,
-          input,
-          assignments,
-          "TEMPLATE"
-        );
-
-      if (
-        leftReservedForOtherTemplate !== rightReservedForOtherTemplate
-      ) {
-        return leftReservedForOtherTemplate ? 1 : -1;
-      }
+      // Weekday templates remain soft preferences in scoreCandidate. They
+      // must not reserve a staff member or defeat continuous coverage.
 
       const previousAssignment = previousClientAssignment(
         requirement,
@@ -1229,7 +1185,7 @@ function findBestSwap(
           reference.staffId === currentAssignment.staffId &&
           reference.clientId === currentAssignment.clientId &&
           reference.startTime === currentAssignment.startTime &&
-          (reference.source === "COPIED" || reference.source === "TEMPLATE")
+          reference.source === "COPIED"
         )) ||
       !currentAssignment.clientId
     ) {
