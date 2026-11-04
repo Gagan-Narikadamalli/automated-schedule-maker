@@ -538,7 +538,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
       setWorking(false);
     }
 
-    const history = messages.slice(-12).map((entry) => ({
+    const history = messages.slice(-24).map((entry) => ({
       role: entry.role,
       text: entry.text,
       effectiveDate: entry.effectiveDate,
