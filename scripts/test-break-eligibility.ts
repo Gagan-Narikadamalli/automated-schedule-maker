@@ -192,6 +192,72 @@ function testNapBreakForRegularBTWinsOverEmptyGenericSlot() {
     "Do not move client to relief when nap already provides the regular BT a break");
 }
 
+function testManagerIsPreferredReliefForBtLunch() {
+  const bt = {
+    ...createStaff("bt-needs-relief", "BT Needs Relief", "BT"),
+    availableSlots: ["12:00"],
+  };
+  const manager = {
+    ...createStaff("manager-first", "Clinic Manager", "OFFICE_MANAGER"),
+    availableSlots: ["12:00"],
+  };
+  const bcba = {
+    ...createStaff("bcba-second", "Clinic BCBA", "BCBA"),
+    availableSlots: ["12:00"],
+  };
+  const client = {
+    ...createClient("ReliefClient", {}),
+    requiredSlots: ["12:00"],
+  };
+  const initial: SchedulerAssignment[] = [{
+    id: "bt-client-block",
+    staffId: bt.id,
+    clientId: client.id,
+    startTime: "12:00",
+    assignmentType: "CLIENT_1_TO_1",
+    source: "AUTO",
+    locked: false,
+  }];
+
+  const result = placeStaffBreaksAfterCoverage({
+    staff: [bt, bcba, manager],
+    clients: [client],
+    assignments: initial,
+    referenceAssignments: [],
+    callOutStaffIds: [],
+    rules: {
+      breakWindowStart: "11:00",
+      breakWindowEnd: "14:00",
+      defaultBreakMinutes: 30,
+      breakEligibilityHours: 0,
+      slotLengthMinutes: 30,
+    },
+    schedulerRules: {
+      ...SCHEDULER_RULES,
+      preventSameStaffClientRepeatSameDay: false,
+    },
+  });
+
+  assert.ok(
+    result.assignments.some(
+      (assignment) =>
+        assignment.staffId === manager.id &&
+        assignment.clientId === client.id &&
+        assignment.assignmentType === "CLIENT_1_TO_1"
+    ),
+    "Move the client block to the available manager before using the BCBA for BT lunch relief."
+  );
+  assert.ok(
+    result.assignments.some(
+      (assignment) =>
+        assignment.staffId === bt.id &&
+        assignment.assignmentType === "BREAK" &&
+        assignment.startTime === "12:00"
+    ),
+    "The original BT must receive the break after the manager takes over the client block."
+  );
+}
+
 function testClientNapCannotBeClaimedByTwoStaffBreaks() {
   const slots = ["11:30", "12:00", "12:30", "13:00"];
   const staff = ["first", "second"].map(id => ({
@@ -400,6 +466,7 @@ function testCaregiverCanTakeBreakInMiddleOfLongNap() {
 function runBreakEligibilityRegressionScenarios() {
   testBreakDoesNotRemoveOnlyEligibleTechnician();
   testNapBreakForRegularBTWinsOverEmptyGenericSlot();
+  testManagerIsPreferredReliefForBtLunch();
   testNapWindowKeepsAutomaticBreaksPlain();
   testClientNapCannotBeClaimedByTwoStaffBreaks();
   testEnrichmentNeverDuplicatesNapLink();
