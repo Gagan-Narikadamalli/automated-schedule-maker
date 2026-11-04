@@ -117,24 +117,6 @@ function roleBreakOrder(role: StaffRole): number {
   }
 }
 
-function coverageRoleTier(role: StaffRole): number {
-  switch (role) {
-    case "BT":
-    case "RBT":
-      return 0;
-    case "INTERN":
-      return 1;
-    case "OFFICE_MANAGER":
-      return 2;
-    case "OTHER":
-      return 3;
-    case "BCBA":
-      return 4;
-    default:
-      return 5;
-  }
-}
-
 function reliefRolePriority(role: StaffRole): number {
   switch (role) {
     case "OFFICE_MANAGER":
