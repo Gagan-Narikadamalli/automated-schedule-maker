@@ -174,7 +174,7 @@ export async function GET(request: Request) {
       (current, day) => ({
         clientHoursNeeded: current.clientHoursNeeded + day.clientHoursNeeded,
         clientHoursCovered: current.clientHoursCovered + day.clientHoursCovered,
-        staffHoursScheduled: current.staffHoursScheduled + day.staffHoursScheduled,
+        staffHoursScheduled: current.staffHoursScheduled,
         additionalLaborHours:
           current.additionalLaborHours + day.additionalLaborHours,
         uncoveredHours: current.uncoveredHours + day.uncoveredHours,
@@ -186,6 +186,12 @@ export async function GET(request: Request) {
         additionalLaborHours: 0,
         uncoveredHours: 0,
       }
+    );
+
+    totals.staffHoursScheduled = staffHourStatus.reduce(
+      (total, staffMember) =>
+        total + Math.min(staffMember.scheduledHours, 40),
+      0
     );
 
     const coveragePercent =
