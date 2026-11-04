@@ -121,6 +121,39 @@ function staffAlreadyOccupied(
   );
 }
 
+function staffHasRemainingHourCapacity(
+  staffMember: SchedulerStaff,
+  protectedAssignments: SchedulerAssignment[],
+  slotHours: number
+): boolean {
+  const protectedDailyHours =
+    protectedAssignments.filter(
+      (assignment) =>
+        assignment.staffId === staffMember.id &&
+        assignment.assignmentType === "CLIENT_1_TO_1"
+    ).length * slotHours;
+  const maximumDailyHours = staffMember.maximumDailyHours;
+  if (
+    maximumDailyHours !== undefined &&
+    protectedDailyHours + slotHours > maximumDailyHours
+  ) {
+    return false;
+  }
+
+  const weeklyHoursUsed =
+    (staffMember.scheduledWeeklyClientHoursBeforeDate ?? 0) +
+    protectedDailyHours;
+  const maximumWeeklyHours = staffMember.maximumWeeklyHours;
+  if (
+    maximumWeeklyHours !== undefined &&
+    weeklyHoursUsed + slotHours > maximumWeeklyHours
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
 function calculateMaximumEligibleCoverage(
   clients: SchedulerClient[],
   staff: SchedulerStaff[],
@@ -283,6 +316,11 @@ export function calculateSchedulerReadiness(
           staffMember.id,
           startTime,
           protectedAssignments
+        ) &&
+        staffHasRemainingHourCapacity(
+          staffMember,
+          protectedAssignments,
+          slotHours
         )
     ).length;
     const protectedStaffAtSlot = new Set(
