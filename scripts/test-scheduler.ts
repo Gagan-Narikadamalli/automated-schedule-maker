@@ -263,7 +263,7 @@ function testTemplateReferenceDoesNotForceShortIsolatedHandoff() {
   assert.equal(coverage.length, times.length);
   assert.ok(
     coverage.every((assignment) => assignment.staffId === "primary-bt"),
-    "A single isolated 30-minute template handoff must not interrupt a feasible continuous client block."
+    `A single isolated 30-minute template handoff must not interrupt a feasible continuous client block. Actual: ${JSON.stringify(coverage.map(item => ({staffId:item.staffId,startTime:item.startTime})))}`
   );
 }
 
