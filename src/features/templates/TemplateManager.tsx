@@ -512,39 +512,6 @@ export function TemplateManager() {
     }
   }
 
-  async function archiveTemplate(templateId: string) {
-    try {
-      setWorking(true);
-
-      const response = await fetch("/api/templates", {
-        method: "DELETE",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          locationId,
-          templateId,
-        }),
-      });
-      const data = (await response.json()) as OperationResponse;
-
-      if (!response.ok) {
-        throw new Error(data.error || "Template could not be archived.");
-      }
-
-      await loadTemplates();
-      notify("success", "Template archived successfully. Existing schedules were not changed.");
-    } catch (error) {
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : "Template could not be archived."
-      );
-    } finally {
-      setWorking(false);
-    }
-  }
-
   async function deleteSelectedTemplates() {
     if (!deleteCandidates.length || !locationId) return;
     try {
@@ -754,7 +721,7 @@ export function TemplateManager() {
                   <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:"auto"}}>
                     {!template.learningOnly ? <button type="button" className="button button-secondary button-small" disabled={working} onClick={()=>setEditorTemplateId(template.id)}>Edit template</button> : null}
                     <button type="button" className="button button-primary button-small" disabled={working||template.learningOnly} title={template.learningOnly?"Learning-only profiles guide Auto Generate but have no exact schedule cells.":"Apply this template to a selected date."} onClick={()=>openApplyTemplate(template)}>{template.learningOnly?"Learning only":"Apply to date"}</button>
-                    <button type="button" className="button button-secondary button-small" disabled={working} onClick={()=>void archiveTemplate(template.id)}>Archive</button>
+                    <button type="button" className="button button-warning button-small" disabled={working} onClick={()=>setDeleteCandidates([template.id])}>Delete</button>
                   </div>
                 </article>
               ))}
@@ -833,7 +800,7 @@ export function TemplateManager() {
       <ManagementModal open={deleteCandidates.length>0} title="Permanently delete templates?" eyebrow="CONFIRM TEMPLATE DELETION" size="medium" description="Only the selected template records will be deleted. Existing calendar schedules and staff/client records will not be changed." onClose={()=>{if(!working)setDeleteCandidates([]);}} footer={<><button type="button" className="button button-secondary" disabled={working} onClick={()=>setDeleteCandidates([])}>Keep templates</button><button type="button" className="button button-warning" disabled={working} onClick={()=>void deleteSelectedTemplates()}>{working?"Deleting…":`Permanently delete ${deleteCandidates.length}`}</button></>}>
         <p>You are about to permanently delete {deleteCandidates.length} template(s):</p>
         <ul>{templates.filter((item)=>deleteCandidates.includes(item.id)).map((item)=><li key={item.id}>{item.name} · {displayDay(item.dayOfWeek)}</li>)}</ul>
-        <p className="helper-text">This cannot be undone. If you only want to hide a template from Auto Generate, use Archive instead.</p>
+        <p className="helper-text">This cannot be undone. Deletion removes the template record only. Existing live schedules are not affected.</p>
       </ManagementModal>
 
       {notification ? <div role="status" aria-live="polite" style={{position:"fixed",right:20,bottom:22,zIndex:2000,width:"min(420px,calc(100vw - 40px))",padding:"13px 16px",borderRadius:12,background:notification.kind==="success"?"#e5f7ed":"#fff0f0",color:notification.kind==="success"?"#145336":"#9a2424",border:"1px solid #b8d6c5",boxShadow:"0 8px 30px #091b2a26",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
