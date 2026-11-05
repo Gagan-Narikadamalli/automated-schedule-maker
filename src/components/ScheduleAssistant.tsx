@@ -83,7 +83,7 @@ type SavedPromptGroup = {
 };
 
 function renderInlineMarkdown(value: string): ReactNode[] {
-  const tokenPattern = /(\\*\\*[^*]+\\*\\*|\\*[^*]+\\*|\x60[^\x60]+\x60)/g;
+  const tokenPattern = /(\*\*[^*]+\*\*|\*[^*]+\*|\x60[^\x60]+\x60)/g;
   return value.split(tokenPattern).filter(Boolean).map((part, index) => {
     if (part.startsWith("**") && part.endsWith("**")) {
       return <strong key={index}>{part.slice(2, -2)}</strong>;
@@ -99,7 +99,7 @@ function renderInlineMarkdown(value: string): ReactNode[] {
 }
 
 function renderMessageMarkdown(value: string): ReactNode {
-  const lines = value.replace(/\\r\\n?/g, "\\n").split("\\n");
+  const lines = value.replace(/\r\n?/g, "\n").split("\n");
   const blocks: ReactNode[] = [];
   let listItems: string[] = [];
 
@@ -117,8 +117,8 @@ function renderMessageMarkdown(value: string): ReactNode {
 
   lines.forEach((line, index) => {
     const trimmed = line.trim();
-    const heading = trimmed.match(/^(#{1,4})\\s+(.+)$/);
-    const listItem = trimmed.match(/^(?:[-*] |\\d+[.)] )(.+)$/);
+    const heading = trimmed.match(/^(#{1,4})\s+(.+)$/);
+    const listItem = trimmed.match(/^(?:[-*] |\d+[.)] )(.+)$/);
 
     if (listItem) {
       listItems.push(listItem[1]);
