@@ -849,4 +849,3 @@ export function TemplateManager() {
     </div>
   );
 }
-}
