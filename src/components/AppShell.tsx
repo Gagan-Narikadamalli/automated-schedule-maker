@@ -80,13 +80,7 @@ const navigationGroups: NavigationGroup[] = [
         href: "/settings",
         label: "Clinic Settings",
         shortLabel: "SET",
-      },
-      {
-        href: "/settings/data-maintenance",
-        label: "Data Maintenance",
-        shortLabel: "DATA",
-      },
-    ],
+      },],
   },
 ];
 
