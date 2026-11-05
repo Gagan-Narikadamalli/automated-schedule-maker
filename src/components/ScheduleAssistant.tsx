@@ -6,6 +6,7 @@ import {
   useState,
   type ChangeEvent,
   type FormEvent,
+  type ReactNode,
 } from "react";
 
 import {
@@ -80,6 +81,68 @@ type SavedPromptGroup = {
   title: string;
   prompts: string[];
 };
+
+function renderInlineMarkdown(value: string): ReactNode[] {
+  const tokenPattern = /(\\*\\*[^*]+\\*\\*|\\*[^*]+\\*|\x60[^\x60]+\x60)/g;
+  return value.split(tokenPattern).filter(Boolean).map((part, index) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return <strong key={index}>{part.slice(2, -2)}</strong>;
+    }
+    if (part.startsWith("*") && part.endsWith("*")) {
+      return <em key={index}>{part.slice(1, -1)}</em>;
+    }
+    if (part.startsWith("`") && part.endsWith("`")) {
+      return <code key={index}>{part.slice(1, -1)}</code>;
+    }
+    return part;
+  });
+}
+
+function renderMessageMarkdown(value: string): ReactNode {
+  const lines = value.replace(/\\r\\n?/g, "\\n").split("\\n");
+  const blocks: ReactNode[] = [];
+  let listItems: string[] = [];
+
+  const flushList = () => {
+    if (!listItems.length) return;
+    blocks.push(
+      <ul key={`list-${blocks.length}`}>
+        {listItems.map((item, index) => (
+          <li key={index}>{renderInlineMarkdown(item)}</li>
+        ))}
+      </ul>
+    );
+    listItems = [];
+  };
+
+  lines.forEach((line, index) => {
+    const trimmed = line.trim();
+    const heading = trimmed.match(/^(#{1,4})\\s+(.+)$/);
+    const listItem = trimmed.match(/^(?:[-*] |\\d+[.)] )(.+)$/);
+
+    if (listItem) {
+      listItems.push(listItem[1]);
+      return;
+    }
+
+    flushList();
+    if (!trimmed) return;
+
+    if (heading) {
+      const level = heading[1].length;
+      const children = renderInlineMarkdown(heading[2]);
+      if (level === 1) blocks.push(<h3 key={index}>{children}</h3>);
+      else if (level === 2) blocks.push(<h4 key={index}>{children}</h4>);
+      else blocks.push(<h5 key={index}>{children}</h5>);
+      return;
+    }
+
+    blocks.push(<p key={index}>{renderInlineMarkdown(trimmed)}</p>);
+  });
+
+  flushList();
+  return blocks;
+}
 
 const MAX_SCREENSHOT_ATTACHMENTS = 3;
 const MAX_SCREENSHOT_TOTAL_BYTES = 3 * 1024 * 1024;
@@ -852,7 +915,9 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
                   <span className={styles.messageRole}>
                     {message.role === "user" ? "You" : "Scheduler AI"}
                   </span>
-                  <p>{message.text}</p>
+                  <div className={styles.messageText}>
+                    {renderMessageMarkdown(message.text)}
+                  </div>
                   {message.attachments && message.attachments.length > 0 && (
                     <div className={styles.messageAttachments}>
                       {message.attachments.map((attachment) => (
