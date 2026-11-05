@@ -659,7 +659,7 @@ export function TemplateManager() {
     }
   }
 
-  const panelButtonStyle = (active: boolean): React.CSSProperties => ({
+  const panelButtonStyle = (active: boolean) => ({
     border: active ? "1px solid #244c68" : "1px solid #d6e0e8",
     background: active ? "#edf4f8" : "#ffffff",
     color: active ? "#173c56" : "#425466",
