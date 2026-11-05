@@ -192,6 +192,161 @@ function testNapBreakForRegularBTWinsOverEmptyGenericSlot() {
     "Do not move client to relief when nap already provides the regular BT a break");
 }
 
+function testReliefSwapNextToNapIsPreferred() {
+  const bt = {
+    ...createStaff("bt-nap-adjacent", "BT Nap Adjacent", "BT"),
+    availableSlots: ["12:30", "13:00"],
+  };
+  const manager = {
+    ...createStaff("manager-nap-adjacent", "Clinic Manager", "OFFICE_MANAGER"),
+    availableSlots: ["12:30", "13:00"],
+  };
+  const bcba = {
+    ...createStaff("bcba-nap-adjacent", "Clinic BCBA", "BCBA"),
+    availableSlots: ["12:30", "13:00"],
+  };
+  const napClient = {
+    ...createClient("NapAdjacentClient", {}),
+    requiredSlots: ["12:30"],
+    napSlots: ["12:00"],
+  };
+  const otherClient = {
+    ...createClient("OtherClient", {}),
+    requiredSlots: ["13:00"],
+  };
+  const initial: SchedulerAssignment[] = [
+    {
+      id: "nap-adjacent-client-block",
+      staffId: bt.id,
+      clientId: napClient.id,
+      startTime: "12:30",
+      assignmentType: "CLIENT_1_TO_1",
+      source: "AUTO",
+      locked: false,
+    },
+    {
+      id: "other-client-block",
+      staffId: bt.id,
+      clientId: otherClient.id,
+      startTime: "13:00",
+      assignmentType: "CLIENT_1_TO_1",
+      source: "AUTO",
+      locked: false,
+    },
+  ];
+
+  const result = placeStaffBreaksAfterCoverage({
+    staff: [bt, manager, bcba],
+    clients: [napClient, otherClient],
+    assignments: initial,
+    referenceAssignments: [],
+    callOutStaffIds: [],
+    rules: {
+      breakWindowStart: "11:00",
+      breakWindowEnd: "14:00",
+      defaultBreakMinutes: 30,
+      breakEligibilityHours: 0,
+      slotLengthMinutes: 30,
+    },
+    schedulerRules: {
+      ...SCHEDULER_RULES,
+      preventSameStaffClientRepeatSameDay: false,
+    },
+  });
+
+  const btBreak = result.assignments.find(
+    (assignment) =>
+      assignment.staffId === bt.id &&
+      assignment.assignmentType === "BREAK"
+  );
+  assert.equal(
+    btBreak?.startTime,
+    "12:30",
+    "The break should be placed directly after the client's nap before using a less useful midday client block."
+  );
+  assert.match(
+    btBreak?.note ?? "",
+    /nap for NapAdjacentClient \(12:00-12:30\)/,
+    "The break should retain the nap alignment that made the adjacent relief swap preferable."
+  );
+  assert.ok(
+    result.assignments.some(
+      (assignment) =>
+        assignment.staffId === manager.id &&
+        assignment.clientId === napClient.id &&
+        assignment.startTime === "12:30" &&
+        assignment.assignmentType === "CLIENT_1_TO_1"
+    ),
+    "The manager should take over the adjacent client block so the BT can combine the break with the nap."
+  );
+}
+
+function testManagerIsPreferredReliefForBtLunch() {
+  const bt = {
+    ...createStaff("bt-needs-relief", "BT Needs Relief", "BT"),
+    availableSlots: ["12:00"],
+  };
+  const manager = {
+    ...createStaff("manager-first", "Clinic Manager", "OFFICE_MANAGER"),
+    availableSlots: ["12:00"],
+  };
+  const bcba = {
+    ...createStaff("bcba-second", "Clinic BCBA", "BCBA"),
+    availableSlots: ["12:00"],
+  };
+  const client = {
+    ...createClient("ReliefClient", {}),
+    requiredSlots: ["12:00"],
+  };
+  const initial: SchedulerAssignment[] = [{
+    id: "bt-client-block",
+    staffId: bt.id,
+    clientId: client.id,
+    startTime: "12:00",
+    assignmentType: "CLIENT_1_TO_1",
+    source: "AUTO",
+    locked: false,
+  }];
+
+  const result = placeStaffBreaksAfterCoverage({
+    staff: [bt, bcba, manager],
+    clients: [client],
+    assignments: initial,
+    referenceAssignments: [],
+    callOutStaffIds: [],
+    rules: {
+      breakWindowStart: "11:00",
+      breakWindowEnd: "14:00",
+      defaultBreakMinutes: 30,
+      breakEligibilityHours: 0,
+      slotLengthMinutes: 30,
+    },
+    schedulerRules: {
+      ...SCHEDULER_RULES,
+      preventSameStaffClientRepeatSameDay: false,
+    },
+  });
+
+  assert.ok(
+    result.assignments.some(
+      (assignment) =>
+        assignment.staffId === manager.id &&
+        assignment.clientId === client.id &&
+        assignment.assignmentType === "CLIENT_1_TO_1"
+    ),
+    "Move the client block to the available manager before using the BCBA for BT lunch relief."
+  );
+  assert.ok(
+    result.assignments.some(
+      (assignment) =>
+        assignment.staffId === bt.id &&
+        assignment.assignmentType === "BREAK" &&
+        assignment.startTime === "12:00"
+    ),
+    "The original BT must receive the break after the manager takes over the client block."
+  );
+}
+
 function testClientNapCannotBeClaimedByTwoStaffBreaks() {
   const slots = ["11:30", "12:00", "12:30", "13:00"];
   const staff = ["first", "second"].map(id => ({
@@ -222,6 +377,13 @@ function testClientNapCannotBeClaimedByTwoStaffBreaks() {
     automaticBreaks.every((a) => !a.clientId),
     "Automatic breaks must never claim a client nap"
   );
+  assert.equal(
+    automaticBreaks.filter((a) =>
+      a.note?.includes("[fixed-event:BREAK_NAP:ZiBo:12:00-13:00]")
+    ).length,
+    1,
+    "Only one caregiver break may be linked to the complete client nap event."
+  );
 }
 
 function testEnrichmentNeverDuplicatesNapLink() {
@@ -250,12 +412,157 @@ function testEnrichmentNeverDuplicatesNapLink() {
   );
 }
 
+function testBtMayStartLunchAtTwoPm() {
+  const bt = {
+    ...createStaff("bt-two-pm", "BT Two PM", "BT"),
+    availableSlots: ["14:00"],
+  };
+  const result = placeStaffBreaksAfterCoverage({
+    staff: [bt],
+    clients: [],
+    assignments: [],
+    referenceAssignments: [],
+    callOutStaffIds: [],
+    rules: {
+      breakWindowStart: "11:00",
+      breakWindowEnd: "14:00",
+      defaultBreakMinutes: 30,
+      breakEligibilityHours: 0,
+      slotLengthMinutes: 30,
+    },
+    schedulerRules: SCHEDULER_RULES,
+  });
+  assert.ok(
+    result.assignments.some(
+      (assignment) =>
+        assignment.staffId === bt.id &&
+        assignment.assignmentType === "BREAK" &&
+        assignment.startTime === "14:00"
+    ),
+    "A BT may start a 30-minute lunch at 2:00 PM and finish at 2:30 PM."
+  );
+}
+
+function testNonBtReliefStaffBreaksOutsideBtLunchWhenPossible() {
+  const bt = {
+    ...createStaff("bt-lunch", "BT Lunch", "BT"),
+    availableSlots: [
+      "11:00", "11:30", "12:00", "12:30", "13:00", "13:30", "14:00",
+    ],
+  };
+  const manager = {
+    ...createStaff("manager-relief", "Manager Relief", "OFFICE_MANAGER"),
+    availableSlots: [
+      "10:00", "10:30", "11:00", "11:30", "12:00", "12:30",
+      "13:00", "13:30", "14:00", "14:30", "15:00",
+    ],
+  };
+  const result = placeStaffBreaksAfterCoverage({
+    staff: [manager, bt],
+    clients: [],
+    assignments: [],
+    referenceAssignments: [],
+    callOutStaffIds: [],
+    rules: {
+      breakWindowStart: "11:00",
+      breakWindowEnd: "14:00",
+      defaultBreakMinutes: 30,
+      breakEligibilityHours: 0,
+      slotLengthMinutes: 30,
+    },
+    schedulerRules: SCHEDULER_RULES,
+  });
+  const btBreak = result.assignments.find(
+    (assignment) =>
+      assignment.staffId === bt.id && assignment.assignmentType === "BREAK"
+  );
+  const managerBreak = result.assignments.find(
+    (assignment) =>
+      assignment.staffId === manager.id &&
+      assignment.assignmentType === "BREAK"
+  );
+  assert.ok(btBreak, "BT should receive a lunch break.");
+  assert.ok(managerBreak, "Manager should still receive a break.");
+  assert.ok(
+    btBreak.startTime >= "11:00" && btBreak.startTime <= "14:00",
+    "BT lunch must start between 11:00 AM and 2:00 PM."
+  );
+  assert.ok(
+    managerBreak.startTime < "11:00" || managerBreak.startTime > "14:00",
+    "Manager break should be outside BT lunch when a suitable alternative exists."
+  );
+}
+
+function testCaregiverCanTakeBreakInMiddleOfLongNap() {
+  const bt = {
+    ...createStaff("nap-caregiver", "Nap Caregiver", "BT"),
+    availableSlots: ["12:30"],
+  };
+  const client = {
+    ...createClient("LongNapClient", {}),
+    requiredSlots: ["11:30", "14:00"],
+    napSlots: ["12:00", "12:30", "13:00", "13:30"],
+  };
+  const assignments: SchedulerAssignment[] = [
+    {
+      id: "before-long-nap",
+      staffId: bt.id,
+      clientId: client.id,
+      startTime: "11:30",
+      assignmentType: "CLIENT_1_TO_1",
+      source: "AUTO",
+      locked: false,
+    },
+    {
+      id: "after-long-nap",
+      staffId: bt.id,
+      clientId: client.id,
+      startTime: "14:00",
+      assignmentType: "CLIENT_1_TO_1",
+      source: "AUTO",
+      locked: false,
+    },
+  ];
+  const result = placeStaffBreaksAfterCoverage({
+    staff: [bt],
+    clients: [client],
+    assignments,
+    referenceAssignments: [],
+    callOutStaffIds: [],
+    rules: {
+      breakWindowStart: "11:00",
+      breakWindowEnd: "14:00",
+      defaultBreakMinutes: 30,
+      breakEligibilityHours: 0,
+      slotLengthMinutes: 30,
+    },
+    schedulerRules: SCHEDULER_RULES,
+  });
+  const napBreak = result.assignments.find(
+    (assignment) =>
+      assignment.staffId === bt.id &&
+      assignment.assignmentType === "BREAK" &&
+      assignment.startTime === "12:30"
+  );
+  assert.ok(
+    napBreak,
+    "The caregiver should be able to take a break in the middle of a multi-hour nap when assigned at its boundaries."
+  );
+  assert.equal(napBreak.clientId, undefined);
+  assert.match(napBreak.note ?? "", /nap for LongNapClient/);
+}
+
 function runBreakEligibilityRegressionScenarios() {
   testBreakDoesNotRemoveOnlyEligibleTechnician();
   testNapBreakForRegularBTWinsOverEmptyGenericSlot();
+  testReliefSwapNextToNapIsPreferred();
+  testManagerIsPreferredReliefForBtLunch();
   testNapWindowKeepsAutomaticBreaksPlain();
   testClientNapCannotBeClaimedByTwoStaffBreaks();
   testEnrichmentNeverDuplicatesNapLink();
+  testBtMayStartLunchAtTwoPm();
+  testNonBtReliefStaffBreaksOutsideBtLunchWhenPossible();
+  testCaregiverCanTakeBreakInMiddleOfLongNap();
   console.log("Break eligibility regression scenarios passed.");
 }
 

@@ -1,5 +1,5 @@
 import { getSlotsInsideTimeRange } from "@/features/scheduler/engine/dateUtils";
-import { resolveFlexibleEventWindows } from "@/features/scheduler/engine/flexibleEventWindows";
+import { selectThirtyMinuteNapSlots } from "@/features/scheduler/engine/napWindowPlacement";
 import type {
   NapPriorityCategory,
   SchedulerInput,
@@ -65,40 +65,44 @@ export async function applyFixedNapSessions(
 
   // Every eligible nap window must originate in a saved Nap event for
   // this exact date. Clients without an event receive no nap slots.
-  const napWindows = input.clients.flatMap((client) =>
-    (sessionsByClient.get(client.id) ?? [])
-      .filter((session) => {
-        const startTime = String(session.startTime ?? "");
-        const endTime = String(session.endTime ?? "");
-        return Boolean(startTime && endTime && endTime > startTime);
-      })
-      .map((session, index) => ({
-        key: `fixed-nap-${String(session._id ?? index)}`,
-        clientId: client.id,
-        startTime: String(session.startTime),
-        endTime: String(session.endTime),
-        allowedSlots: [...client.requiredSlots],
-        priority: String(session.priorityCategory ?? "OLDER") === "YOUNGER" ? 10 : 20,
-      }))
-  );
-
-  const resolvedNapSlots = resolveFlexibleEventWindows(napWindows, {
-    enabled: input.rules.napDurationRulesEnabled ?? true,
-    durationMinutes: input.rules.napPreferredMinutes ?? 30,
-    slotLengthMinutes: input.rules.slotLengthMinutes,
-  });
-
+  // A saved nap start/end is a flexible window, not the length of the nap.
+  // Every nap is exactly 30 minutes. Choose either the first or last 30-minute
+  // portion of that window, preferring the edge with the most BT/RBT coverage
+  // immediately outside the nap so the caregiver can take their break while
+  // the child is resting.
   const napSlotsByClient = new Map<string, Set<string>>();
+  const slotLengthMinutes = input.rules.slotLengthMinutes;
 
-  for (const window of napWindows) {
-    const slots =
-      napSlotsByClient.get(window.clientId) ?? new Set<string>();
+  for (const client of input.clients) {
+    const clientNapSlots = napSlotsByClient.get(client.id) ?? new Set<string>();
+    const sessionsForClient = sessionsByClient.get(client.id) ?? [];
 
-    for (const slot of resolvedNapSlots.get(window.key) ?? []) {
-      slots.add(slot);
+    for (const session of sessionsForClient) {
+      const startTime = String(session.startTime ?? "");
+      const endTime = String(session.endTime ?? "");
+      if (!startTime || !endTime || endTime <= startTime) continue;
+
+      const allowedSlots = new Set(client.requiredSlots);
+      const windowSlots = getSlotsInsideTimeRange(startTime, endTime).filter(
+        (slot) => allowedSlots.has(slot)
+      );
+      const selectedSlots = selectThirtyMinuteNapSlots(
+        windowSlots,
+        slotLengthMinutes,
+        input.staff.map((staffMember) => ({
+          role: staffMember.role,
+          availableSlots: staffMember.availableSlots,
+          hardRestricted:
+            client.staffRelationships[staffMember.id] === "HARD_RESTRICTION",
+        }))
+      );
+
+      for (const slot of selectedSlots) {
+        clientNapSlots.add(slot);
+      }
     }
 
-    napSlotsByClient.set(window.clientId, slots);
+    napSlotsByClient.set(client.id, clientNapSlots);
   }
 
   const clients = input.clients.map((client) => {

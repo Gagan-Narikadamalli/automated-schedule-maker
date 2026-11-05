@@ -126,7 +126,17 @@ for (const sharedToolFile of [
 const paidBase = source("src/app/api/ai/routeBase.ts");
 assert.match(
   paidBase,
-  /DEFAULT_SCHEDULER_AI_PAID_MODEL = "openai\/gpt-5\.6-sol"/
+  /DEFAULT_SCHEDULER_AI_PAID_MODEL = "openai\/gpt-6\.1-sol"/
+);
+const paidModelSelection = paidBase.slice(
+  paidBase.indexOf("const model ="),
+  paidBase.indexOf("const autonomousWrites")
+);
+assert.match(paidModelSelection, /SCHEDULER_AI_PAID_MODEL/);
+assert.match(paidModelSelection, /DEFAULT_SCHEDULER_AI_PAID_MODEL/);
+assert.doesNotMatch(
+  paidModelSelection,
+  /process\.env\.SCHEDULER_AI_MODEL/
 );
 assert.match(paidBase, /reasoning: "high"/);
 assert.match(paidBase, /adaptSchedulerToolsForPaid/);

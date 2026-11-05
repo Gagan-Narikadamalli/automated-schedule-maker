@@ -5,15 +5,16 @@ import { getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
 import { generateSchedule } from "@/features/scheduler/engine/generateSchedule";
 import { placeStaffBreaksAfterCoverage } from "@/features/scheduler/engine/placeStaffBreaks";
 import { enrichBreakAssignmentsWithFixedEvents } from "@/features/scheduler/engine/reserveBreaks";
-import type {
-  SchedulerAssignment,
-  SchedulerResult,
-} from "@/features/scheduler/engine/types";
+import type { SchedulerResult } from "@/features/scheduler/engine/types";
 import { applyFixedNapSessions } from "@/features/scheduler/server/applyFixedNapSessions";
 import { applyHistoricalTraining } from "@/features/scheduler/server/applyHistoricalTraining";
 import { applyLivingstonWorkbookTrial } from "@/features/scheduler/server/applyLivingstonWorkbookTrial";
 import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySchedulerInput";
 import { persistScheduleReplacementSafely } from "@/features/scheduler/server/persistScheduleReplacementSafely";
+import {
+  AUTO_REPLACEABLE_ASSIGNMENT_FILTER,
+  shouldKeepExistingAssignment,
+} from "@/features/scheduler/server/schedulePersistencePolicy";
 import { syncAutoUnplacedGaps } from "@/features/scheduler/server/syncAutoUnplacedGaps";
 import {
   forbiddenResponse,
@@ -32,30 +33,6 @@ type GenerateRangeRequest = {
 };
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
-
-function isAutomaticBreak(assignment: SchedulerAssignment): boolean {
-  return (
-    assignment.source === "AUTO" &&
-    (assignment.assignmentType === "BREAK" ||
-      assignment.assignmentType === "BREAK_NAP" ||
-      assignment.assignmentType === "BREAK_SPEECH")
-  );
-}
-
-function shouldKeepExistingAssignment(
-  assignment: SchedulerAssignment
-): boolean {
-  if (isAutomaticBreak(assignment)) {
-    return false;
-  }
-
-  return (
-    assignment.locked ||
-    assignment.source === "MANUAL" ||
-    assignment.assignmentType === "SPEECH" ||
-    assignment.assignmentType === "UNAVAILABLE"
-  );
-}
 
 function applyFinalBreakMetrics(
   metrics: SchedulerResult["metrics"],
@@ -244,7 +221,7 @@ export async function POST(request: Request) {
       );
 
       const autoAssignments = enrichedAssignments.filter(
-        (assignment) => assignment.source === "AUTO"
+        (assignment) => assignment.source === "AUTO" && !assignment.locked
       );
       const generatedRecords = autoAssignments.map((assignment) => ({
         locationId,
@@ -264,10 +241,7 @@ export async function POST(request: Request) {
         locationId,
         date,
         replacements: generatedRecords,
-        replaceableFilter: {
-          manuallyOverridden: { $ne: true },
-          source: { $in: ["AUTO", "TEMPLATE", "COPIED"] },
-        },
+        replaceableFilter: AUTO_REPLACEABLE_ASSIGNMENT_FILTER,
       });
 
       if (persistence.blockedEmptyReplacement) {

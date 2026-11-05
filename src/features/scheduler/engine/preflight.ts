@@ -1,4 +1,5 @@
 import { canAssignStaffToClient } from "./constraints";
+import { calculateEffectiveStaffAvailableHours } from "./capacity";
 import type {
   SchedulerAssignment,
   SchedulerClient,
@@ -120,6 +121,39 @@ function staffAlreadyOccupied(
   );
 }
 
+function staffHasRemainingHourCapacity(
+  staffMember: SchedulerStaff,
+  protectedAssignments: SchedulerAssignment[],
+  slotHours: number
+): boolean {
+  const protectedDailyHours =
+    protectedAssignments.filter(
+      (assignment) =>
+        assignment.staffId === staffMember.id &&
+        assignment.assignmentType === "CLIENT_1_TO_1"
+    ).length * slotHours;
+  const maximumDailyHours = staffMember.maximumDailyHours;
+  if (
+    maximumDailyHours !== undefined &&
+    protectedDailyHours + slotHours > maximumDailyHours
+  ) {
+    return false;
+  }
+
+  const weeklyHoursUsed =
+    (staffMember.scheduledWeeklyClientHoursBeforeDate ?? 0) +
+    protectedDailyHours;
+  const maximumWeeklyHours = staffMember.maximumWeeklyHours;
+  if (
+    maximumWeeklyHours !== undefined &&
+    weeklyHoursUsed + slotHours > maximumWeeklyHours
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
 function calculateMaximumEligibleCoverage(
   clients: SchedulerClient[],
   staff: SchedulerStaff[],
@@ -236,10 +270,6 @@ export function calculateSchedulerReadiness(
     shouldProtectAssignment
   );
 
-  const staffAvailableSlots = workingStaff.reduce(
-    (total, staffMember) => total + staffMember.availableSlots.length,
-    0
-  );
   const requiredClientSlots = attendingClients.reduce(
     (total, client) => total + client.requiredSlots.length,
     0
@@ -250,7 +280,15 @@ export function calculateSchedulerReadiness(
     return availableHours >= readinessRules.breakEligibilityHours;
   });
 
-  const staffAvailableHours = staffAvailableSlots * slotHours;
+  const staffAvailableHours = workingStaff.reduce(
+    (total, staffMember) =>
+      total +
+      calculateEffectiveStaffAvailableHours(
+        staffMember,
+        input.rules.slotLengthMinutes
+      ),
+    0
+  );
   const requiredClientHours = requiredClientSlots * slotHours;
   const plannedBreakHours =
     breakEligibleStaff.length * (readinessRules.defaultBreakMinutes / 60);
@@ -278,6 +316,11 @@ export function calculateSchedulerReadiness(
           staffMember.id,
           startTime,
           protectedAssignments
+        ) &&
+        staffHasRemainingHourCapacity(
+          staffMember,
+          protectedAssignments,
+          slotHours
         )
     ).length;
     const protectedStaffAtSlot = new Set(

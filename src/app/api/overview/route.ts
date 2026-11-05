@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { calculateCappedWeeklyStaffHours } from "@/features/overview/overviewCalculations";
 
 import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySchedulerInput";
 import { applyFixedNapSessions } from "@/features/scheduler/server/applyFixedNapSessions";
@@ -174,7 +175,7 @@ export async function GET(request: Request) {
       (current, day) => ({
         clientHoursNeeded: current.clientHoursNeeded + day.clientHoursNeeded,
         clientHoursCovered: current.clientHoursCovered + day.clientHoursCovered,
-        staffHoursScheduled: current.staffHoursScheduled + day.staffHoursScheduled,
+        staffHoursScheduled: current.staffHoursScheduled,
         additionalLaborHours:
           current.additionalLaborHours + day.additionalLaborHours,
         uncoveredHours: current.uncoveredHours + day.uncoveredHours,
@@ -187,6 +188,9 @@ export async function GET(request: Request) {
         uncoveredHours: 0,
       }
     );
+
+    totals.staffHoursScheduled =
+      calculateCappedWeeklyStaffHours(staffHourStatus);
 
     const coveragePercent =
       totals.clientHoursNeeded === 0

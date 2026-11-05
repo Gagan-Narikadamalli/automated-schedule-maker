@@ -41,10 +41,10 @@ import { AITrainingExample } from "@/models/AITrainingExample";
 
 export const maxDuration = 300;
 
-const DEFAULT_SCHEDULER_AI_PAID_MODEL = "openai/gpt-5.6-sol";
+const DEFAULT_SCHEDULER_AI_PAID_MODEL = "openai/gpt-6.1-sol";
 const DEFAULT_SCHEDULER_AI_VISION_MODEL = "openai/gpt-5.4";
 const MAX_MESSAGE_LENGTH = 5000;
-const MAX_HISTORY_MESSAGES = 12;
+const MAX_HISTORY_MESSAGES = 24;
 const MAX_ATTACHMENT_CONTEXT_LENGTH = 14_000;
 const MAX_ATTACHMENTS = 3;
 const MAX_ATTACHMENT_DATA_LENGTH = 4_500_000;
@@ -531,9 +531,12 @@ export async function POST(request: Request) {
 
     const aiProvider = "gateway" as const;
     const thinkingLevel = "high" as const;
+    // Paid AI must not inherit SCHEDULER_AI_MODEL: that legacy variable is
+    // intentionally configured for the lower-cost scheduler model. Keep the
+    // paid route on its dedicated high-reasoning model unless explicitly
+    // overridden with SCHEDULER_AI_PAID_MODEL.
     const model =
       process.env.SCHEDULER_AI_PAID_MODEL?.trim() ||
-      process.env.SCHEDULER_AI_MODEL?.trim() ||
       DEFAULT_SCHEDULER_AI_PAID_MODEL;
     const autonomousWrites =
       process.env.SCHEDULER_AI_AUTONOMOUS_WRITES?.trim().toLowerCase() === "true";

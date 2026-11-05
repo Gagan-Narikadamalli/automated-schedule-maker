@@ -1,4 +1,5 @@
 import { canAssignStaffToClient } from "./constraints";
+import { calculateEffectiveStaffAvailableHours } from "./capacity";
 import { scoreCandidate } from "./scoring";
 import type {
   SchedulerAssignment,
@@ -225,14 +226,16 @@ function buildPreferredContinuousPairingPlan(
   staffMember: SchedulerStaff,
   input: SchedulerInput,
   assignments: SchedulerAssignment[],
-  callOutStaffIds: Set<string>
+  callOutStaffIds: Set<string>,
+  allowSameDayPairRepeat = false
 ): SchedulerAssignment[] | null {
   const minimumPlan = buildMinimumPairingPlan(
     requirement,
     staffMember,
     input,
     assignments,
-    callOutStaffIds
+    callOutStaffIds,
+    allowSameDayPairRepeat
   );
 
   if (!minimumPlan) {
@@ -275,8 +278,8 @@ function buildPreferredContinuousPairingPlan(
   );
 
   // Once a new staff/client session starts, fill as much of that client's
-  // uninterrupted attendance segment as safely possible (up to the clinic's
-  // four-hour maximum). Nap, Speech, staff availability, protected cells, or
+  // uninterrupted attendance segment as safely possible (up to the configured
+  // maximum). Nap, Speech, staff availability, protected cells, or
   // another hard constraint naturally stop the run. This makes the schedule
   // visually readable as long blocks instead of re-solving the pairing every
   // 30 minutes.
@@ -298,7 +301,8 @@ function buildPreferredContinuousPairingPlan(
         staffMember.id,
         requirement.client.id,
         slot,
-        input.referenceAssignments
+        input.referenceAssignments,
+        input.rules.slotLengthMinutes
       )
     ) {
       break;
@@ -320,6 +324,7 @@ function buildPreferredContinuousPairingPlan(
       assignments: simulated,
       callOutStaffIds,
       rules: input.rules,
+      allowSameDayPairRepeat,
     });
 
     if (!check.allowed) {
@@ -409,6 +414,90 @@ function countEligibleStaff(
       rules: input.rules,
     }).allowed
   ).length;
+}
+
+function countEligibleBtStaff(
+  requirement: ClientRequirement,
+  input: SchedulerInput,
+  assignments: SchedulerAssignment[],
+  callOutStaffIds: Set<string>
+): number {
+  const btStaff = input.staff.filter(
+    (staffMember) =>
+      staffMember.role === "BT" || staffMember.role === "RBT"
+  );
+
+  return countEligibleStaff(
+    requirement,
+    btStaff,
+    assignments,
+    callOutStaffIds,
+    input
+  );
+}
+
+function calculateFutureBtScarcityPenalty(
+  requirement: ClientRequirement,
+  staffMember: SchedulerStaff,
+  proposedPlan: SchedulerAssignment[],
+  input: SchedulerInput,
+  assignments: SchedulerAssignment[],
+  callOutStaffIds: Set<string>
+): number {
+  if (staffMember.role !== "BT" && staffMember.role !== "RBT") {
+    return 0;
+  }
+
+  const anotherRoleCanCoverCurrentClient = input.staff.some(
+    (candidate) =>
+      candidate.role !== "BT" &&
+      candidate.role !== "RBT" &&
+      canAssignStaffToClient({
+        staffMember: candidate,
+        client: requirement.client,
+        startTime: requirement.startTime,
+        assignments,
+        callOutStaffIds,
+        rules: input.rules,
+      }).allowed
+  );
+  if (!anotherRoleCanCoverCurrentClient) return 0;
+
+  const proposedSlots = new Set(
+    proposedPlan.map((assignment) => assignment.startTime)
+  );
+
+  for (const futureClient of input.clients) {
+    if (futureClient.id === requirement.client.id) continue;
+
+    for (const futureSlot of futureClient.requiredSlots) {
+      if (!proposedSlots.has(futureSlot)) continue;
+
+      const eligibleBtStaff = input.staff.filter(
+        (candidate) =>
+          (candidate.role === "BT" || candidate.role === "RBT") &&
+          canAssignStaffToClient({
+            staffMember: candidate,
+            client: futureClient,
+            startTime: futureSlot,
+            assignments,
+            callOutStaffIds,
+            rules: input.rules,
+          }).allowed
+      );
+
+      if (
+        eligibleBtStaff.length === 1 &&
+        eligibleBtStaff[0].id === staffMember.id
+      ) {
+        // Keep this BT free for a future client who has no other BT option
+        // when an auxiliary role can cover the current, more flexible client.
+        return 1;
+      }
+    }
+  }
+
+  return 0;
 }
 
 function explainUncoveredRequirement(
@@ -525,12 +614,59 @@ function supportPriority(client: SchedulerClient): number {
   return 1;
 }
 
+function isValidTemplatePairReference(
+  staffId: string,
+  clientId: string,
+  startTime: string,
+  referenceAssignments: SchedulerAssignment[],
+  slotLengthMinutes: number
+): boolean {
+  const clientTemplateReferences = referenceAssignments.filter(
+    (assignment) =>
+      assignment.source === "TEMPLATE" &&
+      assignment.assignmentType === "CLIENT_1_TO_1" &&
+      assignment.clientId === clientId
+  );
+  const matchingSlots = new Set(
+    clientTemplateReferences
+      .filter((assignment) => assignment.staffId === staffId)
+      .map((assignment) => assignment.startTime)
+  );
+
+  if (!matchingSlots.has(startTime)) return false;
+  // A single template cell can be a valid reference when it is the client's
+  // only template coverage for the day. A one-slot island inside a longer
+  // template client run is treated as a likely accidental handoff.
+  if (clientTemplateReferences.length === 1) return true;
+
+  const startMinutes = timeToMinutes(startTime);
+  if (startMinutes === null) return false;
+
+  let firstMinutes = startMinutes;
+  let lastMinutes = startMinutes;
+  while (firstMinutes - slotLengthMinutes >= 0) {
+    const previous = minutesToTime(firstMinutes - slotLengthMinutes);
+    if (!matchingSlots.has(previous)) break;
+    firstMinutes -= slotLengthMinutes;
+  }
+  while (lastMinutes + slotLengthMinutes < 24 * 60) {
+    const next = minutesToTime(lastMinutes + slotLengthMinutes);
+    if (!matchingSlots.has(next)) break;
+    lastMinutes += slotLengthMinutes;
+  }
+
+  const runLength =
+    Math.floor((lastMinutes - firstMinutes) / slotLengthMinutes) + 1;
+  return runLength >= 2;
+}
+
 function exactReferenceMatchStrength(
   staffId: string,
   clientId: string,
   startTime: string,
   referenceAssignments: SchedulerAssignment[],
-  source?: "TEMPLATE" | "COPIED"
+  source?: "TEMPLATE" | "COPIED",
+  slotLengthMinutes = 30
 ): number {
   return referenceAssignments.reduce((score, assignment) => {
     if (
@@ -543,11 +679,19 @@ function exactReferenceMatchStrength(
       return score;
     }
 
-    // The immediately previous same-weekday schedule is the strongest reusable
-    // instruction. The current weekday template is the fallback. Current-day
-    // AUTO output is deliberately ignored so a bad generation cannot train itself.
     if (assignment.source === "COPIED") return score + 100;
-    if (assignment.source === "TEMPLATE") return score + 10;
+    if (
+      assignment.source === "TEMPLATE" &&
+      isValidTemplatePairReference(
+        staffId,
+        clientId,
+        startTime,
+        referenceAssignments,
+        slotLengthMinutes
+      )
+    ) {
+      return score + 10;
+    }
     return score;
   }, 0);
 }
@@ -556,14 +700,23 @@ function exactReferenceConflictsWithPair(
   staffId: string,
   clientId: string,
   startTime: string,
-  referenceAssignments: SchedulerAssignment[]
+  referenceAssignments: SchedulerAssignment[],
+  slotLengthMinutes: number
 ): boolean {
   const relevant = referenceAssignments.filter(
     (assignment) =>
       assignment.assignmentType === "CLIENT_1_TO_1" &&
       assignment.startTime === startTime &&
-      (assignment.source === "TEMPLATE" ||
-        assignment.source === "COPIED") &&
+      (assignment.source === "COPIED" ||
+        (assignment.source === "TEMPLATE" &&
+          Boolean(assignment.clientId) &&
+          isValidTemplatePairReference(
+            assignment.staffId,
+            assignment.clientId as string,
+            assignment.startTime,
+            referenceAssignments,
+            slotLengthMinutes
+          ))) &&
       (assignment.staffId === staffId ||
         assignment.clientId === clientId)
   );
@@ -574,7 +727,9 @@ function exactReferenceConflictsWithPair(
     staffId,
     clientId,
     startTime,
-    referenceAssignments
+    referenceAssignments,
+    undefined,
+    slotLengthMinutes
   );
 
   const strongestConflict = relevant.reduce((strength, assignment) => {
@@ -614,10 +769,22 @@ function staffReservedForAnotherExactReferenceClient(
     const referencedClient = input.clients.find(
       (client) => client.id === reference.clientId
     );
-
     if (
       !referencedClient ||
       !referencedClient.requiredSlots.includes(startTime)
+    ) {
+      continue;
+    }
+
+    if (
+      source === "TEMPLATE" &&
+      !isValidTemplatePairReference(
+        staffId,
+        referencedClient.id,
+        startTime,
+        input.referenceAssignments,
+        input.rules.slotLengthMinutes
+      )
     ) {
       continue;
     }
@@ -628,15 +795,38 @@ function staffReservedForAnotherExactReferenceClient(
         assignment.clientId === referencedClient.id &&
         assignment.startTime === startTime
     );
+    if (alreadyCovered) continue;
 
-    if (!alreadyCovered) {
-      return true;
+    // A template must not reserve the only BT for a more constrained client.
+    if (source === "TEMPLATE") {
+      const proposedClient = input.clients.find(
+        (client) => client.id === proposedClientId
+      );
+      if (proposedClient) {
+        const callOutStaffIds = new Set(input.callOutStaffIds);
+        const proposedBtOptions = countEligibleBtStaff(
+          { client: proposedClient, startTime },
+          input,
+          assignments,
+          callOutStaffIds
+        );
+        const referencedBtOptions = countEligibleBtStaff(
+          { client: referencedClient, startTime },
+          input,
+          assignments,
+          callOutStaffIds
+        );
+        if (proposedBtOptions < referencedBtOptions) {
+          continue;
+        }
+      }
     }
+
+    return true;
   }
 
   return false;
 }
-
 function coverageRoleTier(staffMember: SchedulerStaff): number {
   switch (staffMember.role) {
     case "BT":
@@ -696,13 +886,33 @@ function sortRequirementsForClinicFlow(
       return timeComparison;
     }
 
-    // Reproduce the immediately previous same-weekday schedule first. If that
-    // exact pairing is not feasible, give the current weekday template the next
-    // claim. Only after both reusable references fail do normal scheduler rules
-    // decide the assignment.
+    // Protect scarce BT capacity before consulting soft template/history
+    // preferences. Clients with fewer eligible BT/RBT options get first claim;
+    // clients with no eligible BT are assigned to auxiliary staff first when
+    // possible, preserving BTs for clients who actually require them.
+    const leftEligibleBtCount = countEligibleBtStaff(
+      left,
+      input,
+      assignments,
+      callOutStaffIds
+    );
+    const rightEligibleBtCount = countEligibleBtStaff(
+      right,
+      input,
+      assignments,
+      callOutStaffIds
+    );
+
+    if (leftEligibleBtCount !== rightEligibleBtCount) {
+      return leftEligibleBtCount - rightEligibleBtCount;
+    }
+
+    // Previous-week exact pairings can guide requirement ordering when valid.
+    // Weekday templates do not control ordering; coherent template runs are
+    // considered later as soft staff-selection preferences.
     const exactReferenceMatchAvailable = (
       requirement: ClientRequirement,
-      source: "COPIED" | "TEMPLATE"
+      source: "COPIED"
     ): boolean =>
       input.referenceAssignments.some((reference) => {
         if (
@@ -734,11 +944,9 @@ function sortRequirementsForClinicFlow(
       return leftPreviousWeek ? -1 : 1;
     }
 
-    const leftTemplate = exactReferenceMatchAvailable(left, "TEMPLATE");
-    const rightTemplate = exactReferenceMatchAvailable(right, "TEMPLATE");
-    if (leftTemplate !== rightTemplate) {
-      return leftTemplate ? -1 : 1;
-    }
+    // Weekday template pairings are evaluated as soft scores, not as a
+    // requirement-order override. Scarce BT eligibility and client continuity
+    // take precedence over an exact but potentially fragmented template cell.
 
     // First preserve clients that already have a real staff pairing from the
     // immediately previous coverage segment (including across a protected Nap
@@ -879,7 +1087,7 @@ function findBestStaffMember(
         return null;
       }
 
-      const minimumPlan = buildMinimumPairingPlan(
+      const preferredPlan = buildPreferredContinuousPairingPlan(
         requirement,
         staffMember,
         input,
@@ -888,12 +1096,20 @@ function findBestStaffMember(
         allowSameDayPairRepeat
       );
 
-      if (!minimumPlan) {
+      if (!preferredPlan) {
         return null;
       }
 
       return {
         staffMember,
+        futureScarcityPenalty: calculateFutureBtScarcityPenalty(
+          requirement,
+          staffMember,
+          preferredPlan,
+          input,
+          assignments,
+          callOutStaffIds
+        ),
         score: scoreCandidate({
           staffMember,
           client: requirement.client,
@@ -910,13 +1126,20 @@ function findBestStaffMember(
         candidate
       ): candidate is {
         staffMember: SchedulerStaff;
+        futureScarcityPenalty: number;
         score: number;
       } => candidate !== null
     )
     .sort((left, right) => {
+      // A BT reserved for a future client with no other eligible BT must not
+      // be consumed by a flexible client when an auxiliary role can cover it.
+      if (left.futureScarcityPenalty !== right.futureScarcityPenalty) {
+        return left.futureScarcityPenalty - right.futureScarcityPenalty;
+      }
+
       // Coverage-role eligibility is a clinic safety boundary before reusable
-      // schedule preferences. Last-week/template matching only competes inside
-      // the same coverage tier (BT/RBT first, then auxiliary roles).
+      // schedule preferences. Previous-week matches and coherent template runs
+      // compete only inside the same coverage tier (BT/RBT first, then auxiliary roles).
       const roleDifference =
         coverageRoleTier(left.staffMember) -
         coverageRoleTier(right.staffMember);
@@ -929,7 +1152,8 @@ function findBestStaffMember(
         requirement.client.id,
         requirement.startTime,
         input.referenceAssignments,
-        "COPIED"
+        "COPIED",
+        input.rules.slotLengthMinutes
       );
       const rightPreviousWeekStrength = exactReferenceMatchStrength(
         right.staffMember.id,
@@ -971,27 +1195,6 @@ function findBestStaffMember(
         return leftReservedForOtherPreviousWeek ? 1 : -1;
       }
 
-      const leftTemplateStrength = exactReferenceMatchStrength(
-        left.staffMember.id,
-        requirement.client.id,
-        requirement.startTime,
-        input.referenceAssignments,
-        "TEMPLATE"
-      );
-      const rightTemplateStrength = exactReferenceMatchStrength(
-        right.staffMember.id,
-        requirement.client.id,
-        requirement.startTime,
-        input.referenceAssignments,
-        "TEMPLATE"
-      );
-
-      // Priority 2 inside the same coverage tier: use the current weekday
-      // template when last week's exact assignment is unavailable.
-      if (leftTemplateStrength !== rightTemplateStrength) {
-        return rightTemplateStrength - leftTemplateStrength;
-      }
-
       const leftReservedForOtherTemplate =
         staffReservedForAnotherExactReferenceClient(
           left.staffMember.id,
@@ -1015,6 +1218,32 @@ function findBestStaffMember(
         leftReservedForOtherTemplate !== rightReservedForOtherTemplate
       ) {
         return leftReservedForOtherTemplate ? 1 : -1;
+      }
+
+      // A coherent template run is a soft preference: it may preserve a
+      // deliberate multi-block handoff, but an isolated one-slot fragment
+      // cannot interrupt a longer feasible continuous block.
+      const leftTemplateStrength = exactReferenceMatchStrength(
+        left.staffMember.id,
+        requirement.client.id,
+        requirement.startTime,
+        input.referenceAssignments,
+        "TEMPLATE",
+        input.rules.slotLengthMinutes
+      );
+      const rightTemplateStrength = exactReferenceMatchStrength(
+        right.staffMember.id,
+        requirement.client.id,
+        requirement.startTime,
+        input.referenceAssignments,
+        "TEMPLATE",
+        input.rules.slotLengthMinutes
+      );
+
+      // Reuse a coherent template run, but never elevate an isolated one-slot
+      // fragment over the schedule's continuity and coverage constraints.
+      if (leftTemplateStrength !== rightTemplateStrength) {
+        return rightTemplateStrength - leftTemplateStrength;
       }
 
       const previousAssignment = previousClientAssignment(
@@ -1122,16 +1351,20 @@ function calculateCapacityMetrics(
   const activeClients = input.clients.filter(
     (client) => client.requiredSlots.length > 0
   );
-  const staffAvailableSlots = workingStaff.reduce(
-    (total, staffMember) => total + staffMember.availableSlots.length,
-    0
-  );
   const breakSlots = countReservedBreakSlots(assignments);
 
   const requiredClientHours = requiredClientSlots * slotHours;
   const coveredClientHours = coveredClientSlots * slotHours;
   const uncoveredClientHours = uncoveredClientSlots * slotHours;
-  const staffAvailableHours = staffAvailableSlots * slotHours;
+  const staffAvailableHours = workingStaff.reduce(
+    (total, staffMember) =>
+      total +
+      calculateEffectiveStaffAvailableHours(
+        staffMember,
+        input.rules.slotLengthMinutes
+      ),
+    0
+  );
   const breakHoursReserved = breakSlots * slotHours;
   const netStaffCoverageHours = Math.max(
     staffAvailableHours - breakHoursReserved,
@@ -1179,16 +1412,16 @@ function findBestSwap(
       currentAssignment.assignmentType !== "CLIENT_1_TO_1" ||
       (!allowProtectedAssignments &&
         (currentAssignment.locked || currentAssignment.source !== "AUTO")) ||
-      // A pinned previous-week or weekday-template match is never a movable
-      // repair candidate. Otherwise the coverage repair pass can silently
-      // undo the exact reference blocks placed at the start of generation.
+      // A previous-week exact pairing is protected from opportunistic repair.
+      // Weekday templates remain movable soft references so the repair pass can
+      // remove fragmented or otherwise inconsistent template-driven handoffs.
       (currentAssignment.source === "AUTO" &&
         input.referenceAssignments.some((reference) =>
           reference.assignmentType === "CLIENT_1_TO_1" &&
           reference.staffId === currentAssignment.staffId &&
           reference.clientId === currentAssignment.clientId &&
           reference.startTime === currentAssignment.startTime &&
-          (reference.source === "COPIED" || reference.source === "TEMPLATE")
+          reference.source === "COPIED"
         )) ||
       !currentAssignment.clientId
     ) {
@@ -1795,15 +2028,11 @@ export function generateSchedule(input: SchedulerInput): SchedulerResult {
     ),
   ].sort();
 
-  // Reserve feasible exact reusable coverage BEFORE long continuity runs can
-  // claim those staff/time cells. The order is deliberate:
-  //   1. immediately previous same-weekday schedule (COPIED)
-  //   2. current weekday template (TEMPLATE)
-  // If the first reference cannot be used because of attendance, availability,
-  // eligibility, or an already occupied cell, the second reference may fill it.
-  // Only BT/RBT coverage is pinned here; auxiliary-role references remain soft
-  // preferences so the normal clinic coverage-role boundary is preserved.
-  for (const source of ["COPIED", "TEMPLATE"] as const) {
+  // Reserve only the immediately previous same-weekday BT/RBT coverage
+  // before long continuity runs can claim those staff/time cells. Weekday
+  // templates are deliberately excluded: they remain soft scoring references
+  // and must never pin a fragmented client handoff into the generated day.
+  for (const source of ["COPIED"] as const) {
     for (const reference of input.referenceAssignments
       .filter(
         (assignment) =>
