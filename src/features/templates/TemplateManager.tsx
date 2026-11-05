@@ -111,6 +111,7 @@ export function TemplateManager() {
   const [locationId, setLocationId] = useState("");
   const [templates, setTemplates] = useState<TemplateRecord[]>([]);
   const [filterDay, setFilterDay] = useState("ALL");
+  const [activePanel, setActivePanel] = useState<"library" | "add" | "workbook" | "priority" | "copy">("library");
   const [weekdayPreferences, setWeekdayPreferences] = useState<Record<string, WeekdayPreference>>({});
   const [savingPreferenceDay, setSavingPreferenceDay] = useState("");
   const [selectedTemplateIds, setSelectedTemplateIds] = useState<string[]>([]);
@@ -658,566 +659,194 @@ export function TemplateManager() {
     }
   }
 
+  const panelButtonStyle = (active: boolean): React.CSSProperties => ({
+    border: active ? "1px solid #244c68" : "1px solid #d6e0e8",
+    background: active ? "#edf4f8" : "#ffffff",
+    color: active ? "#173c56" : "#425466",
+    borderRadius: 10,
+    padding: "10px 14px",
+    fontWeight: 750,
+    cursor: "pointer",
+  });
+
+  const sourceLabel = (template: TemplateRecord) =>
+    template.sourceType === "HISTORICAL_WORKBOOK"
+      ? template.learningOnly
+        ? `Workbook learning profile · ${template.sourceDate ?? "undated"}`
+        : `Excel workbook · ${template.sourceDate ?? "undated"}`
+      : template.sourceType === "SAVED_SCHEDULE"
+        ? `Saved schedule · ${template.sourceDate ?? "date unavailable"}`
+        : "Manually created";
+
   return (
     <div className="management-layout">
       <section className="section-card">
         <div className="panel-heading-row">
           <div>
-            <h2>Template Location</h2>
-            <p>
-              Templates are location-specific. Livingston and Parsippany never share
-              staff/client IDs accidentally.
-            </p>
+            <h2>Schedule Templates</h2>
+            <p>Manage reusable templates for one clinic at a time. Templates are stored separately from live calendars; editing or deleting a template never deletes an existing schedule.</p>
           </div>
-
           <label className="form-field compact-field">
-            <span>Location</span>
-            <select
-              value={locationId}
-              disabled={loading || working}
-              onChange={(event) => setLocationId(event.target.value)}
-            >
-              {locations.map((location) => (
-                <option key={location.id} value={location.id}>
-                  {location.name}
-                </option>
-              ))}
+            <span>Clinic location</span>
+            <select value={locationId} disabled={loading || working} onChange={(event) => setLocationId(event.target.value)}>
+              {locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
             </select>
           </label>
         </div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:8,marginTop:18}} role="tablist" aria-label="Template management sections">
+          <button type="button" style={panelButtonStyle(activePanel==="library")} aria-selected={activePanel==="library"} onClick={()=>setActivePanel("library")}>Saved templates ({templates.length})</button>
+          <button type="button" style={panelButtonStyle(activePanel==="add")} aria-selected={activePanel==="add"} onClick={()=>setActivePanel("add")}>+ Save a schedule day</button>
+          <button type="button" style={panelButtonStyle(activePanel==="workbook")} aria-selected={activePanel==="workbook"} onClick={()=>setActivePanel("workbook")}>Import Excel workbook</button>
+          <button type="button" style={panelButtonStyle(activePanel==="priority")} aria-selected={activePanel==="priority"} onClick={()=>setActivePanel("priority")}>Auto Generate priorities</button>
+          <button type="button" style={panelButtonStyle(activePanel==="copy")} aria-selected={activePanel==="copy"} onClick={()=>setActivePanel("copy")}>Copy a schedule</button>
+        </div>
       </section>
 
-      <section className="section-card" id="weekday-template-priority">
-        <h2>Auto Generate Day — Weekday Template Priority</h2>
-        <p className="helper-text">Choose two saved templates for each weekday and their exact placement order. The first fills eligible empty blocks, then the second fills only the remaining empty blocks. By default, the actual previous week's same-weekday schedule takes priority over both. Change the selector to put the saved templates first. Staff/client call-outs, attendance, and hard constraints remain mandatory.</p>
-        {DAYS.slice(0,5).map(day => {
-          const preference = weekdayPreferences[day] ?? DEFAULT_WEEKDAY_PREFERENCE(day);
-          const choices = templates.filter(template => template.dayOfWeek === day && !template.learningOnly && template.assignmentCount > 0);
-          return (
-            <div className="form-grid" key={day} style={{marginBottom:16,alignItems:"end"}}>
-              <label className="form-field"><span>{displayDay(day)} — priority 1 template</span>
-                <select value={preference.firstTemplateId} onChange={event=>updateWeekdayPreference(day,{firstTemplateId:event.target.value})}>
-                  <option value="">Automatic best saved weekday template</option>
-                  {choices.map(template=><option value={template.id} key={template.id}>{template.name}</option>)}
-                </select>
-              </label>
-              <label className="form-field"><span>Priority 2 template (fill empty slots)</span>
-                <select value={preference.secondTemplateId} onChange={event=>updateWeekdayPreference(day,{secondTemplateId:event.target.value})}>
-                  <option value="">None</option>
-                  {choices.map(template=><option value={template.id} key={template.id}>{template.name}</option>)}
-                </select>
-              </label>
-              <button className="button button-primary" type="button" disabled={working||savingPreferenceDay!==""||!locationId||preference.firstTemplateId!==""&&preference.firstTemplateId===preference.secondTemplateId} onClick={()=>void saveWeekdayPreference(day)}>
-                {savingPreferenceDay===day?"Saving...":"Save priority"}
-              </button>
+      {activePanel === "library" ? (
+        <section className="section-card" id="saved-schedule-templates">
+          <div className="panel-heading-row">
+            <div>
+              <h2>Saved template library</h2>
+              <p>Browse, edit, apply, archive, or permanently delete templates. Select multiple templates for bulk deletion.</p>
             </div>
-          );
-        })}
-      </section>
-
-      <section className="section-card" id="create-schedule-template">
-        <h2>Create Template from a Saved Day</h2>
-        <p className="helper-text">
-          Capture any already-saved schedule day as a template draft. After it
-          is captured, the isolated Template Editor opens automatically so you
-          can change the template without changing the live scheduling calendar.
-          The weekday is detected from the date automatically.
-        </p>
-
-        <div className="form-grid">
-          <label className="form-field">
-            <span>Template name</span>
-            <input
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder={`Example: ${selectedLocation?.name ?? "Clinic"} Monday`}
-            />
-          </label>
-
-          <label className="form-field">
-            <span>Detected weekday</span>
-            <input
-              value={displayDay(dayOfWeek)}
-              readOnly
-              aria-readonly="true"
-            />
-            <small>
-              The weekday is taken from the capture date so a Thursday can no
-              longer accidentally be saved as a Monday template.
-            </small>
-          </label>
-
-          <label className="form-field">
-            <span>Capture schedule from date</span>
-            <input
-              type="date"
-              value={templateSourceDate}
-              onChange={(event) => setTemplateSourceDate(event.target.value)}
-            />
-          </label>
-        </div>
-
-        <div className="template-action-row">
-          <button
-            type="button"
-            className="button button-primary"
-            disabled={
-              working ||
-              loading ||
-              !locationId ||
-              !name.trim() ||
-              !templateSourceDate
-            }
-            onClick={() => void createTemplate()}
-          >
-            {working
-              ? "Working..."
-              : "Capture Day & Open Template Editor"}
-          </button>
-        </div>
-      </section>
-
-      <section className="section-card" id="workbook-template-upload">
-        <h2>Upload Excel Workbook and Create an Exact Sheet Template</h2>
-        <p className="helper-text">Bulk import exactly Sep 28–Oct 2 and Oct 5–9, 2026 from the workbook. Existing unrelated templates and live schedules remain unchanged.</p>
-        <button type="button" className="button button-primary" disabled={!workbookFile||!locationId||working||inspectingWorkbook} onClick={()=>void importRecentTwoWeeks()}>
-          {working?"Importing...":"Import all 10 recent dated templates from selected workbook"}
-        </button>
-
-        <p className="helper-text">
-          Upload the real Excel workbook. The website reads its sheet names,
-          lets you select one sheet, matches the staff names in the columns and
-          client display codes inside the time cells, and saves those exact
-          mapped blocks as the weekday template. Current-day rules still
-          override the template when Auto Generate runs.
-        </p>
-
-        <div className="form-grid">
-          <label className="form-field">
-            <span>Excel workbook</span>
-            <input
-              type="file"
-              accept=".xlsx,.xls,.xlsm"
-              disabled={working || inspectingWorkbook || !locationId}
-              onChange={(event) =>
-                void inspectWorkbook(event.target.files?.[0] ?? null)
-              }
-            />
-            <small>
-              {inspectingWorkbook
-                ? "Reading workbook..."
-                : workbookFile
-                  ? workbookFile.name
-                  : "Choose the Livingston workbook or another clinic workbook."}
-            </small>
-          </label>
-
-          <label className="form-field">
-            <span>Sheet to use</span>
-            <select
-              value={selectedWorkbookSheet}
-              disabled={
-                inspectingWorkbook ||
-                working ||
-                workbookSheets.length === 0
-              }
-              onChange={(event) =>
-                applyWorkbookSheetSelection(event.target.value)
-              }
-            >
-              {workbookSheets.length === 0 ? (
-                <option value="">Upload a workbook first</option>
-              ) : (
-                workbookSheets.map((sheet) => (
-                  <option key={sheet.sheetName} value={sheet.sheetName}>
-                    {sheet.sheetName}
-                  </option>
-                ))
-              )}
-            </select>
-          </label>
-
-          <label className="form-field">
-            <span>Template name</span>
-            <input
-              value={workbookName}
-              disabled={!selectedWorkbookSheet || working}
-              onChange={(event) => setWorkbookName(event.target.value)}
-              placeholder="Example: Livingston Wednesday - Oct 7"
-            />
-          </label>
-
-          <label className="form-field">
-            <span>Weekday</span>
-            <select
-              value={workbookDayOfWeek}
-              disabled={!selectedWorkbookSheet || working}
-              onChange={(event) =>
-                setWorkbookDayOfWeek(event.target.value)
-              }
-            >
-              {DAYS.map((day) => (
-                <option key={day} value={day}>
-                  {displayDay(day)}
-                </option>
-              ))}
-            </select>
-            <small>
-              Auto-detected from the sheet name/date when possible. You can
-              correct it before saving.
-            </small>
-          </label>
-
-          <label className="form-field">
-            <span>Original sheet date (optional)</span>
-            <input
-              type="date"
-              value={workbookSourceDate}
-              disabled={!selectedWorkbookSheet || working}
-              onChange={(event) =>
-                setWorkbookSourceDate(event.target.value)
-              }
-            />
-          </label>
-        </div>
-
-        {selectedWorkbookSheet ? (() => {
-          const sheet = workbookSheets.find(
-            (item) => item.sheetName === selectedWorkbookSheet
-          );
-          if (!sheet) return null;
-
-          return (
-            <div className="template-import-summary">
-              <div>
-                <strong>{sheet.assignmentCount}</strong>
-                <span>mapped blocks</span>
-              </div>
-              <div>
-                <strong>
-                  {sheet.matchedStaffCount}/{sheet.totalStaffHeaders || sheet.matchedStaffCount}
-                </strong>
-                <span>staff columns matched</span>
-              </div>
-              <div>
-                <strong>{sheet.mappedClientAssignmentCount}</strong>
-                <span>client blocks</span>
-              </div>
-              <div>
-                <strong>{sheet.mappedBreakCount}</strong>
-                <span>break / break+nap blocks</span>
-              </div>
-              <div>
-                <strong>{sheet.timeRowCount}</strong>
-                <span>time rows detected</span>
-              </div>
-            </div>
-          );
-        })() : null}
-
-        {selectedWorkbookSheet ? (() => {
-          const sheet = workbookSheets.find(
-            (item) => item.sheetName === selectedWorkbookSheet
-          );
-          if (!sheet) return null;
-          const hasWarnings =
-            sheet.unmatchedStaffHeaders.length > 0 ||
-            sheet.unmatchedClientCodes.length > 0;
-          if (!hasWarnings) {
-            return (
-              <div className="template-import-ok">
-                All detected workbook names/codes on this sheet mapped to the
-                current clinic records.
-              </div>
-            );
-          }
-
-          return (
-            <div className="template-import-warning">
-              {sheet.unmatchedStaffHeaders.length > 0 ? (
-                <p>
-                  <strong>Unmatched staff columns:</strong>{" "}
-                  {sheet.unmatchedStaffHeaders.join(", ")}
-                </p>
-              ) : null}
-              {sheet.unmatchedClientCodes.length > 0 ? (
-                <p>
-                  <strong>Unmatched client cells:</strong>{" "}
-                  {sheet.unmatchedClientCodes.slice(0, 18).join(", ")}
-                  {sheet.unmatchedClientCodes.length > 18 ? " ..." : ""}
-                </p>
-              ) : null}
-              <p>
-                Unmatched values are skipped instead of being attached to the
-                wrong person.
-              </p>
-            </div>
-          );
-        })() : null}
-
-        <button
-          type="button"
-          className="button button-primary"
-          disabled={
-            working ||
-            inspectingWorkbook ||
-            loading ||
-            !locationId ||
-            !workbookFile ||
-            !selectedWorkbookSheet ||
-            !workbookName.trim()
-          }
-          onClick={() => void createWorkbookTemplate()}
-        >
-          {working ? "Working..." : "Create Exact Template from Selected Sheet"}
-        </button>
-      </section>
-
-      <section className="section-card">
-        <h2>Copy an Existing Day</h2>
-        <p className="helper-text">
-          The target day is checked against staff availability, client activity,
-          protected manual cells, and other current constraints instead of being
-          blindly duplicated.
-        </p>
-
-        <div className="form-grid form-grid-compact">
-          <label className="form-field">
-            <span>Copy from</span>
-            <input
-              type="date"
-              value={copySourceDate}
-              onChange={(event) => setCopySourceDate(event.target.value)}
-            />
-          </label>
-
-          <label className="form-field">
-            <span>Copy to</span>
-            <input
-              type="date"
-              value={copyTargetDate}
-              onChange={(event) => setCopyTargetDate(event.target.value)}
-            />
-          </label>
-        </div>
-
-        <button
-          type="button"
-          className="button button-primary"
-          disabled={working || loading || !locationId}
-          onClick={() => void copyScheduleDate()}
-        >
-          Copy and Revalidate
-        </button>
-      </section>
-
-      <section className="section-card" id="saved-schedule-templates">
-        <div className="panel-heading-row">
-          <div>
-            <h2>Saved Templates</h2>
-            <p>
-              Save multiple alternatives for each weekday. Auto Generate compares their feasible staff and client matches and automatically uses the best fit.
-              Apply manually copies one template to a chosen date.
-            </p>
+            <button type="button" className="button button-primary" onClick={()=>setActivePanel("add")}>+ Add template</button>
           </div>
-        </div>
-
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", margin: "16px 0" }}>
-          <a className="button button-primary" href="#create-schedule-template">+ Add Template from Day</a>
-          <a className="button button-secondary" href="#workbook-template-upload">+ Upload Workbook Template</a>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700 }}>
-            Weekday
-            <select value={filterDay} onChange={(event) => { setFilterDay(event.target.value); setSelectedTemplateIds([]); }}
-              style={{ padding: 10, border: "1px solid #c9dce8", borderRadius: 8 }}>
-              <option value="ALL">All weekdays</option>
-              {DAYS.map((day) => <option key={day} value={day}>{displayDay(day)}</option>)}
-            </select>
-          </label>
-          <button type="button" className="button button-secondary button-small"
-            disabled={working || visibleTemplates.length === 0}
-            onClick={() => {
-              const allSelected = visibleTemplates.every((item) => selectedTemplateIds.includes(item.id));
-              setSelectedTemplateIds(allSelected ? [] : visibleTemplates.map((item) => item.id));
-            }}>
-            {visibleTemplates.length && visibleTemplates.every((item) => selectedTemplateIds.includes(item.id)) ? "Deselect all" : "Select all shown"}
-          </button>
-          <button type="button" className="button button-warning button-small"
-            disabled={working || visibleSelected.length === 0}
-            onClick={() => setDeleteCandidates(visibleSelected.map((item) => item.id))}>
-            Delete selected ({visibleSelected.length})
-          </button>
-        </div>
-        <div className="table-scroll">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th style={{ width: 46 }}><span className="sr-only">Select</span></th>
-                <th>Name</th>
-                <th>Day</th>
-                <th>Saved blocks</th>
-                <th>Source</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visibleTemplates.length === 0 ? (
-                <tr>
-                  <td colSpan={6}>No matching saved templates. Use Add Template or Upload Workbook above.</td>
-                </tr>
-              ) : (
-                visibleTemplates.map((template) => (
-                  <tr key={template.id}>
-                    <td><input aria-label={`Select ${template.name}`} type="checkbox" checked={selectedTemplateIds.includes(template.id)} onChange={(event) => setSelectedTemplateIds((current) => event.target.checked ? [...current, template.id] : current.filter((id) => id !== template.id))} /></td>
-                    <td>
-                      <div className="template-name-cell">
-                        <span>{template.name}</span>
-                        {primaryExactTemplateIdByDay.get(
-                          template.dayOfWeek
-                        ) === template.id ? (
-                          <span className="template-primary-badge">
-                            Recently updated
-                          </span>
-                        ) : null}
-                      </div>
-                    </td>
-                    <td>{template.dayOfWeek}</td>
-                    <td>{template.assignmentCount}</td>
-                    <td>
-                      {template.sourceType === "HISTORICAL_WORKBOOK"
-                        ? template.learningOnly
-                          ? `Workbook learning profile ${template.sourceDate ?? ""}`
-                          : `Workbook ${template.sourceDate ?? ""}`
-                        : template.sourceType === "SAVED_SCHEDULE"
-                          ? `Saved day ${template.sourceDate ?? ""}`
-                          : "Manual"}
-                    </td>
-                    <td>
-                      <div className="table-actions">
-                        {!template.learningOnly ? (
-                          <button
-                            type="button"
-                            className="button button-secondary button-small"
-                            disabled={working}
-                            onClick={() => setEditorTemplateId(template.id)}
-                          >
-                            View / Edit
-                          </button>
-                        ) : null}
-                        <button
-                          type="button"
-                          className="button button-primary button-small"
-                          disabled={working || template.learningOnly}
-                          title={
-                            template.learningOnly
-                              ? "Learning-only profiles guide Auto Generate but have no exact cells to apply."
-                              : "Apply this exact template to a date now. Auto Generate does not require this button."
-                          }
-                          onClick={() => openApplyTemplate(template)}
-                        >
-                          {template.learningOnly ? "Learning only" : "Apply"}
-                        </button>
-                        <button
-                          type="button"
-                          className="button button-secondary button-small"
-                          disabled={working}
-                          onClick={() => void archiveTemplate(template.id)}
-                        >
-                          Archive
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="inline-message">{message}</div>
-      </section>
-
-      <ManagementModal
-        open={Boolean(applyTemplateTarget)}
-        title={
-          applyTemplateTarget
-            ? `Apply ${applyTemplateTarget.name}`
-            : "Apply Template"
-        }
-        eyebrow="MANUAL TEMPLATE APPLICATION"
-        description="Choose the date to receive this template. This is separate from Auto Generate, which automatically uses the matching weekday template as guidance."
-        size="medium"
-        onClose={() => setApplyTemplateTarget(null)}
-        footer={
-          <>
-            <button
-              type="button"
-              className="button button-secondary"
-              disabled={working}
-              onClick={() => setApplyTemplateTarget(null)}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="button button-primary"
-              disabled={working || !applyTargetDate}
-              onClick={() => void applyTemplate()}
-            >
-              {working ? "Applying..." : "Apply to This Date"}
-            </button>
-          </>
-        }
-      >
-        <label className="form-field">
-          <span>Apply template to date</span>
-          <input
-            type="date"
-            value={applyTargetDate}
-            onChange={(event) => setApplyTargetDate(event.target.value)}
-          />
-          {applyTemplateTarget ? (
-            <small>
-              Template weekday: {displayDay(applyTemplateTarget.dayOfWeek)}.
-              Target date: {displayDay(getDayOfWeekFromDate(applyTargetDate))}.
-              Current availability, attendance, call-outs, events, and protected
-              cells are revalidated.
-            </small>
-          ) : null}
-        </label>
-      </ManagementModal>
-
-      <ManagementModal open={deleteCandidates.length > 0} title="Delete selected templates?"
-        eyebrow="PERMANENT DELETE" size="medium"
-        description="This deletes saved template records only. Existing live schedules and client/staff profiles are unchanged."
-        onClose={() => { if (!working) setDeleteCandidates([]); }}
-        footer={<>
-          <button type="button" className="button button-secondary" disabled={working} onClick={() => setDeleteCandidates([])}>Cancel</button>
-          <button type="button" className="button button-warning" disabled={working} onClick={() => void deleteSelectedTemplates()}>
-            {working ? "Deleting..." : `Delete ${deleteCandidates.length} template(s)`}
-          </button>
-        </>}>
-        <p>Delete these {deleteCandidates.length} saved templates permanently? This cannot be undone.</p>
-        <ul>{templates.filter((item) => deleteCandidates.includes(item.id)).map((item) =>
-          <li key={item.id}>{item.name} — {displayDay(item.dayOfWeek)}</li>)}</ul>
-      </ManagementModal>
-      {notification ? (
-        <div role="status" aria-live="polite"
-          style={{ position: "fixed", right: 20, bottom: 22, zIndex: 2000, width: "min(420px, calc(100vw - 40px))", padding: "13px 16px", borderRadius: 12, background: notification.kind === "success" ? "#e5f7ed" : "#fff0f0", color: notification.kind === "success" ? "#145336" : "#9a2424", border: "1px solid #b8d6c5", boxShadow: "0 8px 30px #091b2a26", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-          <span style={{ fontWeight: 750 }}>{notification.kind === "success" ? "✓ " : ""}{notification.text}</span>
-          <button type="button" aria-label="Dismiss notification" onClick={() => setNotification(null)} style={{ border: 0, background: "transparent", fontSize: 22, cursor: "pointer" }}>×</button>
-        </div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:12,alignItems:"center",margin:"16px 0"}}>
+            <label className="form-field compact-field"><span>Filter by weekday</span>
+              <select value={filterDay} onChange={(event)=>{setFilterDay(event.target.value);setSelectedTemplateIds([]);}}>
+                <option value="ALL">All weekdays</option>
+                {DAYS.map((day)=><option key={day} value={day}>{displayDay(day)}</option>)}
+              </select>
+            </label>
+            <button type="button" className="button button-secondary button-small" disabled={working||visibleTemplates.length===0} onClick={()=>{
+              const allSelected=visibleTemplates.every((item)=>selectedTemplateIds.includes(item.id));
+              setSelectedTemplateIds(allSelected?[]:visibleTemplates.map((item)=>item.id));
+            }}>{visibleTemplates.length>0&&visibleTemplates.every((item)=>selectedTemplateIds.includes(item.id))?"Clear selection":"Select all shown"}</button>
+            <button type="button" className="button button-warning button-small" disabled={working||visibleSelected.length===0} onClick={()=>setDeleteCandidates(visibleSelected.map((item)=>item.id))}>Delete selected ({visibleSelected.length})</button>
+            <span className="helper-text">{visibleTemplates.length} template(s) shown</span>
+          </div>
+          {loading ? <p className="helper-text">Loading templates…</p> : visibleTemplates.length===0 ? (
+            <div className="template-import-ok" style={{padding:20}}>
+              <strong>No templates found for this filter.</strong>
+              <p>Save a completed schedule day or import an Excel sheet to create your first reusable template.</p>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                <button type="button" className="button button-primary" onClick={()=>setActivePanel("add")}>Save a schedule day</button>
+                <button type="button" className="button button-secondary" onClick={()=>setActivePanel("workbook")}>Import Excel workbook</button>
+              </div>
+            </div>
+          ) : (
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,320px),1fr))",gap:14}}>
+              {visibleTemplates.map((template)=>(
+                <article key={template.id} style={{border:"1px solid #dbe4eb",borderRadius:14,padding:16,background:"#fff",display:"flex",flexDirection:"column",gap:12}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10}}>
+                    <label style={{display:"flex",alignItems:"flex-start",gap:9,minWidth:0}}>
+                      <input aria-label={`Select ${template.name}`} type="checkbox" checked={selectedTemplateIds.includes(template.id)} onChange={(event)=>setSelectedTemplateIds((current)=>event.target.checked?[...current,template.id]:current.filter((id)=>id!==template.id))}/>
+                      <span style={{fontWeight:800,overflowWrap:"anywhere"}}>{template.name}</span>
+                    </label>
+                    {primaryExactTemplateIdByDay.get(template.dayOfWeek)===template.id ? <span className="template-primary-badge">Recently updated</span> : null}
+                  </div>
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                    <span className="badge">{displayDay(template.dayOfWeek)}</span>
+                    <span className="badge">{template.assignmentCount} saved block(s)</span>
+                    {template.learningOnly ? <span className="badge">Learning profile</span> : <span className="badge">Editable</span>}
+                  </div>
+                  <p className="helper-text" style={{margin:0}}>{sourceLabel(template)}</p>
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:"auto"}}>
+                    {!template.learningOnly ? <button type="button" className="button button-secondary button-small" disabled={working} onClick={()=>setEditorTemplateId(template.id)}>Edit template</button> : null}
+                    <button type="button" className="button button-primary button-small" disabled={working||template.learningOnly} title={template.learningOnly?"Learning-only profiles guide Auto Generate but have no exact schedule cells.":"Apply this template to a selected date."} onClick={()=>openApplyTemplate(template)}>{template.learningOnly?"Learning only":"Apply to date"}</button>
+                    <button type="button" className="button button-secondary button-small" disabled={working} onClick={()=>void archiveTemplate(template.id)}>Archive</button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+          <div className="inline-message" role="status">{message}</div>
+        </section>
       ) : null}
-      <TemplateEditorModal
-        open={Boolean(editorTemplateId)}
-        locationId={locationId}
-        templateId={editorTemplateId}
-        onClose={() => setEditorTemplateId(null)}
-        onSaved={async () => {
-          setEditorTemplateId(null);
-          await loadTemplates();
-          notify("success", "Template changes saved successfully. The updated template is ready for Auto Generate.");
-        }}
-      />
+
+      {activePanel === "add" ? (
+        <section className="section-card" id="create-schedule-template">
+          <div className="panel-heading-row"><div><h2>Save a completed schedule as a template</h2><p>Choose the saved calendar date and give the reusable template a clear name. The weekday is detected from the date automatically.</p></div><button type="button" className="button button-secondary" onClick={()=>setActivePanel("library")}>Back to library</button></div>
+          <div className="form-grid">
+            <label className="form-field"><span>Template name</span><input value={name} onChange={(event)=>setName(event.target.value)} placeholder={`Example: ${selectedLocation?.name??"Clinic"} Monday standard`} maxLength={100}/><small>Use a recognizable name, such as “Livingston Monday – Standard Coverage”.</small></label>
+            <label className="form-field"><span>Schedule date to capture</span><input type="date" value={templateSourceDate} onChange={(event)=>setTemplateSourceDate(event.target.value)}/><small>The source date must already have a saved schedule.</small></label>
+            <label className="form-field"><span>Detected weekday</span><input value={displayDay(dayOfWeek)} readOnly aria-readonly="true"/><small>This is calculated from the selected date.</small></label>
+          </div>
+          <div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:16}}>
+            <button type="button" className="button button-primary" disabled={working||loading||!locationId||!name.trim()||!templateSourceDate} onClick={()=>void createTemplate()}>{working?"Saving template…":"Save day as template & open editor"}</button>
+            <button type="button" className="button button-secondary" onClick={()=>setActivePanel("library")}>Cancel</button>
+          </div>
+          <div className="helper-text" style={{marginTop:14}}>This creates a separate template record. It does not change the source calendar day. After saving, the template editor opens so you can review the copied assignments before using it for Auto Generate.</div>
+        </section>
+      ) : null}
+
+      {activePanel === "workbook" ? (
+        <section className="section-card" id="workbook-template-upload">
+          <div className="panel-heading-row"><div><h2>Import templates from Excel</h2><p>Inspect the workbook first, choose a sheet, review matching results, then save that sheet as a reusable template.</p></div><button type="button" className="button button-secondary" onClick={()=>setActivePanel("library")}>Back to library</button></div>
+          <label className="form-field"><span>Excel workbook</span><input type="file" accept=".xlsx,.xls,.xlsm" disabled={working||inspectingWorkbook||!locationId} onChange={(event)=>void inspectWorkbook(event.target.files?.[0]??null)}/><small>{inspectingWorkbook?"Inspecting workbook…":workbookFile?workbookFile.name:"Select an .xlsx, .xls, or .xlsm file."}</small></label>
+          {workbookSheets.length>0 ? (
+            <>
+              <div className="form-grid" style={{marginTop:16}}>
+                <label className="form-field"><span>Workbook sheet</span><select value={selectedWorkbookSheet} disabled={working||inspectingWorkbook} onChange={(event)=>applyWorkbookSheetSelection(event.target.value)}>{workbookSheets.map((sheet)=><option key={sheet.sheetName} value={sheet.sheetName}>{sheet.sheetName}</option>)}</select></label>
+                <label className="form-field"><span>Template name</span><input value={workbookName} disabled={!selectedWorkbookSheet||working} onChange={(event)=>setWorkbookName(event.target.value)} maxLength={100}/></label>
+                <label className="form-field"><span>Weekday</span><select value={workbookDayOfWeek} disabled={!selectedWorkbookSheet||working} onChange={(event)=>setWorkbookDayOfWeek(event.target.value)}>{DAYS.map((day)=><option key={day} value={day}>{displayDay(day)}</option>)}</select></label>
+                <label className="form-field"><span>Original schedule date (optional)</span><input type="date" value={workbookSourceDate} disabled={!selectedWorkbookSheet||working} onChange={(event)=>setWorkbookSourceDate(event.target.value)}/></label>
+              </div>
+              {selectedWorkbookSheet ? (()=>{const sheet=workbookSheets.find((item)=>item.sheetName===selectedWorkbookSheet);if(!sheet)return null;return <><div className="template-import-summary"><div><strong>{sheet.assignmentCount}</strong><span>mapped blocks</span></div><div><strong>{sheet.matchedStaffCount}/{sheet.totalStaffHeaders||sheet.matchedStaffCount}</strong><span>staff columns matched</span></div><div><strong>{sheet.mappedClientAssignmentCount}</strong><span>client assignments</span></div><div><strong>{sheet.mappedBreakCount}</strong><span>break / nap blocks</span></div></div>{sheet.unmatchedStaffHeaders.length||sheet.unmatchedClientCodes.length?<div className="template-import-warning"><p><strong>Review before saving.</strong></p>{sheet.unmatchedStaffHeaders.length?<p>Unmatched staff columns: {sheet.unmatchedStaffHeaders.join(", ")}</p>:null}{sheet.unmatchedClientCodes.length?<p>Unmatched client codes: {sheet.unmatchedClientCodes.slice(0,18).join(", ")}{sheet.unmatchedClientCodes.length>18?" …":""}</p>:null}<p>Unmatched values are skipped; they are never assigned to the wrong person.</p></div>:<div className="template-import-ok">All detected staff and client values on this sheet match clinic records.</div>}</>;})():null}
+              <div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:16}}><button type="button" className="button button-primary" disabled={working||loading||!selectedWorkbookSheet||!workbookName.trim()} onClick={()=>void createWorkbookTemplate()}>{working?"Saving…":"Save selected sheet as template"}</button><button type="button" className="button button-secondary" disabled={working||!workbookFile} onClick={()=>void importRecentTwoWeeks()}>{working?"Importing…":"Bulk import the 10 configured recent dates"}</button></div>
+            </>
+          ) : null}
+          <p className="helper-text" style={{marginTop:14}}>Bulk import is an optional shortcut for the configured recent two-week range. It does not replace or delete unrelated templates.</p>
+        </section>
+      ) : null}
+
+      {activePanel === "priority" ? (
+        <section className="section-card" id="weekday-template-priority">
+          <div className="panel-heading-row"><div><h2>Auto Generate weekday priorities</h2><p>Set preferred templates for each weekday. The generator still checks attendance, availability, role eligibility, fixed events, breaks, and coverage constraints; templates are guidance, not hard rules.</p></div><button type="button" className="button button-secondary" onClick={()=>setActivePanel("library")}>Back to library</button></div>
+          {DAYS.slice(0,5).map((day)=>{
+            const preference=weekdayPreferences[day]??DEFAULT_WEEKDAY_PREFERENCE(day);
+            const choices=templates.filter((template)=>template.dayOfWeek===day&&!template.learningOnly&&template.assignmentCount>0);
+            return <div key={day} className="form-grid" style={{marginBottom:14,alignItems:"end",paddingBottom:14,borderBottom:"1px solid #e7edf2"}}>
+              <label className="form-field"><span>{displayDay(day)} · First choice</span><select value={preference.firstTemplateId} onChange={(event)=>updateWeekdayPreference(day,{firstTemplateId:event.target.value})}><option value="">Automatic best saved template</option>{choices.map((template)=><option key={template.id} value={template.id}>{template.name}</option>)}</select></label>
+              <label className="form-field"><span>Second choice</span><select value={preference.secondTemplateId} onChange={(event)=>updateWeekdayPreference(day,{secondTemplateId:event.target.value})}><option value="">None</option>{choices.map((template)=><option key={template.id} value={template.id}>{template.name}</option>)}</select></label>
+              <button type="button" className="button button-primary" disabled={working||savingPreferenceDay!==""||!locationId||(preference.firstTemplateId!==""&&preference.firstTemplateId===preference.secondTemplateId)} onClick={()=>void saveWeekdayPreference(day)}>{savingPreferenceDay===day?"Saving…":"Save weekday priority"}</button>
+            </div>;
+          })}
+        </section>
+      ) : null}
+
+      {activePanel === "copy" ? (
+        <section className="section-card">
+          <div className="panel-heading-row"><div><h2>Copy one saved schedule day to another date</h2><p>This copies schedule assignments, not a reusable weekday template. The destination is revalidated against current staff/client constraints.</p></div><button type="button" className="button button-secondary" onClick={()=>setActivePanel("library")}>Back to library</button></div>
+          <div className="form-grid form-grid-compact">
+            <label className="form-field"><span>Copy from date</span><input type="date" value={copySourceDate} onChange={(event)=>setCopySourceDate(event.target.value)}/></label>
+            <label className="form-field"><span>Copy to date</span><input type="date" value={copyTargetDate} onChange={(event)=>setCopyTargetDate(event.target.value)}/></label>
+          </div>
+          <button type="button" className="button button-primary" disabled={working||loading||!locationId||!copySourceDate||!copyTargetDate||copySourceDate===copyTargetDate} onClick={()=>void copyScheduleDate()}>{working?"Copying…":"Copy schedule and revalidate"}</button>
+        </section>
+      ) : null}
+
+      <ManagementModal open={Boolean(applyTemplateTarget)} title={applyTemplateTarget?`Apply ${applyTemplateTarget.name}`:"Apply Template"} eyebrow="MANUAL TEMPLATE APPLICATION" description="Choose a date. The template is revalidated against the target date; incompatible blocks are skipped and reported." size="medium" onClose={()=>setApplyTemplateTarget(null)} footer={<><button type="button" className="button button-secondary" disabled={working} onClick={()=>setApplyTemplateTarget(null)}>Cancel</button><button type="button" className="button button-primary" disabled={working||!applyTargetDate} onClick={()=>void applyTemplate()}>{working?"Applying…":"Apply to selected date"}</button></>}>
+        <label className="form-field"><span>Target date</span><input type="date" value={applyTargetDate} onChange={(event)=>setApplyTargetDate(event.target.value)}/><small>{applyTemplateTarget? `Template weekday: ${displayDay(applyTemplateTarget.dayOfWeek)} · Selected date: ${displayDay(getDayOfWeekFromDate(applyTargetDate))}`:""}</small></label>
+      </ManagementModal>
+
+      <ManagementModal open={deleteCandidates.length>0} title="Permanently delete templates?" eyebrow="CONFIRM TEMPLATE DELETION" size="medium" description="Only the selected template records will be deleted. Existing calendar schedules and staff/client records will not be changed." onClose={()=>{if(!working)setDeleteCandidates([]);}} footer={<><button type="button" className="button button-secondary" disabled={working} onClick={()=>setDeleteCandidates([])}>Keep templates</button><button type="button" className="button button-warning" disabled={working} onClick={()=>void deleteSelectedTemplates()}>{working?"Deleting…":`Permanently delete ${deleteCandidates.length}`}</button></>}>
+        <p>You are about to permanently delete {deleteCandidates.length} template(s):</p>
+        <ul>{templates.filter((item)=>deleteCandidates.includes(item.id)).map((item)=><li key={item.id}>{item.name} · {displayDay(item.dayOfWeek)}</li>)}</ul>
+        <p className="helper-text">This cannot be undone. If you only want to hide a template from Auto Generate, use Archive instead.</p>
+      </ManagementModal>
+
+      {notification ? <div role="status" aria-live="polite" style={{position:"fixed",right:20,bottom:22,zIndex:2000,width:"min(420px,calc(100vw - 40px))",padding:"13px 16px",borderRadius:12,background:notification.kind==="success"?"#e5f7ed":"#fff0f0",color:notification.kind==="success"?"#145336":"#9a2424",border:"1px solid #b8d6c5",boxShadow:"0 8px 30px #091b2a26",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
+        <span style={{fontWeight:750}}>{notification.kind==="success"?"✓ ":""}{notification.text}</span>
+        <button type="button" aria-label="Dismiss notification" onClick={()=>setNotification(null)} style={{border:0,background:"transparent",fontSize:22,cursor:"pointer"}}>×</button>
+      </div> : null}
+
+      <TemplateEditorModal open={Boolean(editorTemplateId)} locationId={locationId} templateId={editorTemplateId} onClose={()=>setEditorTemplateId(null)} onSaved={async()=>{
+        setEditorTemplateId(null);
+        await loadTemplates();
+        notify("success","Template changes saved. The updated template is ready for Auto Generate.");
+      }}/>
     </div>
   );
+}
 }
