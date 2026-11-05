@@ -280,46 +280,33 @@ export async function POST(request: Request) {
       );
     }
 
-    const template = await ScheduleTemplate.findOneAndUpdate(
-      {
-        locationId,
-        dayOfWeek,
-        name: templateName,
+    // A one-sheet import creates a new template; it must not overwrite an existing one by name.
+    const template = await ScheduleTemplate.create({
+      locationId,
+      name: templateName,
+      dayOfWeek,
+      sourceType: "HISTORICAL_WORKBOOK",
+      sourceName: cleanFileName(fileValue.name),
+      sourceDate,
+      styleNotes: [
+        `Exact workbook sheet: ${sheetName}.`,
+        "Use these exact staff/client/time pairings first when they remain valid on the new day.",
+        "Current-day availability, attendance, call-outs, Speech, Nap, breaks, hard restrictions, hour limits, and protected manual cells always override the workbook.",
+        "If an exact workbook pairing cannot be reused, fall back to the nearest valid current-day schedule while preserving coverage.",
+      ],
+      learningOnly: false,
+      learningProfile: {
+        humanStyleBlockBalancingEnabled: true,
+        preferredClientsPerStaffPerDay: 2,
+        preferredStaffPerClientPerDay: 2,
+        continuityPriority: 240,
+        clientHandoffPenaltyPriority: 250,
+        workloadBalancePriority: 10,
+        staffScheduleCompactnessPriority: 25,
       },
-      {
-        $set: {
-          locationId,
-          name: templateName,
-          dayOfWeek,
-          sourceType: "HISTORICAL_WORKBOOK",
-          sourceName: cleanFileName(fileValue.name),
-          sourceDate,
-          styleNotes: [
-            `Exact workbook sheet: ${sheetName}.`,
-            "Use these exact staff/client/time pairings first when they remain valid on the new day.",
-            "Current-day availability, attendance, call-outs, Speech, Nap, breaks, hard restrictions, hour limits, and protected manual cells always override the workbook.",
-            "If an exact workbook pairing cannot be reused, fall back to the nearest valid current-day schedule while preserving coverage.",
-          ],
-          learningOnly: false,
-          learningProfile: {
-            humanStyleBlockBalancingEnabled: true,
-            preferredClientsPerStaffPerDay: 2,
-            preferredStaffPerClientPerDay: 2,
-            continuityPriority: 240,
-            clientHandoffPenaltyPriority: 250,
-            workloadBalancePriority: 10,
-            staffScheduleCompactnessPriority: 25,
-          },
-          assignments: inspection.assignments,
-          active: true,
-        },
-      },
-      {
-        new: true,
-        upsert: true,
-        runValidators: true,
-      }
-    );
+      assignments: inspection.assignments,
+      active: true,
+    });
 
     await writeAuditLog({
       locationId,
