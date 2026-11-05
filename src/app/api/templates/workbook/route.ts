@@ -351,8 +351,15 @@ export async function POST(request: Request) {
       },
       { status: 201 }
     );
-  } catch (error) {
+  } catch (error: any) {
     console.error("Workbook template import failed:", error);
+
+    if (error?.code === 11000) {
+      return NextResponse.json(
+        { error: "A template with this name already exists for that weekday. Rename the new template or delete the existing one first." },
+        { status: 409 }
+      );
+    }
 
     return NextResponse.json(
       {
