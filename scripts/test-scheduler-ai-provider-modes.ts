@@ -133,15 +133,11 @@ const paidModelSelection = paidBase.slice(
   paidBase.indexOf("const autonomousWrites")
 );
 assert.match(paidModelSelection, /SCHEDULER_AI_PAID_MODEL/);
-assert.match(paidBase, /import \\{ openai \\} from "@ai-sdk\\/openai"/);
-assert.match(paidBase, /OPENAI_API_KEY/);
-assert.match(paidBase, /openai\\.responses\\(configuredModel\\.replace/);
-assert.doesNotMatch(paidBase, /const aiProvider = "gateway"/);
+assert.ok(paidBase.includes('import { openai } from "@ai-sdk/openai";'));
+assert.ok(paidBase.includes("OPENAI_API_KEY"));
+assert.ok(paidBase.includes("openai.responses(configuredModel.replace"));
+assert.ok(!paidBase.includes('const aiProvider = "gateway"'));
 assert.match(paidModelSelection, /DEFAULT_SCHEDULER_AI_PAID_MODEL/);
-assert.match(paidBase, /import \\{ openai \\} from "@ai-sdk\\/openai"/);
-assert.match(paidBase, /OPENAI_API_KEY/);
-assert.match(paidBase, /openai\\.responses\\(configuredModel\\.replace/);
-assert.doesNotMatch(paidBase, /const aiProvider = "gateway"/);
 assert.doesNotMatch(
   paidModelSelection,
   /process\.env\.SCHEDULER_AI_MODEL/
