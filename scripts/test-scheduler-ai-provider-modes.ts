@@ -126,7 +126,7 @@ for (const sharedToolFile of [
 const paidBase = source("src/app/api/ai/routeBase.ts");
 assert.match(
   paidBase,
-  /DEFAULT_SCHEDULER_AI_PAID_MODEL = "gpt-6\.1-sol"/
+  /DEFAULT_SCHEDULER_AI_PAID_MODEL = "gpt-6\\.1-sol"/
 );
 const paidModelSelection = paidBase.slice(
   paidBase.indexOf("const model ="),
@@ -138,6 +138,10 @@ assert.match(paidBase, /OPENAI_API_KEY/);
 assert.match(paidBase, /openai\\.responses\\(configuredModel\\.replace/);
 assert.doesNotMatch(paidBase, /const aiProvider = "gateway"/);
 assert.match(paidModelSelection, /DEFAULT_SCHEDULER_AI_PAID_MODEL/);
+assert.match(paidBase, /import \\{ openai \\} from "@ai-sdk\\/openai"/);
+assert.match(paidBase, /OPENAI_API_KEY/);
+assert.match(paidBase, /openai\\.responses\\(configuredModel\\.replace/);
+assert.doesNotMatch(paidBase, /const aiProvider = "gateway"/);
 assert.doesNotMatch(
   paidModelSelection,
   /process\.env\.SCHEDULER_AI_MODEL/
