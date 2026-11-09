@@ -42,6 +42,7 @@ type StaffMember = {
   role: StaffRole;
   employeeType: EmployeeType;
   teamId: string | null;
+  teamIds?: string[];
   color: string;
   serviceSetting: ServiceSetting;
   minimumWeeklyHours: number;
@@ -57,7 +58,7 @@ type StaffForm = {
   endDate: string;
   role: StaffRole;
   employeeType: EmployeeType;
-  teamId: string;
+  teamIds: string[];
   color: string;
   serviceSetting: ServiceSetting;
   minimumWeeklyHours: number;
@@ -91,7 +92,7 @@ function createEmptyForm(): StaffForm {
     endDate: "",
     role: "BT",
     employeeType: "FULL_TIME",
-    teamId: "",
+    teamIds: [],
     color: "#DCE9F8",
     serviceSetting: "IN_CENTER",
     minimumWeeklyHours: 30,
@@ -393,7 +394,7 @@ export function StaffManager() {
       endDate: form.endDate || null,
       role: form.role,
       employeeType: form.employeeType,
-      teamId: form.teamId || null,
+      teamIds: form.teamIds,
       color: form.color,
       serviceSetting: form.serviceSetting,
       minimumWeeklyHours: form.minimumWeeklyHours,
@@ -447,7 +448,7 @@ export function StaffManager() {
       endDate: formatDateForInput(staffMember.endDate),
       role: staffMember.role,
       employeeType: staffMember.employeeType,
-      teamId: staffMember.teamId ?? "",
+      teamIds: staffMember.teamIds?.length ? staffMember.teamIds : staffMember.teamId ? [staffMember.teamId] : [],
       color: staffMember.color || "#DCE9F8",
       serviceSetting: staffMember.serviceSetting,
       minimumWeeklyHours: staffMember.minimumWeeklyHours,
@@ -613,25 +614,27 @@ export function StaffManager() {
             </select>
           </label>
 
-          <label className="form-field">
-            <span>Team</span>
-            <select
-              value={form.teamId}
-              onChange={(event) =>
-                setForm((currentForm) => ({
-                  ...currentForm,
-                  teamId: event.target.value,
-                }))
-              }
-            >
-              <option value="">Unassigned</option>
+          <div className="form-field">
+            <span>Teams (select all that apply)</span>
+            <div className="day-selector" style={{ maxHeight: 180, overflowY: "auto" }}>
               {teams.map((team) => (
-                <option key={team.id} value={team.id}>
-                  {team.name}
-                </option>
+                <label key={team.id} className="checkbox-card">
+                  <input
+                    type="checkbox"
+                    checked={form.teamIds.includes(team.id)}
+                    onChange={() => setForm((currentForm) => ({
+                      ...currentForm,
+                      teamIds: currentForm.teamIds.includes(team.id)
+                        ? currentForm.teamIds.filter((teamId) => teamId !== team.id)
+                        : [...currentForm.teamIds, team.id],
+                    }))}
+                  />
+                  <span>{team.name}</span>
+                </label>
               ))}
-            </select>
-          </label>
+            </div>
+            <small>A therapist can belong to more than one team. This does not reserve their time or prevent scheduling elsewhere.</small>
+          </div>
 
           <label className="form-field">
             <span>Staff color</span>
