@@ -126,7 +126,7 @@ for (const sharedToolFile of [
 const paidBase = source("src/app/api/ai/routeBase.ts");
 assert.match(
   paidBase,
-  /DEFAULT_SCHEDULER_AI_PAID_MODEL = "openai\/gpt-6\.1-sol"/
+  /DEFAULT_SCHEDULER_AI_PAID_MODEL = "gpt-6\.1-sol"/
 );
 const paidModelSelection = paidBase.slice(
   paidBase.indexOf("const model ="),
