@@ -29,7 +29,8 @@
     "next": "^16.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "@ai-sdk/openai": "^4.0.111"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
