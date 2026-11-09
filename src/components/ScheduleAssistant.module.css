@@ -941,3 +941,48 @@
     max-height: 34vh;
   }
 }
+
+
+.quickActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+}
+
+.generateDayButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 8px 13px;
+  border: 1px solid #176f9f;
+  border-radius: 11px;
+  background: linear-gradient(145deg, #1686b8, #0c5f91);
+  color: #ffffff;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 850;
+  cursor: pointer;
+  box-shadow: 0 5px 12px rgba(12, 95, 145, 0.14);
+}
+
+.generateDayButton span {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.generateDayButton:hover:not(:disabled) {
+  background: linear-gradient(145deg, #0f75a8, #084f7c);
+}
+
+.generateDayButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.quickActions small {
+  color: #8094a1;
+  font-size: 9.5px;
+}
