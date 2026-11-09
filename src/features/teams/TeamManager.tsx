@@ -330,8 +330,8 @@ export function TeamManager() {
       return;
     }
     const selectedStaffMember = activeStaff.find((member) => member.id === preferenceStaffId);
-    if (!selectedStaffMember || !["BT", "RBT"].includes(selectedStaffMember.role)) {
-      setMessage("Choose an active BT or RBT for this preference.");
+    if (!selectedStaffMember) {
+      setMessage("Choose an active staff member for this preference.");
       return;
     }
     const selectedClients = activeClients.filter((client) => preferenceClientIds.includes(client.id));
@@ -527,15 +527,15 @@ export function TeamManager() {
         <div className="panel-heading-row">
           <div>
             <h2>Shared staff preferences</h2>
-            <p>Select one BT/RBT and assign that same person as Preferred for multiple clients at once. Each client's preferences are saved independently: a staff member can be preferred by many clients, and each client can have multiple preferred staff. Preferences never override availability or hard restrictions.</p>
+            <p>Select one active staff member and assign that same person as Preferred for multiple clients at once. Each client's preferences are saved independently: a staff member can be preferred by many clients, and each client can have multiple preferred staff. Preferences never override availability, role eligibility, or hard restrictions.</p>
           </div>
         </div>
         <div className="form-grid">
           <label className="form-field">
-            <span>Preferred BT / RBT</span>
+            <span>Preferred staff member</span>
             <select value={preferenceStaffId} disabled={loading || saving || savingPreferences} onChange={(event) => setPreferenceStaffId(event.target.value)}>
               <option value="">Choose staff member</option>
-              {activeStaff.filter((member) => ["BT", "RBT"].includes(member.role)).sort((left, right) => left.fullName.localeCompare(right.fullName)).map((member) => (
+              {activeStaff.slice().sort((left, right) => left.fullName.localeCompare(right.fullName)).map((member) => (
                 <option key={member.id} value={member.id}>{member.fullName} · {member.role}</option>
               ))}
             </select>
