@@ -28,7 +28,7 @@ type LocationsResponse = {
 };
 
 type SchedulerAiMode = "READ_ONLY" | "AUTONOMOUS";
-type SchedulerAiProviderMode = "native" | "gateway";
+type SchedulerAiProviderMode = "native" | "openai";
 type SchedulerAiThinkingLevel = "low" | "high";
 
 type SchedulerAiResponse = {
@@ -334,8 +334,10 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
 
   useEffect(() => {
     const savedProvider = window.localStorage.getItem("scheduler-ai-provider");
-    if (savedProvider === "native" || savedProvider === "gateway") {
-      setProvider(savedProvider);
+    if (savedProvider === "native" || savedProvider === "openai" || savedProvider === "gateway") {
+      const nextProvider = savedProvider === "native" ? "native" : "openai";
+      setProvider(nextProvider);
+      window.localStorage.setItem("scheduler-ai-provider", nextProvider);
     }
   }, []);
 
@@ -480,7 +482,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     setStatus(
       nextProvider === "native"
         ? "Free AI selected — Native Scheduler AI uses local deterministic reasoning and no paid model tokens."
-        : "Paid AI selected — Gateway AI uses high reasoning and may consume paid AI credits."
+        : "Paid AI selected — OpenAI GPT-6.1 Sol uses high reasoning and your OpenAI API key."
     );
   }
 
@@ -847,23 +849,23 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
                 className={provider === "gateway" ? styles.providerActive : ""}
                 aria-pressed={provider === "gateway"}
                 disabled={working}
-                onClick={() => void changeProvider("gateway")}
+                onClick={() => void changeProvider("openai")}
               >
                 <strong>Paid AI</strong>
-                <small>Gateway · High thinking</small>
+                <small>OpenAI GPT-6.1 Sol · High thinking</small>
               </button>
             </div>
             <span className={styles.providerNote}>
               {provider === "native"
                 ? "Runs the built-in Scheduler AI without paid model tokens. Text scheduling only."
-                : "Uses the paid AI Gateway with high reasoning. Screenshot analysis is available in this mode."}
+                : "Uses OpenAI GPT-6.1 Sol directly with high reasoning. Screenshot analysis is available in this mode."}
             </span>
           </div>
 
           <div className={styles.promptHint}>
             <span>
               Ask naturally — capitalization and normal typos are okay. {provider === "gateway"
-                ? "Paid AI can also analyze schedule screenshots before you confirm changes."
+                ? "Paid AI uses OpenAI GPT-6.1 Sol and can also analyze schedule screenshots before you confirm changes."
                 : "Free AI handles text scheduling locally; switch to Paid AI for screenshots."} Use Saved prompts for more examples.
             </span>
             <button
