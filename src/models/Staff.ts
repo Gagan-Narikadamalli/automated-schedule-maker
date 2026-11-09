@@ -62,6 +62,10 @@ const StaffSchema = new Schema(
       ref: "Team",
       default: null,
     },
+    teamIds: {
+      type: [{ type: Schema.Types.ObjectId, ref: "Team" }],
+      default: [],
+    },
     color: {
       type: String,
       default: "#DCE9F8",
