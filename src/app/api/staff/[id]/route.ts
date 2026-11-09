@@ -26,6 +26,7 @@ type StaffUpdateRequest = {
   role?: "BT" | "RBT" | "INTERN" | "BCBA" | "OFFICE_MANAGER" | "OTHER";
   employeeType?: "FULL_TIME" | "PART_TIME";
   teamId?: string | null;
+  teamIds?: string[];
   color?: string;
   serviceSetting?: "IN_CENTER" | "IN_HOME" | "BOTH";
   minimumWeeklyHours?: number;
@@ -100,8 +101,12 @@ export async function PATCH(request: Request, context: RouteContext) {
       staffMember.employeeType = body.employeeType;
     }
 
-    if (body.teamId !== undefined) {
+    if (body.teamIds !== undefined) {
+      staffMember.teamIds = [...new Set(body.teamIds.filter(Boolean))];
+      staffMember.teamId = staffMember.teamIds[0] ?? null;
+    } else if (body.teamId !== undefined) {
       staffMember.teamId = body.teamId || null;
+      staffMember.teamIds = body.teamId ? [body.teamId] : [];
     }
 
     if (body.color !== undefined) {
@@ -171,6 +176,9 @@ export async function PATCH(request: Request, context: RouteContext) {
         _id: undefined,
         locationId,
         teamId: staffMember.teamId ? String(staffMember.teamId) : null,
+        teamIds: Array.isArray(staffMember.teamIds) && staffMember.teamIds.length > 0
+          ? staffMember.teamIds.map((teamId: unknown) => String(teamId))
+          : staffMember.teamId ? [String(staffMember.teamId)] : [],
       },
     });
   } catch (error) {

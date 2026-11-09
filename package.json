@@ -24,12 +24,13 @@
     "test:native-ai-isolation": "tsx scripts/test-scheduler-ai-provider-modes.ts"
   },
   "dependencies": {
-    "ai": "^7.0.123",
+    "ai": "^7.0.165",
     "mongoose": "^8.9.0",
     "next": "^16.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "@ai-sdk/openai": "^4.0.111"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

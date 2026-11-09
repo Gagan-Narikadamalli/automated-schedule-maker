@@ -23,6 +23,10 @@ import { applyHistoricalTraining } from "@/features/scheduler/server/applyHistor
 import { applyLivingstonWorkbookTrial } from "@/features/scheduler/server/applyLivingstonWorkbookTrial";
 import { buildDaySchedulerInput } from "@/features/scheduler/server/buildDaySchedulerInput";
 import { persistScheduleReplacementSafely } from "@/features/scheduler/server/persistScheduleReplacementSafely";
+import {
+  AUTO_REPLACEABLE_ASSIGNMENT_FILTER,
+  shouldKeepExistingAssignment,
+} from "@/features/scheduler/server/schedulePersistencePolicy";
 import { syncAutoUnplacedGaps } from "@/features/scheduler/server/syncAutoUnplacedGaps";
 import { writeAuditLog } from "@/lib/api/audit";
 import { connectToDatabase } from "@/lib/db";
@@ -108,10 +112,14 @@ export async function POST(request: Request) {
     }
 
     const dayData = await buildDaySchedulerInput(locationId, date);
-    // Manager nap events do not override workbook coverage during generation.
-    // Date-specific attendance call-outs/call-ins still apply.
+    // Apply the selected date's saved nap sessions and attendance changes
+    // before calculating capacity or assigning staff. A nap removes that
+    // client's 1:1 demand for the nap window, allowing the assigned caregiver
+    // to take a break without creating an unnecessary coverage handoff.
     const fixedNapApplication = await applyFixedNapSessions(
-      locationId, date, dayData.input, { ignoreNapSessions: true }
+      locationId,
+      date,
+      dayData.input
     );
 
     const workbookTraining = await applyLivingstonWorkbookTrial(
@@ -131,10 +139,18 @@ export async function POST(request: Request) {
       dayData.extendedRules
     );
 
-    // Fresh generation starts from workbook pins, not previously generated/manual cells.
-    // Repair mode is a separate action and retains the saved schedule.
+    // Fresh generation starts from validated workbook references, not hard-pinned
+    // template cells or the previous AUTO result for this date. Repair mode is
+    // a separate action and retains the saved schedule.
     const templatePinning = pinWorkbookTemplates(schedulerInput);
-    const protectedAssignments = templatePinning.pinned;
+    // Valid template cells are advisory references, not locked assignments.
+    // The generator may follow them when they produce a coherent schedule,
+    // but it must be free to improve fragmented blocks and break placement.
+    // Preserve locked/manual/fixed-event cells during a fresh daily rebuild.
+    // Unlocked automatic/template/copied work is regenerated from current data.
+    const protectedAssignments = schedulerInput.existingAssignments.filter(
+      shouldKeepExistingAssignment
+    );
 
 
     // Coverage is built first. Fixed nap and speech windows have already been
@@ -147,9 +163,21 @@ export async function POST(request: Request) {
     // Auto Generate must NEVER learn from the schedule already saved for the
     // target date. Workbook references are independent of existing day cells.
     const existingDayIds = new Set(schedulerInput.existingAssignments.map(item => item.id));
-    const freshReferences = schedulerInput.referenceAssignments.filter(reference =>
-      !existingDayIds.has(reference.id) && reference.source !== "AUTO"
+    const acceptedTemplateKeys = new Set(
+      templatePinning.pinned.map(reference =>
+        `${reference.staffId}|${reference.clientId ?? ""}|${reference.startTime}|${reference.assignmentType}`
+      )
     );
+    const freshReferences = schedulerInput.referenceAssignments.filter(reference => {
+      if (existingDayIds.has(reference.id) || reference.source === "AUTO") {
+        return false;
+      }
+      if (reference.source !== "TEMPLATE") {
+        return true;
+      }
+      const key = `${reference.staffId}|${reference.clientId ?? ""}|${reference.startTime}|${reference.assignmentType}`;
+      return acceptedTemplateKeys.has(key);
+    });
     const coverageResult = generateSchedule({
       ...schedulerInput,
       referenceAssignments: freshReferences,
@@ -174,13 +202,10 @@ export async function POST(request: Request) {
       schedulerRules: schedulerInput.rules,
     });
 
-    const enrichedAssignments = breakPlan.assignments.map(assignment => {
-      // Workbook BREAK, BREAK_NAP and BREAK_SPEECH must remain exactly as saved.
-      const pinned = templatePinning.pinned.find(item =>
-        item.staffId === assignment.staffId && item.startTime === assignment.startTime
-      );
-      return pinned ? {...assignment, assignmentType:pinned.assignmentType} : assignment;
-    });
+    // Break records are generated from the selected date's live nap/speech
+    // windows and coverage plan. A template's old break label is only a
+    // preference and must not overwrite the newly validated assignment type.
+    const enrichedAssignments = breakPlan.assignments;
     const finalCoverage = auditFinalCoverage(
       schedulerInput.clients,
       enrichedAssignments,
@@ -217,7 +242,9 @@ export async function POST(request: Request) {
 
     await connectToDatabase();
 
-    const autoAssignments = enrichedAssignments;
+    const autoAssignments = enrichedAssignments.filter(
+      (assignment) => assignment.source === "AUTO" && !assignment.locked
+    );
     const generatedRecords = autoAssignments.map((assignment) => ({
       locationId,
       date,
@@ -236,7 +263,7 @@ export async function POST(request: Request) {
       locationId,
       date,
       replacements: generatedRecords,
-      replaceableFilter: {},
+      replaceableFilter: AUTO_REPLACEABLE_ASSIGNMENT_FILTER,
     });
 
     if (persistence.blockedEmptyReplacement) {

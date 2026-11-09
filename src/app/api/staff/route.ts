@@ -19,6 +19,7 @@ type StaffRequest = {
   role?: "BT" | "RBT" | "INTERN" | "BCBA" | "OFFICE_MANAGER" | "OTHER";
   employeeType?: "FULL_TIME" | "PART_TIME";
   teamId?: string | null;
+  teamIds?: string[];
   color?: string;
   serviceSetting?: "IN_CENTER" | "IN_HOME" | "BOTH";
   minimumWeeklyHours?: number;
@@ -39,6 +40,9 @@ function serializeStaff(staffMember: Record<string, unknown>) {
     _id: undefined,
     locationId: String(staffMember.locationId),
     teamId: staffMember.teamId ? String(staffMember.teamId) : null,
+    teamIds: Array.isArray(staffMember.teamIds) && staffMember.teamIds.length > 0
+      ? staffMember.teamIds.map((teamId) => String(teamId))
+      : staffMember.teamId ? [String(staffMember.teamId)] : [],
   };
 }
 
@@ -147,7 +151,8 @@ export async function POST(request: Request) {
       endDate: body.endDate ? new Date(body.endDate) : null,
       role: body.role,
       employeeType: body.employeeType,
-      teamId: body.teamId || null,
+      teamId: body.teamId || body.teamIds?.[0] || null,
+      teamIds: body.teamIds ?? (body.teamId ? [body.teamId] : []),
       color: body.color || "#DCE9F8",
       serviceSetting: body.serviceSetting || "IN_CENTER",
       minimumWeeklyHours,

@@ -176,6 +176,140 @@ function testRoleCoverageOrder() {
   );
 }
 
+function testScarceBtIsReservedForClientWithFewestBtOptions() {
+  const time = "08:00";
+  const staff = [
+    createStaff("bt-a", "BT A", "BT", [time]),
+    createStaff("bt-b", "BT B", "BT", [time]),
+    createStaff("manager", "Manager", "OFFICE_MANAGER", [time]),
+    createStaff("bcba", "BCBA", "BCBA", [time]),
+  ];
+  const scarceBtClient = createClient(
+    "client-scarce-bt",
+    "ScBt",
+    [time],
+    {
+      staffRelationships: {
+        "bt-b": "HARD_RESTRICTION",
+      },
+    }
+  );
+  const flexibleClient = createClient(
+    "client-flexible-bt",
+    "FlBt",
+    [time],
+    {
+      staffRelationships: {
+        manager: "HARD_RESTRICTION",
+        bcba: "HARD_RESTRICTION",
+      },
+    }
+  );
+
+  // The flexible client has two eligible BTs (two total eligible staff).
+  // The scarce client has only one eligible BT but also has manager/BCBA
+  // alternatives (three total eligible staff). BT scarcity must win over the
+  // raw total-staff count so the manager/BCBA can take the flexible client.
+  const result = generateSchedule(
+    createInput(staff, [flexibleClient, scarceBtClient])
+  );
+  const assignments = clientAssignments(result.assignments);
+  const scarceAssignment = assignments.find(
+    (assignment) => assignment.clientId === scarceBtClient.id
+  );
+  const flexibleAssignment = assignments.find(
+    (assignment) => assignment.clientId === flexibleClient.id
+  );
+
+  assert.equal(
+    scarceAssignment?.staffId,
+    "bt-a",
+    "The client with only one eligible BT must receive that BT first."
+  );
+  assert.equal(
+    flexibleAssignment?.staffId,
+    "bt-b",
+    "The flexible client should use the remaining BT after the scarce client is covered."
+  );
+  assert.equal(
+    result.uncoveredRequirements.length,
+    0,
+    "Both clients should remain covered."
+  );
+}
+
+function testBtIsReservedForFutureClientWithNoOtherBtOption() {
+  const times = ["08:00", "08:30", "09:00"];
+  const bt = createStaff("only-bt", "Only Eligible BT", "BT", times);
+  const manager = createStaff("manager", "Relief Manager", "OFFICE_MANAGER", times);
+  const flexibleClient = createClient(
+    "flexible-client",
+    "FlCl",
+    times
+  );
+  const constrainedClient = createClient(
+    "constrained-client",
+    "CoCl",
+    ["09:00"],
+    {
+      staffRelationships: {
+        manager: "HARD_RESTRICTION",
+      },
+    }
+  );
+
+  const result = generateSchedule(
+    createInput([bt, manager], [flexibleClient, constrainedClient])
+  );
+  const flexibleAssignments = clientAssignments(result.assignments).filter(
+    (assignment) => assignment.clientId === flexibleClient.id
+  );
+  const constrainedAssignment = clientAssignments(result.assignments).find(
+    (assignment) => assignment.clientId === constrainedClient.id
+  );
+
+  assert.equal(flexibleAssignments.length, times.length);
+  assert.ok(
+    flexibleAssignments.every((assignment) => assignment.staffId === manager.id),
+    "An auxiliary role should cover the flexible client while the only eligible BT is needed for a later constrained client."
+  );
+  assert.equal(
+    constrainedAssignment?.staffId,
+    bt.id,
+    "The only eligible BT must remain available for the client who has no other BT option."
+  );
+  assert.equal(result.uncoveredRequirements.length, 0);
+}
+
+function testTemplateReferenceDoesNotForceShortIsolatedHandoff() {
+  const times = ["08:00", "08:30", "09:00", "09:30"];
+  const staff = [
+    createStaff("primary-bt", "Primary BT", "BT", times),
+    createStaff("template-bt", "Template BT", "BT", times),
+  ];
+  const client = createClient("continuous-client", "CoCl", times);
+  const references: SchedulerAssignment[] = times.map((startTime, index) => ({
+    id: `template-fragment-${startTime}`,
+    staffId: index === 3 ? "template-bt" : "primary-bt",
+    clientId: client.id,
+    startTime,
+    assignmentType: "CLIENT_1_TO_1",
+    source: "TEMPLATE",
+    locked: false,
+  }));
+
+  const result = generateSchedule(createInput(staff, [client], [], references));
+  const coverage = clientAssignments(result.assignments)
+    .filter((assignment) => assignment.clientId === client.id)
+    .sort((left, right) => left.startTime.localeCompare(right.startTime));
+
+  assert.equal(coverage.length, times.length);
+  assert.ok(
+    coverage.every((assignment) => assignment.staffId === "primary-bt"),
+    `A single isolated 30-minute template handoff must not interrupt a feasible continuous client block. Actual: ${JSON.stringify(coverage.map(item => ({staffId:item.staffId,startTime:item.startTime})))}`
+  );
+}
+
 function testHistoricalPreferenceCannotJumpRoleTier() {
   const staff = [
     createStaff("bt-1", "Primary BT", "BT", ["08:00"]),
@@ -1421,6 +1555,9 @@ function testFourHourPreferenceWithFinalHourExtension() {
 
 function runSchedulerRegressionScenarios() {
   testRoleCoverageOrder();
+  testScarceBtIsReservedForClientWithFewestBtOptions();
+  testBtIsReservedForFutureClientWithNoOtherBtOption();
+  testTemplateReferenceDoesNotForceShortIsolatedHandoff();
   testFourHourPreferenceWithFinalHourExtension();
   testAvailableBTWinsOverNonBTTemplateCoverage();
   testContiguousClientCoverageAndNoDoubleBooking();

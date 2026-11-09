@@ -6,6 +6,7 @@ import {
   useState,
   type ChangeEvent,
   type FormEvent,
+  type ReactNode,
 } from "react";
 
 import {
@@ -27,7 +28,7 @@ type LocationsResponse = {
 };
 
 type SchedulerAiMode = "READ_ONLY" | "AUTONOMOUS";
-type SchedulerAiProviderMode = "native" | "gateway";
+type SchedulerAiProviderMode = "native" | "openai";
 type SchedulerAiThinkingLevel = "low" | "high";
 
 type SchedulerAiResponse = {
@@ -80,6 +81,154 @@ type SavedPromptGroup = {
   title: string;
   prompts: string[];
 };
+
+function renderInlineMarkdown(value: string): ReactNode[] {
+  const tokenPattern = /(\[[^\]]+\]\(https?:\/\/[^)\s]+\)|\*\*[^*]+\*\*|~~[^~]+~~|\*[^*]+\*|\x60[^\x60]+\x60)/g;
+  return value.split(tokenPattern).filter(Boolean).map((part, index) => {
+    const linkMatch = part.match(/^\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)$/);
+    if (linkMatch) {
+      return <a key={index} href={linkMatch[2]} target="_blank" rel="noreferrer">{linkMatch[1]}</a>;
+    }
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return <strong key={index}>{part.slice(2, -2)}</strong>;
+    }
+    if (part.startsWith("~~") && part.endsWith("~~")) {
+      return <del key={index}>{part.slice(2, -2)}</del>;
+    }
+    if (part.startsWith("*") && part.endsWith("*")) {
+      return <em key={index}>{part.slice(1, -1)}</em>;
+    }
+    if (part.startsWith(String.fromCharCode(96)) && part.endsWith(String.fromCharCode(96))) {
+      return <code key={index}>{part.slice(1, -1)}</code>;
+    }
+    return part;
+  });
+}
+
+function renderMessageMarkdown(value: string): ReactNode {
+  const lines = value.replace(/\r\n?/g, "\n").split("\n");
+  const blocks: ReactNode[] = [];
+  let index = 0;
+  const fence = String.fromCharCode(96).repeat(3);
+
+  const isTableRow = (line: string) => /^\s*\|.*\|\s*$/.test(line);
+  const splitTableRow = (line: string) =>
+    line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
+  const isTableDivider = (line: string) =>
+    isTableRow(line) && splitTableRow(line).every((cell) => /^:?-{3,}:?$/.test(cell));
+
+  while (index < lines.length) {
+    const trimmed = lines[index].trim();
+    if (!trimmed) {
+      index += 1;
+      continue;
+    }
+
+    if (trimmed.startsWith(fence)) {
+      const language = trimmed.slice(3).trim();
+      const codeLines: string[] = [];
+      index += 1;
+      while (index < lines.length && !lines[index].trim().startsWith(fence)) {
+        codeLines.push(lines[index]);
+        index += 1;
+      }
+      if (index < lines.length) index += 1;
+      blocks.push(
+        <pre key={blocks.length} data-language={language || undefined}>
+          <code>{codeLines.join("\n")}</code>
+        </pre>
+      );
+      continue;
+    }
+
+    const heading = trimmed.match(/^(#{1,4})\s+(.+)$/);
+    if (heading) {
+      const level = heading[1].length;
+      const children = renderInlineMarkdown(heading[2]);
+      if (level === 1) blocks.push(<h3 key={blocks.length}>{children}</h3>);
+      else if (level === 2) blocks.push(<h4 key={blocks.length}>{children}</h4>);
+      else blocks.push(<h5 key={blocks.length}>{children}</h5>);
+      index += 1;
+      continue;
+    }
+
+    if (/^(---+|\*\*\*+|___+)$/.test(trimmed)) {
+      blocks.push(<hr key={blocks.length} />);
+      index += 1;
+      continue;
+    }
+
+    if (isTableRow(trimmed) && index + 1 < lines.length && isTableDivider(lines[index + 1].trim())) {
+      const headers = splitTableRow(trimmed);
+      index += 2;
+      const rows: string[][] = [];
+      while (index < lines.length && isTableRow(lines[index].trim())) {
+        rows.push(splitTableRow(lines[index].trim()));
+        index += 1;
+      }
+      blocks.push(
+        <div className={styles.markdownTableWrap} key={blocks.length}>
+          <table>
+            <thead><tr>{headers.map((cell, cellIndex) => <th key={cellIndex}>{renderInlineMarkdown(cell)}</th>)}</tr></thead>
+            <tbody>
+              {rows.map((row, rowIndex) => (
+                <tr key={rowIndex}>
+                  {headers.map((_, cellIndex) => <td key={cellIndex}>{renderInlineMarkdown(row[cellIndex] ?? "")}</td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+      continue;
+    }
+
+    const unorderedItem = trimmed.match(/^[-*+]\s+(.+)$/);
+    const orderedItem = trimmed.match(/^\d+[.)]\s+(.+)$/);
+    if (unorderedItem || orderedItem) {
+      const ordered = Boolean(orderedItem);
+      const items: string[] = [];
+      while (index < lines.length) {
+        const itemLine = lines[index].trim();
+        const match = ordered
+          ? itemLine.match(/^\d+[.)]\s+(.+)$/)
+          : itemLine.match(/^[-*+]\s+(.+)$/);
+        if (!match) break;
+        items.push(match[1]);
+        index += 1;
+      }
+      const ListTag = ordered ? "ol" : "ul";
+      blocks.push(<ListTag key={blocks.length}>{items.map((item, itemIndex) => <li key={itemIndex}>{renderInlineMarkdown(item)}</li>)}</ListTag>);
+      continue;
+    }
+
+    if (trimmed.startsWith(">")) {
+      const quoteLines: string[] = [];
+      while (index < lines.length && lines[index].trim().startsWith(">")) {
+        quoteLines.push(lines[index].trim().replace(/^>\s?/, ""));
+        index += 1;
+      }
+      blocks.push(<blockquote key={blocks.length}>{quoteLines.map((line, lineIndex) => <p key={lineIndex}>{renderInlineMarkdown(line)}</p>)}</blockquote>);
+      continue;
+    }
+
+    const paragraphLines = [trimmed];
+    index += 1;
+    while (
+      index < lines.length &&
+      lines[index].trim() &&
+      !/^(#{1,4}\s+|[-*+]\s+|\d+[.)]\s+|>|---+$|\*\*\*+$|___+$)/.test(lines[index].trim()) &&
+      !lines[index].trim().startsWith(fence) &&
+      !(isTableRow(lines[index].trim()) && index + 1 < lines.length && isTableDivider(lines[index + 1].trim()))
+    ) {
+      paragraphLines.push(lines[index].trim());
+      index += 1;
+    }
+    blocks.push(<p key={blocks.length}>{renderInlineMarkdown(paragraphLines.join(" "))}</p>);
+  }
+
+  return blocks;
+}
 
 const MAX_SCREENSHOT_ATTACHMENTS = 3;
 const MAX_SCREENSHOT_TOTAL_BYTES = 3 * 1024 * 1024;
@@ -271,8 +420,10 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
 
   useEffect(() => {
     const savedProvider = window.localStorage.getItem("scheduler-ai-provider");
-    if (savedProvider === "native" || savedProvider === "gateway") {
-      setProvider(savedProvider);
+    if (savedProvider === "native" || savedProvider === "openai" || savedProvider === "gateway") {
+      const nextProvider = savedProvider === "native" ? "native" : "openai";
+      setProvider(nextProvider);
+      window.localStorage.setItem("scheduler-ai-provider", nextProvider);
     }
   }, []);
 
@@ -417,7 +568,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     setStatus(
       nextProvider === "native"
         ? "Free AI selected — Native Scheduler AI uses local deterministic reasoning and no paid model tokens."
-        : "Paid AI selected — Gateway AI uses high reasoning and may consume paid AI credits."
+        : "Paid AI selected — OpenAI GPT-6.1 Sol uses high reasoning and your OpenAI API key."
     );
   }
 
@@ -501,10 +652,11 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     }
   }
 
-  async function askScheduler(event?: FormEvent) {
+  async function askScheduler(event?: FormEvent, requestedMessage?: string) {
     event?.preventDefault();
     const selectedAttachments = attachments;
     const message =
+      requestedMessage?.trim() ||
       input.trim() ||
       (selectedAttachments.length > 0
         ? "Analyze the attached scheduler screenshot and tell me what it contains. Do not make changes yet."
@@ -538,7 +690,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
       setWorking(false);
     }
 
-    const history = messages.slice(-12).map((entry) => ({
+    const history = messages.slice(-24).map((entry) => ({
       role: entry.role,
       text: entry.text,
       effectiveDate: entry.effectiveDate,
@@ -781,26 +933,26 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
               </button>
               <button
                 type="button"
-                className={provider === "gateway" ? styles.providerActive : ""}
-                aria-pressed={provider === "gateway"}
+                className={provider === "openai" ? styles.providerActive : ""}
+                aria-pressed={provider === "openai"}
                 disabled={working}
-                onClick={() => void changeProvider("gateway")}
+                onClick={() => void changeProvider("openai")}
               >
                 <strong>Paid AI</strong>
-                <small>Gateway · High thinking</small>
+                <small>OpenAI GPT-6.1 Sol · High thinking</small>
               </button>
             </div>
             <span className={styles.providerNote}>
               {provider === "native"
                 ? "Runs the built-in Scheduler AI without paid model tokens. Text scheduling only."
-                : "Uses the paid AI Gateway with high reasoning. Screenshot analysis is available in this mode."}
+                : "Uses OpenAI GPT-6.1 Sol directly with high reasoning. Screenshot analysis is available in this mode."}
             </span>
           </div>
 
           <div className={styles.promptHint}>
             <span>
-              Ask naturally — capitalization and normal typos are okay. {provider === "gateway"
-                ? "Paid AI can also analyze schedule screenshots before you confirm changes."
+              Ask naturally — capitalization and normal typos are okay. {provider === "openai"
+                ? "Paid AI uses OpenAI GPT-6.1 Sol and can also analyze schedule screenshots before you confirm changes."
                 : "Free AI handles text scheduling locally; switch to Paid AI for screenshots."} Use Saved prompts for more examples.
             </span>
             <button
@@ -852,7 +1004,9 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
                   <span className={styles.messageRole}>
                     {message.role === "user" ? "You" : "Scheduler AI"}
                   </span>
-                  <p>{message.text}</p>
+                  <div className={styles.messageText}>
+                    {renderMessageMarkdown(message.text)}
+                  </div>
                   {message.attachments && message.attachments.length > 0 && (
                     <div className={styles.messageAttachments}>
                       {message.attachments.map((attachment) => (
@@ -941,6 +1095,24 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
           </div>
 
           <form className={styles.composer} onSubmit={(event) => void askScheduler(event)}>
+            <div className={styles.quickActions}>
+              <button
+                type="button"
+                className={styles.generateDayButton}
+                disabled={working || !locationId}
+                onClick={() => {
+                  const requestContext = getRequestContext();
+                  void askScheduler(
+                    undefined,
+                    `Generate the schedule for the selected date ${requestContext.date} at ${requestContext.locationName}. Use the automatic scheduler and its saved templates, rules, staff/client availability, preferences, events, breaks, and call-outs. Then summarize coverage, remaining Unplaced assignments, uncovered time, and any warnings.`
+                  );
+                }}
+              >
+                <span aria-hidden="true">✦</span>
+                Generate selected day’s schedule
+              </button>
+              <small>Uses the calendar date selected above</small>
+            </div>
             {attachments.length > 0 && (
               <div className={styles.attachmentTray}>
                 {attachments.map((attachment, index) => (

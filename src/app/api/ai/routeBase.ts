@@ -1,4 +1,5 @@
 import { ToolLoopAgent, generateText, stepCountIs } from "ai";
+import { openai } from "@ai-sdk/openai";
 import { NextResponse } from "next/server";
 
 import {
@@ -41,10 +42,10 @@ import { AITrainingExample } from "@/models/AITrainingExample";
 
 export const maxDuration = 300;
 
-const DEFAULT_SCHEDULER_AI_PAID_MODEL = "openai/gpt-5.6-sol";
+const DEFAULT_SCHEDULER_AI_PAID_MODEL = "gpt-6.1-sol";
 const DEFAULT_SCHEDULER_AI_VISION_MODEL = "openai/gpt-5.4";
 const MAX_MESSAGE_LENGTH = 5000;
-const MAX_HISTORY_MESSAGES = 12;
+const MAX_HISTORY_MESSAGES = 24;
 const MAX_ATTACHMENT_CONTEXT_LENGTH = 14_000;
 const MAX_ATTACHMENTS = 3;
 const MAX_ATTACHMENT_DATA_LENGTH = 4_500_000;
@@ -367,7 +368,7 @@ async function analyzeSchedulerAttachments(args: {
     DEFAULT_SCHEDULER_AI_VISION_MODEL;
 
   const result = await generateText({
-    model: visionModel,
+    model: openai.responses(visionModel.replace(/^openai\//, "")),
     instructions: `You are the screenshot-reading layer for an Automatic Schedule Maker.
 Your only job is to extract scheduling facts from the attached screenshots accurately.
 
@@ -529,12 +530,22 @@ export async function POST(request: Request) {
       return forbiddenResponse("You do not have access to this scheduler location.");
     }
 
-    const aiProvider = "gateway" as const;
+    if (!process.env.OPENAI_API_KEY?.trim()) {
+      return NextResponse.json(
+        { error: "Paid AI is not connected: the OPENAI_API_KEY environment variable is missing from this deployment." },
+        { status: 503 }
+      );
+    }
+
+    const aiProvider = "openai" as const;
     const thinkingLevel = "high" as const;
-    const model =
+    // Use the OpenAI API directly so OPENAI_API_KEY is the credential that
+    // authenticates Paid AI. Keep the working GPT-6.1 Sol model and Responses
+    // API tool calling; never route this request through AI Gateway.
+    const configuredModel =
       process.env.SCHEDULER_AI_PAID_MODEL?.trim() ||
-      process.env.SCHEDULER_AI_MODEL?.trim() ||
       DEFAULT_SCHEDULER_AI_PAID_MODEL;
+    const model = openai.responses(configuredModel.replace(/^openai\//, ""));
     const autonomousWrites =
       process.env.SCHEDULER_AI_AUTONOMOUS_WRITES?.trim().toLowerCase() === "true";
     const writeToolsEnabled = autonomousWrites && !attachmentPreviewOnly;

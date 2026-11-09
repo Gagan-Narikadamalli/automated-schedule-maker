@@ -22,7 +22,9 @@ type StaffRecord = {
   id: string;
   fullName: string;
   teamId: string | null;
+  teamIds?: string[];
   active: boolean;
+  role: string;
 };
 
 type ClientRecord = {
@@ -31,6 +33,7 @@ type ClientRecord = {
   fullName: string;
   teamId: string | null;
   active: boolean;
+  staffRelationships?: Array<{staffId: string; relationship: "PREFERRED" | "ALLOWED" | "HARD_RESTRICTION"}>;
 };
 
 type LocationsResponse = {
@@ -76,6 +79,9 @@ export function TeamManager() {
   const [teamColor, setTeamColor] = useState("#DCE9F8");
   const [selectedStaffIds, setSelectedStaffIds] = useState<string[]>([]);
   const [selectedClientIds, setSelectedClientIds] = useState<string[]>([]);
+  const [preferenceStaffId, setPreferenceStaffId] = useState("");
+  const [preferenceClientIds, setPreferenceClientIds] = useState<string[]>([]);
+  const [savingPreferences, setSavingPreferences] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(true);
@@ -235,7 +241,9 @@ export function TeamManager() {
     setTeamColor(team.color);
     setSelectedStaffIds(
       activeStaff
-        .filter((staffMember) => staffMember.teamId === team.id)
+        .filter((staffMember) =>
+          (staffMember.teamIds?.length ? staffMember.teamIds : staffMember.teamId ? [staffMember.teamId] : []).includes(team.id)
+        )
         .map((staffMember) => staffMember.id)
     );
     setSelectedClientIds(
@@ -247,19 +255,16 @@ export function TeamManager() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  async function updateStaffTeam(staffId: string, teamId: string | null) {
+  async function updateStaffTeams(staffId: string, teamIds: string[]) {
     const response = await fetch(`/api/staff/${staffId}`, {
       method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ teamId }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ teamIds }),
     });
 
     const data = await readJson<{ error?: string }>(response);
-
     if (!response.ok) {
-      throw new Error(data.error || "A staff team assignment could not be saved.");
+      throw new Error(data.error || "Staff team memberships could not be saved.");
     }
   }
 
@@ -289,13 +294,17 @@ export function TeamManager() {
     const membershipUpdates: Promise<void>[] = [];
 
     for (const staffMember of activeStaff) {
+      const currentTeamIds = staffMember.teamIds?.length
+        ? staffMember.teamIds
+        : staffMember.teamId ? [staffMember.teamId] : [];
       const shouldBelongToTeam = desiredStaff.has(staffMember.id);
-      const currentlyBelongsToTeam = staffMember.teamId === teamId;
+      const currentlyBelongsToTeam = currentTeamIds.includes(teamId);
 
-      if (shouldBelongToTeam && !currentlyBelongsToTeam) {
-        membershipUpdates.push(updateStaffTeam(staffMember.id, teamId));
-      } else if (!shouldBelongToTeam && currentlyBelongsToTeam) {
-        membershipUpdates.push(updateStaffTeam(staffMember.id, null));
+      if (shouldBelongToTeam !== currentlyBelongsToTeam) {
+        const nextTeamIds = shouldBelongToTeam
+          ? [...currentTeamIds, teamId]
+          : currentTeamIds.filter((currentTeamId) => currentTeamId !== teamId);
+        membershipUpdates.push(updateStaffTeams(staffMember.id, nextTeamIds));
       }
     }
 
@@ -311,6 +320,57 @@ export function TeamManager() {
     }
 
     await Promise.all(membershipUpdates);
+  }
+
+  function togglePreferenceClient(clientId: string) {
+    setPreferenceClientIds((current) =>
+      current.includes(clientId) ? current.filter((id) => id !== clientId) : [...current, clientId]
+    );
+  }
+
+  async function saveSharedStaffPreferences() {
+    if (!preferenceStaffId || preferenceClientIds.length === 0) {
+      setMessage("Choose one BT/RBT and at least one client.");
+      return;
+    }
+    const selectedStaffMember = activeStaff.find((member) => member.id === preferenceStaffId);
+    if (!selectedStaffMember) {
+      setMessage("Choose an active staff member for this preference.");
+      return;
+    }
+    const selectedClients = activeClients.filter((client) => preferenceClientIds.includes(client.id));
+    const restrictedClients = selectedClients.filter((client) =>
+      client.staffRelationships?.some((relationship) =>
+        relationship.staffId === preferenceStaffId && relationship.relationship === "HARD_RESTRICTION"
+      )
+    );
+    if (restrictedClients.length > 0) {
+      setMessage(`Cannot add ${selectedStaffMember.fullName} as preferred for ${restrictedClients.map((client) => client.displayCode).join(", ")} because a hard restriction already exists. Remove that restriction on the client profile first.`);
+      return;
+    }
+    try {
+      setSavingPreferences(true);
+      setMessage("Saving shared staff preferences...");
+      await Promise.all(selectedClients.map(async (client) => {
+        const relationships = new Map((client.staffRelationships ?? []).map((relationship) => [relationship.staffId, relationship.relationship]));
+        relationships.set(preferenceStaffId, "PREFERRED");
+        const response = await fetch(`/api/clients/${client.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ staffRelationships: Array.from(relationships.entries()).map(([staffId, relationship]) => ({ staffId, relationship })) }),
+        });
+        const data = await readJson<{ error?: string }>(response);
+        if (!response.ok) throw new Error(data.error || `Could not update ${client.displayCode}.`);
+      }));
+      await loadLocationData(selectedLocationId);
+      setPreferenceClientIds([]);
+      setMessage(`${selectedStaffMember.fullName} is now preferred for ${selectedClients.map((client) => client.displayCode).join(", ")}. Other client preferences were preserved.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Shared staff preferences could not be saved.");
+      await loadLocationData(selectedLocationId);
+    } finally {
+      setSavingPreferences(false);
+    }
   }
 
   async function saveTeam() {
@@ -450,7 +510,9 @@ export function TeamManager() {
 
   function staffNamesForTeam(teamId: string): string {
     const names = activeStaff
-      .filter((staffMember) => staffMember.teamId === teamId)
+      .filter((staffMember) =>
+        (staffMember.teamIds?.length ? staffMember.teamIds : staffMember.teamId ? [staffMember.teamId] : []).includes(teamId)
+      )
       .map((staffMember) => staffMember.fullName);
 
     return names.length > 0 ? names.join(", ") : "None";
@@ -470,11 +532,48 @@ export function TeamManager() {
       <section className="section-card">
         <div className="panel-heading-row">
           <div>
+            <h2>Shared staff preferences</h2>
+            <p>Select one active staff member and assign that same person as Preferred for multiple clients at once. Each client's preferences are saved independently: a staff member can be preferred by many clients, and each client can have multiple preferred staff. Preferences never override availability, role eligibility, or hard restrictions.</p>
+          </div>
+        </div>
+        <div className="form-grid">
+          <label className="form-field">
+            <span>Preferred staff member</span>
+            <select value={preferenceStaffId} disabled={loading || saving || savingPreferences} onChange={(event) => setPreferenceStaffId(event.target.value)}>
+              <option value="">Choose staff member</option>
+              {activeStaff.slice().sort((left, right) => left.fullName.localeCompare(right.fullName)).map((member) => (
+                <option key={member.id} value={member.id}>{member.fullName} · {member.role}</option>
+              ))}
+            </select>
+          </label>
+          <div className="form-field">
+            <span>Clients ({preferenceClientIds.length} selected)</span>
+            <div className="day-selector" style={{maxHeight:260,overflowY:"auto"}}>
+              {activeClients.slice().sort((left, right) => left.displayCode.localeCompare(right.displayCode)).map((client) => (
+                <label key={client.id} className="checkbox-card">
+                  <input type="checkbox" checked={preferenceClientIds.includes(client.id)} disabled={savingPreferences || saving} onChange={() => togglePreferenceClient(client.id)} />
+                  <span>{client.displayCode}{client.staffRelationships?.some((relationship) => relationship.staffId === preferenceStaffId && relationship.relationship === "PREFERRED") ? " · Already preferred" : ""}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div className="form-actions">
+          <button type="button" className="button button-primary" disabled={saving || savingPreferences || loading || !preferenceStaffId || preferenceClientIds.length === 0} onClick={() => void saveSharedStaffPreferences()}>
+            {savingPreferences ? "Saving preferences..." : `Save preference for ${preferenceClientIds.length} client(s)`}
+          </button>
+          <button type="button" className="button button-secondary" disabled={savingPreferences} onClick={() => setPreferenceClientIds([])}>Clear client selection</button>
+        </div>
+      </section>
+      <section className="section-card">
+        <div className="panel-heading-row">
+          <div>
             <h2>{editingId ? "Edit Team" : "Create Team"}</h2>
             <p>
-              Teams give staff and clients the same scheduling preference group.
-              The generator tries same-team matches first, but required coverage
-              remains more important than team preference.
+              A client belongs to one team, but a therapist can belong to multiple teams.
+              You can add Dezz (or any other staff member) to several teams for different clients.
+              The generator treats team matching as a preference, while coverage and availability
+              remain more important.
             </p>
           </div>
         </div>

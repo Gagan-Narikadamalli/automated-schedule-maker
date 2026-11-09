@@ -1,5 +1,5 @@
 export type SchedulerAiMode = "READ_ONLY" | "AUTONOMOUS";
-export type SchedulerAiProviderMode = "native" | "gateway";
+export type SchedulerAiProviderMode = "native" | "gateway" | "openai";
 export type SchedulerAiThinkingLevel = "low" | "high";
 
 export type SchedulerAiDateSource =

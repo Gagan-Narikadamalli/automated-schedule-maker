@@ -472,29 +472,21 @@ export async function POST(request: Request) {
       );
     }
 
-    const template = await ScheduleTemplate.findOneAndUpdate(
-      { locationId, dayOfWeek, name },
-      {
-        $set: {
-          locationId,
-          name,
-          dayOfWeek,
-          sourceType,
-          sourceName,
-          sourceDate,
-          styleNotes,
-          learningOnly,
-          learningProfile,
-          assignments,
-          active: true,
-        },
-      },
-      {
-        new: true,
-        upsert: true,
-        runValidators: true,
-      }
-    );
+    // Creating a template must never silently replace an existing saved template.
+    // Editing an existing template is handled only by the dedicated editor PUT route.
+    const template = await ScheduleTemplate.create({
+      locationId,
+      name,
+      dayOfWeek,
+      sourceType,
+      sourceName,
+      sourceDate,
+      styleNotes,
+      learningOnly,
+      learningProfile,
+      assignments,
+      active: true,
+    });
 
     await writeAuditLog({
       locationId,

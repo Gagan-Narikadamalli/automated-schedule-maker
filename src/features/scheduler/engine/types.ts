@@ -21,6 +21,7 @@ export type SchedulerStaff = {
   name: string;
   role: StaffRole;
   teamId?: string;
+  teamIds?: string[];
   serviceSetting?: ServiceSetting;
   availableSlots: string[];
   minimumDailyHours?: number;

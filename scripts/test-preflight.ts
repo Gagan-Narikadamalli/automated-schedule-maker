@@ -133,6 +133,50 @@ function testPartialBuildForecastFromConcurrentShortage() {
   assert.equal(readiness.shortageSlots.length, 1);
 }
 
+function testEffectiveStaffHoursRespectDailyAndWeeklyCaps() {
+  const dailyLimitedStaff = {
+    ...createStaff("daily-limited", [
+      "08:00", "08:30", "09:00", "09:30",
+      "10:00", "10:30", "11:00", "11:30",
+    ]),
+    maximumDailyHours: 3,
+    maximumWeeklyHours: 40,
+    scheduledWeeklyClientHoursBeforeDate: 10,
+  };
+  const dailyReadiness = calculateSchedulerReadiness(
+    createInput([dailyLimitedStaff], [createClient("client-daily", ["08:00", "08:30"])]),
+    READINESS_RULES
+  );
+  assert.equal(
+    dailyReadiness.staffAvailableHours,
+    3,
+    "Preflight must cap a four-hour shift at the configured three-hour daily service limit."
+  );
+
+  const weeklyLimitedStaff = {
+    ...createStaff("weekly-limited", [
+      "08:00", "08:30", "09:00", "09:30",
+      "10:00", "10:30", "11:00", "11:30",
+    ]),
+    maximumWeeklyHours: 40,
+    scheduledWeeklyClientHoursBeforeDate: 39.5,
+  };
+  const weeklyReadiness = calculateSchedulerReadiness(
+    createInput([weeklyLimitedStaff], [createClient("client-weekly", ["08:00", "08:30"])]),
+    READINESS_RULES
+  );
+  assert.equal(
+    weeklyReadiness.staffAvailableHours,
+    0.5,
+    "Preflight must use only the half-hour remaining under the weekly service-hour cap."
+  );
+  assert.equal(
+    weeklyReadiness.additionalLaborHoursNeeded,
+    0.5,
+    "The capacity forecast must report the remaining half-hour staffing gap."
+  );
+}
+
 function testNoClientsForecast() {
   const input = createInput(
     [createStaff("staff-1", ["08:00"])],
@@ -151,6 +195,7 @@ function testNoClientsForecast() {
 function runPreflightRegressionScenarios() {
   testCompleteBuildForecast();
   testPartialBuildForecastFromConcurrentShortage();
+  testEffectiveStaffHoursRespectDailyAndWeeklyCaps();
   testNoClientsForecast();
 
   console.log("Scheduler readiness regression scenarios passed.");
