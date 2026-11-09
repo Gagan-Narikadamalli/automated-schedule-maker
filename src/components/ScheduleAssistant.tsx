@@ -652,10 +652,11 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     }
   }
 
-  async function askScheduler(event?: FormEvent) {
+  async function askScheduler(event?: FormEvent, requestedMessage?: string) {
     event?.preventDefault();
     const selectedAttachments = attachments;
     const message =
+      requestedMessage?.trim() ||
       input.trim() ||
       (selectedAttachments.length > 0
         ? "Analyze the attached scheduler screenshot and tell me what it contains. Do not make changes yet."
@@ -1094,6 +1095,24 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
           </div>
 
           <form className={styles.composer} onSubmit={(event) => void askScheduler(event)}>
+            <div className={styles.quickActions}>
+              <button
+                type="button"
+                className={styles.generateDayButton}
+                disabled={working || !locationId}
+                onClick={() => {
+                  const requestContext = getRequestContext();
+                  void askScheduler(
+                    undefined,
+                    `Generate the schedule for the selected date ${requestContext.date} at ${requestContext.locationName}. Use the automatic scheduler and its saved templates, rules, staff/client availability, preferences, events, breaks, and call-outs. Then summarize coverage, remaining Unplaced assignments, uncovered time, and any warnings.`
+                  );
+                }}
+              >
+                <span aria-hidden="true">✦</span>
+                Generate selected day’s schedule
+              </button>
+              <small>Uses the calendar date selected above</small>
+            </div>
             {attachments.length > 0 && (
               <div className={styles.attachmentTray}>
                 {attachments.map((attachment, index) => (
