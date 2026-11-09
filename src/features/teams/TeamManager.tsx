@@ -22,6 +22,7 @@ type StaffRecord = {
   id: string;
   fullName: string;
   teamId: string | null;
+  teamIds?: string[];
   active: boolean;
   role: string;
 };
@@ -240,7 +241,9 @@ export function TeamManager() {
     setTeamColor(team.color);
     setSelectedStaffIds(
       activeStaff
-        .filter((staffMember) => staffMember.teamId === team.id)
+        .filter((staffMember) =>
+          (staffMember.teamIds?.length ? staffMember.teamIds : staffMember.teamId ? [staffMember.teamId] : []).includes(team.id)
+        )
         .map((staffMember) => staffMember.id)
     );
     setSelectedClientIds(
@@ -252,19 +255,16 @@ export function TeamManager() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  async function updateStaffTeam(staffId: string, teamId: string | null) {
+  async function updateStaffTeams(staffId: string, teamIds: string[]) {
     const response = await fetch(`/api/staff/${staffId}`, {
       method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ teamId }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ teamIds }),
     });
 
     const data = await readJson<{ error?: string }>(response);
-
     if (!response.ok) {
-      throw new Error(data.error || "A staff team assignment could not be saved.");
+      throw new Error(data.error || "Staff team memberships could not be saved.");
     }
   }
 
@@ -294,13 +294,17 @@ export function TeamManager() {
     const membershipUpdates: Promise<void>[] = [];
 
     for (const staffMember of activeStaff) {
+      const currentTeamIds = staffMember.teamIds?.length
+        ? staffMember.teamIds
+        : staffMember.teamId ? [staffMember.teamId] : [];
       const shouldBelongToTeam = desiredStaff.has(staffMember.id);
-      const currentlyBelongsToTeam = staffMember.teamId === teamId;
+      const currentlyBelongsToTeam = currentTeamIds.includes(teamId);
 
-      if (shouldBelongToTeam && !currentlyBelongsToTeam) {
-        membershipUpdates.push(updateStaffTeam(staffMember.id, teamId));
-      } else if (!shouldBelongToTeam && currentlyBelongsToTeam) {
-        membershipUpdates.push(updateStaffTeam(staffMember.id, null));
+      if (shouldBelongToTeam !== currentlyBelongsToTeam) {
+        const nextTeamIds = shouldBelongToTeam
+          ? [...currentTeamIds, teamId]
+          : currentTeamIds.filter((currentTeamId) => currentTeamId !== teamId);
+        membershipUpdates.push(updateStaffTeams(staffMember.id, nextTeamIds));
       }
     }
 
