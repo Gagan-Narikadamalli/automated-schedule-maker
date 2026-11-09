@@ -176,7 +176,7 @@ export async function PATCH(request: Request, context: RouteContext) {
         _id: undefined,
         locationId,
         teamId: staffMember.teamId ? String(staffMember.teamId) : null,
-        teamIds: Array.isArray(staffMember.teamIds)
+        teamIds: Array.isArray(staffMember.teamIds) && staffMember.teamIds.length > 0
           ? staffMember.teamIds.map((teamId: unknown) => String(teamId))
           : staffMember.teamId ? [String(staffMember.teamId)] : [],
       },
