@@ -313,11 +313,14 @@ export function scoreCandidate({
     score += rules.preferredStaffPriority;
   }
 
+  const staffTeamIds = staffMember.teamIds?.length
+    ? staffMember.teamIds
+    : staffMember.teamId ? [staffMember.teamId] : [];
+
   if (
     rules.preferSameTeam &&
-    staffMember.teamId &&
     client.teamId &&
-    staffMember.teamId === client.teamId
+    staffTeamIds.includes(client.teamId)
   ) {
     score += rules.sameTeamPriority;
   }
