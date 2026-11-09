@@ -322,7 +322,7 @@ export function TeamCardManager() {
       eyebrow: "DELETE TEAM",
       title: `Permanently delete ${team.name}?`,
       description:
-        "Staff and clients in this team will be moved to No team. Their profiles and schedules will remain.",
+        "Staff will be removed from this team only; any other team memberships will remain. Clients assigned to this team will become unassigned. Their profiles and schedules will remain.",
       actions: [
         {
           id: "delete",
