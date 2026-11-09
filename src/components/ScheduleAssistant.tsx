@@ -846,8 +846,8 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
               </button>
               <button
                 type="button"
-                className={provider === "gateway" ? styles.providerActive : ""}
-                aria-pressed={provider === "gateway"}
+                className={provider === "openai" ? styles.providerActive : ""}
+                aria-pressed={provider === "openai"}
                 disabled={working}
                 onClick={() => void changeProvider("openai")}
               >
@@ -864,7 +864,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
 
           <div className={styles.promptHint}>
             <span>
-              Ask naturally — capitalization and normal typos are okay. {provider === "gateway"
+              Ask naturally — capitalization and normal typos are okay. {provider === "openai"
                 ? "Paid AI uses OpenAI GPT-6.1 Sol and can also analyze schedule screenshots before you confirm changes."
                 : "Free AI handles text scheduling locally; switch to Paid AI for screenshots."} Use Saved prompts for more examples.
             </span>
