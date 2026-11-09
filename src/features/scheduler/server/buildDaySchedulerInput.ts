@@ -667,7 +667,7 @@ function mapStaff(
         teamId: staffMember.teamId
           ? String(staffMember.teamId)
           : undefined,
-        teamIds: Array.isArray(staffMember.teamIds)
+        teamIds: Array.isArray(staffMember.teamIds) && staffMember.teamIds.length > 0
           ? staffMember.teamIds.map((teamId: unknown) => String(teamId))
           : staffMember.teamId ? [String(staffMember.teamId)] : [],
         serviceSetting: normalizeServiceSetting(
