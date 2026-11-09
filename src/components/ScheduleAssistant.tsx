@@ -83,10 +83,17 @@ type SavedPromptGroup = {
 };
 
 function renderInlineMarkdown(value: string): ReactNode[] {
-  const tokenPattern = /(\*\*[^*]+\*\*|\*[^*]+\*|\x60[^\x60]+\x60)/g;
+  const tokenPattern = /(\\[[^\\]]+\\]\\(https?:\\/\\/[^)\\s]+\\)|\\*\\*[^*]+\\*\\*|~~[^~]+~~|\\*[^*]+\\*|\\x60[^\\x60]+\\x60)/g;
   return value.split(tokenPattern).filter(Boolean).map((part, index) => {
+    const linkMatch = part.match(/^\\[([^\\]]+)\\]\\((https?:\\/\\/[^)\\s]+)\\)$/);
+    if (linkMatch) {
+      return <a key={index} href={linkMatch[2]} target="_blank" rel="noreferrer">{linkMatch[1]}</a>;
+    }
     if (part.startsWith("**") && part.endsWith("**")) {
       return <strong key={index}>{part.slice(2, -2)}</strong>;
+    }
+    if (part.startsWith("~~") && part.endsWith("~~")) {
+      return <del key={index}>{part.slice(2, -2)}</del>;
     }
     if (part.startsWith("*") && part.endsWith("*")) {
       return <em key={index}>{part.slice(1, -1)}</em>;
@@ -99,48 +106,125 @@ function renderInlineMarkdown(value: string): ReactNode[] {
 }
 
 function renderMessageMarkdown(value: string): ReactNode {
-  const lines = value.replace(/\r\n?/g, "\n").split("\n");
+  const lines = value.replace(/\\r\\n?/g, "\\n").split("\\n");
   const blocks: ReactNode[] = [];
-  let listItems: string[] = [];
+  let index = 0;
 
-  const flushList = () => {
-    if (!listItems.length) return;
-    blocks.push(
-      <ul key={`list-${blocks.length}`}>
-        {listItems.map((item, index) => (
-          <li key={index}>{renderInlineMarkdown(item)}</li>
-        ))}
-      </ul>
-    );
-    listItems = [];
-  };
+  const isTableRow = (line: string) => /^\\s*\\|.*\\|\\s*$/.test(line);
+  const splitTableRow = (line: string) =>
+    line.trim().replace(/^\\|/, "").replace(/\\|$/, "").split("|").map((cell) => cell.trim());
+  const isTableDivider = (line: string) =>
+    isTableRow(line) && splitTableRow(line).every((cell) => /^:?-{3,}:?$/.test(cell));
 
-  lines.forEach((line, index) => {
-    const trimmed = line.trim();
-    const heading = trimmed.match(/^(#{1,4})\s+(.+)$/);
-    const listItem = trimmed.match(/^(?:[-*] |\d+[.)] )(.+)$/);
-
-    if (listItem) {
-      listItems.push(listItem[1]);
-      return;
+  while (index < lines.length) {
+    const trimmed = lines[index].trim();
+    if (!trimmed) {
+      index += 1;
+      continue;
     }
 
-    flushList();
-    if (!trimmed) return;
+    if (trimmed.startsWith("```")) {
+      const language = trimmed.slice(3).trim();
+      const codeLines: string[] = [];
+      index += 1;
+      while (index < lines.length && !lines[index].trim().startsWith("```")) {
+        codeLines.push(lines[index]);
+        index += 1;
+      }
+      if (index < lines.length) index += 1;
+      blocks.push(
+        <pre key={blocks.length} data-language={language || undefined}>
+          <code>{codeLines.join("\\n")}</code>
+        </pre>
+      );
+      continue;
+    }
 
+    const heading = trimmed.match(/^(#{1,4})\\s+(.+)$/);
     if (heading) {
       const level = heading[1].length;
       const children = renderInlineMarkdown(heading[2]);
-      if (level === 1) blocks.push(<h3 key={index}>{children}</h3>);
-      else if (level === 2) blocks.push(<h4 key={index}>{children}</h4>);
-      else blocks.push(<h5 key={index}>{children}</h5>);
-      return;
+      if (level === 1) blocks.push(<h3 key={blocks.length}>{children}</h3>);
+      else if (level === 2) blocks.push(<h4 key={blocks.length}>{children}</h4>);
+      else blocks.push(<h5 key={blocks.length}>{children}</h5>);
+      index += 1;
+      continue;
     }
 
-    blocks.push(<p key={index}>{renderInlineMarkdown(trimmed)}</p>);
-  });
+    if (/^(---+|\\*\\*\\*+|___+)$/.test(trimmed)) {
+      blocks.push(<hr key={blocks.length} />);
+      index += 1;
+      continue;
+    }
 
-  flushList();
+    if (isTableRow(trimmed) && index + 1 < lines.length && isTableDivider(lines[index + 1].trim())) {
+      const headers = splitTableRow(trimmed);
+      index += 2;
+      const rows: string[][] = [];
+      while (index < lines.length && isTableRow(lines[index].trim())) {
+        rows.push(splitTableRow(lines[index].trim()));
+        index += 1;
+      }
+      blocks.push(
+        <div className={styles.markdownTableWrap} key={blocks.length}>
+          <table>
+            <thead><tr>{headers.map((cell, cellIndex) => <th key={cellIndex}>{renderInlineMarkdown(cell)}</th>)}</tr></thead>
+            <tbody>
+              {rows.map((row, rowIndex) => (
+                <tr key={rowIndex}>
+                  {headers.map((_, cellIndex) => <td key={cellIndex}>{renderInlineMarkdown(row[cellIndex] ?? "")}</td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+      continue;
+    }
+
+    const unorderedItem = trimmed.match(/^[-*+]\\s+(.+)$/);
+    const orderedItem = trimmed.match(/^\\d+[.)]\\s+(.+)$/);
+    if (unorderedItem || orderedItem) {
+      const ordered = Boolean(orderedItem);
+      const items: string[] = [];
+      while (index < lines.length) {
+        const itemLine = lines[index].trim();
+        const match = ordered
+          ? itemLine.match(/^\\d+[.)]\\s+(.+)$/)
+          : itemLine.match(/^[-*+]\\s+(.+)$/);
+        if (!match) break;
+        items.push(match[1]);
+        index += 1;
+      }
+      const ListTag = ordered ? "ol" : "ul";
+      blocks.push(<ListTag key={blocks.length}>{items.map((item, itemIndex) => <li key={itemIndex}>{renderInlineMarkdown(item)}</li>)}</ListTag>);
+      continue;
+    }
+
+    if (trimmed.startsWith(">")) {
+      const quoteLines: string[] = [];
+      while (index < lines.length && lines[index].trim().startsWith(">")) {
+        quoteLines.push(lines[index].trim().replace(/^>\\s?/, ""));
+        index += 1;
+      }
+      blocks.push(<blockquote key={blocks.length}>{quoteLines.map((line, lineIndex) => <p key={lineIndex}>{renderInlineMarkdown(line)}</p>)}</blockquote>);
+      continue;
+    }
+
+    const paragraphLines = [trimmed];
+    index += 1;
+    while (
+      index < lines.length &&
+      lines[index].trim() &&
+      !/^(#{1,4}\\s+|[-*+]\\s+|\\d+[.)]\\s+|>|\\`\\`\\`|---+$|\\*\\*\\*+$|___+$)/.test(lines[index].trim()) &&
+      !(isTableRow(lines[index].trim()) && index + 1 < lines.length && isTableDivider(lines[index + 1].trim()))
+    ) {
+      paragraphLines.push(lines[index].trim());
+      index += 1;
+    }
+    blocks.push(<p key={blocks.length}>{renderInlineMarkdown(paragraphLines.join(" "))}</p>);
+  }
+
   return blocks;
 }
 
