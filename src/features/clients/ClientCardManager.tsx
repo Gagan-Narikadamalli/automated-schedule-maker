@@ -583,9 +583,9 @@ export function ClientCardManager() {
       relationshipsByStaffId.set(staffMember.id, relationship);
     }
 
-    const staffRelationships = Array.from(relationshipsByStaffId.entries())
-      .filter(([staffId]) => !activePairingStaffIds.has(staffId) || pairingStaff.some((member) => member.id === staffId))
-      .map(([staffId, relationship]) => ({ staffId, relationship }));
+    const staffRelationships = Array.from(relationshipsByStaffId.entries()).map(
+      ([staffId, relationship]) => ({ staffId, relationship })
+    );
 
     try {
       setSaveError("");
