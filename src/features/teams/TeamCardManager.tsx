@@ -388,7 +388,7 @@ export function TeamCardManager() {
           </div>
           <div className={cardStyles.summaryItem}>
             <span>Assigned staff</span>
-            <strong>{activeStaff.filter((item) => item.teamId).length}</strong>
+            <strong>{activeStaff.filter((item) => (item.teamIds?.length ? item.teamIds : item.teamId ? [item.teamId] : []).length > 0).length}</strong>
           </div>
           <div className={cardStyles.summaryItem}>
             <span>Assigned clients</span>
