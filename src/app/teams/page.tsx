@@ -9,7 +9,7 @@ export default function TeamsPage() {
         <SectionHeader
           eyebrow="TEAM MANAGEMENT"
           title="Teams"
-          description="Group staff and clients together, share team colors, and give the automatic scheduler a preferred matching structure before it fills remaining coverage."
+          description="Create optional operational groups. Use Client–Staff Assignments to manage shared therapist preferences independently for each client."
         />
 
         <TeamCardManager />
