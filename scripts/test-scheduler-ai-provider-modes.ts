@@ -129,7 +129,7 @@ assert.match(
   /DEFAULT_SCHEDULER_AI_PAID_MODEL = "gpt-6\.1-sol"/
 );
 const paidModelSelection = paidBase.slice(
-  paidBase.indexOf("const model ="),
+  paidBase.indexOf("const configuredModel ="),
   paidBase.indexOf("const autonomousWrites")
 );
 assert.match(paidModelSelection, /SCHEDULER_AI_PAID_MODEL/);
