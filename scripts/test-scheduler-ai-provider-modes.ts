@@ -181,7 +181,7 @@ assert.match(
   /provider === "native" \? "\/api\/ai\/native" : "\/api\/ai\/paid"/
 );
 assert.match(assistant, /changeProvider\("native"\)/);
-assert.match(assistant, /changeProvider\("gateway"\)/);
+assert.match(assistant, /changeProvider\("openai"\)/);
 assert.match(assistant, /Free AI/);
 assert.match(assistant, /Paid AI/);
 assert.match(
