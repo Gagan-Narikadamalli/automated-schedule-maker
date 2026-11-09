@@ -510,7 +510,9 @@ export function TeamManager() {
 
   function staffNamesForTeam(teamId: string): string {
     const names = activeStaff
-      .filter((staffMember) => staffMember.teamId === teamId)
+      .filter((staffMember) =>
+        (staffMember.teamIds?.length ? staffMember.teamIds : staffMember.teamId ? [staffMember.teamId] : []).includes(teamId)
+      )
       .map((staffMember) => staffMember.fullName);
 
     return names.length > 0 ? names.join(", ") : "None";
@@ -568,9 +570,10 @@ export function TeamManager() {
           <div>
             <h2>{editingId ? "Edit Team" : "Create Team"}</h2>
             <p>
-              Teams give staff and clients the same scheduling preference group.
-              The generator tries same-team matches first, but required coverage
-              remains more important than team preference.
+              A client belongs to one team, but a therapist can belong to multiple teams.
+              You can add Dezz (or any other staff member) to several teams for different clients.
+              The generator treats team matching as a preference, while coverage and availability
+              remain more important.
             </p>
           </div>
         </div>
