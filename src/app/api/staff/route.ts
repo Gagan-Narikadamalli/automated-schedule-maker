@@ -40,7 +40,7 @@ function serializeStaff(staffMember: Record<string, unknown>) {
     _id: undefined,
     locationId: String(staffMember.locationId),
     teamId: staffMember.teamId ? String(staffMember.teamId) : null,
-    teamIds: Array.isArray(staffMember.teamIds)
+    teamIds: Array.isArray(staffMember.teamIds) && staffMember.teamIds.length > 0
       ? staffMember.teamIds.map((teamId) => String(teamId))
       : staffMember.teamId ? [String(staffMember.teamId)] : [],
   };
