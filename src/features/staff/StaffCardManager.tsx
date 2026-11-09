@@ -227,9 +227,9 @@ export function StaffCardManager() {
         return true;
       }
 
-      const teamName = staffMember.teamId
-        ? teamNameById.get(staffMember.teamId) ?? ""
-        : "";
+      const teamName = (staffMember.teamIds?.length ? staffMember.teamIds : staffMember.teamId ? [staffMember.teamId] : [])
+        .map((teamId) => teamNameById.get(teamId) ?? "")
+        .join(", ");
 
       return [
         staffMember.fullName,
@@ -637,9 +637,9 @@ export function StaffCardManager() {
         ) : (
           <div className={cardStyles.grid}>
             {visibleStaff.map((staffMember) => {
-              const teamName = staffMember.teamId
-                ? teamNameById.get(staffMember.teamId) ?? "Unknown team"
-                : "No team";
+              const teamName = (staffMember.teamIds?.length ? staffMember.teamIds : staffMember.teamId ? [staffMember.teamId] : [])
+                .map((teamId) => teamNameById.get(teamId) ?? "Unknown team")
+                .join(", ") || "No team";
 
               return (
                 <article
