@@ -24,7 +24,7 @@
     "test:native-ai-isolation": "tsx scripts/test-scheduler-ai-provider-modes.ts"
   },
   "dependencies": {
-    "ai": "^7.0.123",
+    "ai": "^7.0.165",
     "mongoose": "^8.9.0",
     "next": "^16.0.0",
     "react": "^19.0.0",
