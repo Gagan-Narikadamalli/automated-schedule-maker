@@ -903,9 +903,9 @@ export function StaffManager() {
                       <td>{staffMember.role.replaceAll("_", " ")}</td>
                       <td>{staffMember.employeeType.replaceAll("_", " ")}</td>
                       <td>
-                        {staffMember.teamId
-                          ? teamNameById.get(staffMember.teamId) || "Unknown team"
-                          : "Unassigned"}
+                        {(staffMember.teamIds?.length ? staffMember.teamIds : staffMember.teamId ? [staffMember.teamId] : [])
+                          .map((teamId) => teamNameById.get(teamId) || "Unknown team")
+                          .join(", ") || "Unassigned"}
                       </td>
                       <td>
                         {staffMember.shiftPatterns?.length
