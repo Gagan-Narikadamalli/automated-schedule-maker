@@ -83,9 +83,9 @@ type SavedPromptGroup = {
 };
 
 function renderInlineMarkdown(value: string): ReactNode[] {
-  const tokenPattern = /(\\[[^\\]]+\\]\\(https?:\\/\\/[^)\\s]+\\)|\\*\\*[^*]+\\*\\*|~~[^~]+~~|\\*[^*]+\\*|\\x60[^\\x60]+\\x60)/g;
+  const tokenPattern = /(\[[^\]]+\]\(https?:\/\/[^)\s]+\)|\*\*[^*]+\*\*|~~[^~]+~~|\*[^*]+\*|\x60[^\x60]+\x60)/g;
   return value.split(tokenPattern).filter(Boolean).map((part, index) => {
-    const linkMatch = part.match(/^\\[([^\\]]+)\\]\\((https?:\\/\\/[^)\\s]+)\\)$/);
+    const linkMatch = part.match(/^\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)$/);
     if (linkMatch) {
       return <a key={index} href={linkMatch[2]} target="_blank" rel="noreferrer">{linkMatch[1]}</a>;
     }
@@ -98,7 +98,7 @@ function renderInlineMarkdown(value: string): ReactNode[] {
     if (part.startsWith("*") && part.endsWith("*")) {
       return <em key={index}>{part.slice(1, -1)}</em>;
     }
-    if (part.startsWith("`") && part.endsWith("`")) {
+    if (part.startsWith(String.fromCharCode(96)) && part.endsWith(String.fromCharCode(96))) {
       return <code key={index}>{part.slice(1, -1)}</code>;
     }
     return part;
@@ -106,13 +106,14 @@ function renderInlineMarkdown(value: string): ReactNode[] {
 }
 
 function renderMessageMarkdown(value: string): ReactNode {
-  const lines = value.replace(/\\r\\n?/g, "\\n").split("\\n");
+  const lines = value.replace(/\r\n?/g, "\n").split("\n");
   const blocks: ReactNode[] = [];
   let index = 0;
+  const fence = String.fromCharCode(96).repeat(3);
 
-  const isTableRow = (line: string) => /^\\s*\\|.*\\|\\s*$/.test(line);
+  const isTableRow = (line: string) => /^\s*\|.*\|\s*$/.test(line);
   const splitTableRow = (line: string) =>
-    line.trim().replace(/^\\|/, "").replace(/\\|$/, "").split("|").map((cell) => cell.trim());
+    line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
   const isTableDivider = (line: string) =>
     isTableRow(line) && splitTableRow(line).every((cell) => /^:?-{3,}:?$/.test(cell));
 
@@ -123,24 +124,24 @@ function renderMessageMarkdown(value: string): ReactNode {
       continue;
     }
 
-    if (trimmed.startsWith("```")) {
+    if (trimmed.startsWith(fence)) {
       const language = trimmed.slice(3).trim();
       const codeLines: string[] = [];
       index += 1;
-      while (index < lines.length && !lines[index].trim().startsWith("```")) {
+      while (index < lines.length && !lines[index].trim().startsWith(fence)) {
         codeLines.push(lines[index]);
         index += 1;
       }
       if (index < lines.length) index += 1;
       blocks.push(
         <pre key={blocks.length} data-language={language || undefined}>
-          <code>{codeLines.join("\\n")}</code>
+          <code>{codeLines.join("\n")}</code>
         </pre>
       );
       continue;
     }
 
-    const heading = trimmed.match(/^(#{1,4})\\s+(.+)$/);
+    const heading = trimmed.match(/^(#{1,4})\s+(.+)$/);
     if (heading) {
       const level = heading[1].length;
       const children = renderInlineMarkdown(heading[2]);
@@ -151,7 +152,7 @@ function renderMessageMarkdown(value: string): ReactNode {
       continue;
     }
 
-    if (/^(---+|\\*\\*\\*+|___+)$/.test(trimmed)) {
+    if (/^(---+|\*\*\*+|___+)$/.test(trimmed)) {
       blocks.push(<hr key={blocks.length} />);
       index += 1;
       continue;
@@ -182,16 +183,16 @@ function renderMessageMarkdown(value: string): ReactNode {
       continue;
     }
 
-    const unorderedItem = trimmed.match(/^[-*+]\\s+(.+)$/);
-    const orderedItem = trimmed.match(/^\\d+[.)]\\s+(.+)$/);
+    const unorderedItem = trimmed.match(/^[-*+]\s+(.+)$/);
+    const orderedItem = trimmed.match(/^\d+[.)]\s+(.+)$/);
     if (unorderedItem || orderedItem) {
       const ordered = Boolean(orderedItem);
       const items: string[] = [];
       while (index < lines.length) {
         const itemLine = lines[index].trim();
         const match = ordered
-          ? itemLine.match(/^\\d+[.)]\\s+(.+)$/)
-          : itemLine.match(/^[-*+]\\s+(.+)$/);
+          ? itemLine.match(/^\d+[.)]\s+(.+)$/)
+          : itemLine.match(/^[-*+]\s+(.+)$/);
         if (!match) break;
         items.push(match[1]);
         index += 1;
@@ -204,7 +205,7 @@ function renderMessageMarkdown(value: string): ReactNode {
     if (trimmed.startsWith(">")) {
       const quoteLines: string[] = [];
       while (index < lines.length && lines[index].trim().startsWith(">")) {
-        quoteLines.push(lines[index].trim().replace(/^>\\s?/, ""));
+        quoteLines.push(lines[index].trim().replace(/^>\s?/, ""));
         index += 1;
       }
       blocks.push(<blockquote key={blocks.length}>{quoteLines.map((line, lineIndex) => <p key={lineIndex}>{renderInlineMarkdown(line)}</p>)}</blockquote>);
@@ -216,7 +217,8 @@ function renderMessageMarkdown(value: string): ReactNode {
     while (
       index < lines.length &&
       lines[index].trim() &&
-      !/^(#{1,4}\\s+|[-*+]\\s+|\\d+[.)]\\s+|>|\\`\\`\\`|---+$|\\*\\*\\*+$|___+$)/.test(lines[index].trim()) &&
+      !/^(#{1,4}\s+|[-*+]\s+|\d+[.)]\s+|>|---+$|\*\*\*+$|___+$)/.test(lines[index].trim()) &&
+      !lines[index].trim().startsWith(fence) &&
       !(isTableRow(lines[index].trim()) && index + 1 < lines.length && isTableDivider(lines[index + 1].trim()))
     ) {
       paragraphLines.push(lines[index].trim());
