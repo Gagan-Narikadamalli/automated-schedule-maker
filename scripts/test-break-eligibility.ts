@@ -544,14 +544,14 @@ function testCaregiverCanTakeBreakInMiddleOfLongNap() {
   const napBreak = result.assignments.find(
     (assignment) =>
       assignment.staffId === bt.id &&
-      assignment.assignmentType === "BREAK" &&
+      assignment.assignmentType === "BREAK_NAP" &&
       assignment.startTime === "12:30"
   );
   assert.ok(
     napBreak,
-    "The caregiver should be able to take a break in the middle of a multi-hour nap when assigned at its boundaries."
+    "The caregiver should be able to take a combined break/nap in the middle of a multi-hour nap when assigned at its boundaries."
   );
-  assert.equal(napBreak.clientId, undefined);
+  assert.equal(napBreak.clientId, client.id);
   assert.match(napBreak.note ?? "", /nap for LongNapClient/);
 }
 
