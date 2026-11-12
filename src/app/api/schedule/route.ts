@@ -42,6 +42,18 @@ type Conflict = {
 
 type PlainDatabaseRecord = Record<string, any>;
 
+function staffDisplayRoleOrder(role: unknown): number {
+  switch (String(role ?? "").toUpperCase()) {
+    case "BT":
+    case "RBT": return 0;
+    case "INTERN": return 1;
+    case "OFFICE_MANAGER": return 2;
+    case "BCBA": return 3;
+    case "DIRECTOR": return 4;
+    default: return 5;
+  }
+}
+
 function firstNameOnly(value: unknown): string {
   return String(value ?? "").trim().split(/\s+/)[0] ?? "";
 }
@@ -128,6 +140,11 @@ export async function GET(request: Request) {
 
     const plainStaffDocuments =
       staffDocuments as unknown as PlainDatabaseRecord[];
+    plainStaffDocuments.sort((left, right) => {
+      const roleDifference = staffDisplayRoleOrder(left.role) - staffDisplayRoleOrder(right.role);
+      if (roleDifference !== 0) return roleDifference;
+      return String(left.fullName ?? "").localeCompare(String(right.fullName ?? ""));
+    });
     const plainClientDocuments =
       clientDocuments as unknown as PlainDatabaseRecord[];
     const plainAssignments =
