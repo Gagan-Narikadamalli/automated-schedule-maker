@@ -2,6 +2,7 @@ import { jsonSchema, tool } from "./schedulerToolDefinition";
 
 import { PUT as updateScheduleBatch } from "@/app/api/schedule/batch/route";
 import { POST as copyScheduleDay } from "@/app/api/schedule/copy/route";
+import { DELETE as clearScheduleDay } from "@/app/api/schedule/clear-day/route";
 import { POST as generateScheduleDay } from "@/app/api/schedule/generate/route";
 import { POST as generateScheduleRange } from "@/app/api/schedule/generate-range/route";
 import { POST as repairScheduleDay } from "@/app/api/schedule/repair/route";
@@ -183,7 +184,7 @@ function getWorkWeek(dateText: string): { startDate: string; endDate: string } {
 
 async function invokeJson(
   handler: (request: Request) => Promise<Response>,
-  method: "POST" | "PUT" | "PATCH",
+  method: "POST" | "PUT" | "PATCH" | "DELETE",
   body: JsonRecord
 ): Promise<JsonRecord> {
   const response = await handler(
@@ -300,6 +301,7 @@ function assignmentIsProtected(record: JsonRecord | null | undefined): boolean {
 
 export const SCHEDULER_WRITE_TOOL_NAMES = new Set([
   "generate_schedule",
+  "clear_schedule_day",
   "repair_schedule",
   "copy_schedule_day",
   "record_call_out",
@@ -325,6 +327,14 @@ export function createSchedulerWriteTools(context: SchedulerAiContext) {
         }
         return invokeJson(generateScheduleDay, "POST", { locationId, date });
       },
+    }),
+
+    clear_schedule_day: tool({
+      description:
+        "Permanently clear the selected date's schedule: delete every saved schedule cell and every Unplaced record for that date. This does not delete staff/client profiles, shifts, attendance, call-outs, or saved nap/speech events. Use only when the user explicitly asks to delete, clear, or completely remove the entire day's schedule. This action is destructive and requires explicit user intent.",
+      inputSchema: noInputSchema,
+      execute: async () =>
+        invokeJson(clearScheduleDay, "DELETE", { locationId, date }),
     }),
 
     repair_schedule: tool({
