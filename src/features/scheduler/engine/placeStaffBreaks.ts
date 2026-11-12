@@ -106,8 +106,6 @@ function roleBreakOrder(role: StaffRole): number {
       return 0;
     case "INTERN":
       return 1;
-    case "OTHER":
-      return 2;
     case "OFFICE_MANAGER":
       return 2;
     case "BCBA":
@@ -129,8 +127,10 @@ function reliefRolePriority(role: StaffRole): number {
       return 1;
     case "INTERN":
       return 2;
-    case "OTHER":
+    case "DIRECTOR":
       return 3;
+    case "OTHER":
+      return 4;
     case "BT":
     case "RBT":
       return 4;
