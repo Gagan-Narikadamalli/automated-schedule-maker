@@ -48,7 +48,7 @@ type StaffInput = {
   fullName?: string;
   startDate?: string;
   endDate?: string | null;
-  role?: "BT" | "RBT" | "INTERN" | "BCBA" | "OFFICE_MANAGER" | "OTHER";
+  role?: "BT" | "RBT" | "INTERN" | "BCBA" | "OFFICE_MANAGER" | "DIRECTOR" | "OTHER";
   employeeType?: "FULL_TIME" | "PART_TIME";
   team?: string | null;
   color?: string;
@@ -178,7 +178,7 @@ const staffSchema = jsonSchema<StaffInput>({
     fullName: { type: "string" },
     startDate: { type: "string", description: "YYYY-MM-DD" },
     endDate: { type: ["string", "null"] },
-    role: { type: "string", enum: ["BT", "RBT", "INTERN", "BCBA", "OFFICE_MANAGER", "OTHER"] },
+    role: { type: "string", enum: ["BT", "RBT", "INTERN", "OFFICE_MANAGER", "BCBA", "DIRECTOR", "OTHER"] },
     employeeType: { type: "string", enum: ["FULL_TIME", "PART_TIME"] },
     team: { type: ["string", "null"], description: "Team ID or unique team name." },
     color: { type: "string" },
