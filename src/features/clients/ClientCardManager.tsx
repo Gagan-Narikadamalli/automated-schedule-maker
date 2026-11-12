@@ -567,10 +567,6 @@ export function ClientCardManager() {
         item.relationship,
       ])
     );
-    const activePairingStaffIds = new Set(
-      pairingStaff.map((staffMember) => staffMember.id)
-    );
-
     // Preserve relationships for staff outside the active BT/RBT/Intern roster.
     for (const staffMember of pairingStaff) {
       let relationship: Relationship = "ALLOWED";
