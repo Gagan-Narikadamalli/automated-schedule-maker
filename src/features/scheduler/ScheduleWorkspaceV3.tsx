@@ -333,14 +333,9 @@ function buildGrid(
       assignment.assignmentType === "BREAK_NAP" &&
       clientIdFromAssignment(assignment) === clientEvent.clientId
     );
-    const breaksAtNapTime = assignments.filter((assignment) =>
-      assignment.startTime === clientEvent.startTime &&
-      assignment.assignmentType === "BREAK"
-    );
     const candidateStaffIds = [
       ...new Set([
         ...explicitlyLinkedBreaks.map((assignment) => String(assignment.staffId)),
-        ...breaksAtNapTime.map((assignment) => String(assignment.staffId)),
         ...adjacentAssignments.map((assignment) => String(assignment.staffId)),
         ...nearestClientAssignments.map((assignment) => String(assignment.staffId)),
       ]),
@@ -349,8 +344,12 @@ function buildGrid(
       .map((staffId) => staffIndexById.get(staffId))
       .find((candidateColumn) => {
         if (candidateColumn === undefined) return false;
-        const cellType = grid[eventRow][candidateColumn].assignmentType;
-        return ["EMPTY", "BREAK", "BREAK_NAP", "NAP"].includes(cellType);
+        const candidateCell = grid[eventRow][candidateColumn];
+        if (["EMPTY", "BREAK", "NAP"].includes(candidateCell.assignmentType)) {
+          return true;
+        }
+        return candidateCell.assignmentType === "BREAK_NAP" &&
+          candidateCell.clientId === clientEvent.clientId;
       });
     if (column === undefined) continue;
 
