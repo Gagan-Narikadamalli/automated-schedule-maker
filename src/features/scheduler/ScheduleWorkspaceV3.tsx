@@ -314,8 +314,33 @@ function buildGrid(
         assignment.assignmentType === "CLIENT_1_TO_1" &&
         clientIdFromAssignment(assignment) === clientEvent.clientId
       ));
-    const pairedStaffId = adjacentAssignments[0]?.staffId;
-    const column = pairedStaffId ? staffIndexById.get(String(pairedStaffId)) : undefined;
+
+    // If a relief handoff or a short schedule segment means the client has no
+    // assignment in the immediately adjacent slot, use the nearest same-day
+    // pairing to keep the saved nap visible rather than leaving a misleading
+    // empty hole in the therapist grid.
+    const nearestClientAssignments = assignments
+      .filter((assignment) =>
+        assignment.assignmentType === "CLIENT_1_TO_1" &&
+        clientIdFromAssignment(assignment) === clientEvent.clientId
+      )
+      .sort((left, right) =>
+        Math.abs(DAILY_TIME_SLOTS.findIndex((slot) => slot.startTime === left.startTime) - eventRow) -
+        Math.abs(DAILY_TIME_SLOTS.findIndex((slot) => slot.startTime === right.startTime) - eventRow)
+      );
+    const candidateStaffIds = [
+      ...new Set([
+        ...adjacentAssignments.map((assignment) => String(assignment.staffId)),
+        ...nearestClientAssignments.map((assignment) => String(assignment.staffId)),
+      ]),
+    ];
+    const column = candidateStaffIds
+      .map((staffId) => staffIndexById.get(staffId))
+      .find((candidateColumn) => {
+        if (candidateColumn === undefined) return false;
+        const cellType = grid[eventRow][candidateColumn].assignmentType;
+        return ["EMPTY", "BREAK", "BREAK_NAP", "NAP"].includes(cellType);
+      });
     if (column === undefined) continue;
 
     const existingCell = grid[eventRow][column];
@@ -324,6 +349,14 @@ function buildGrid(
         ...existingCell,
         text: `Break + Nap · ${clientEvent.clientCode}`,
         assignmentType: "BREAK_NAP",
+        clientId: clientEvent.clientId,
+        clientCode: clientEvent.clientCode,
+        color: "#FFF3D6",
+      };
+    } else if (existingCell.assignmentType === "BREAK_NAP") {
+      grid[eventRow][column] = {
+        ...existingCell,
+        text: `Break + Nap · ${clientEvent.clientCode}`,
         clientId: clientEvent.clientId,
         clientCode: clientEvent.clientCode,
         color: "#FFF3D6",
