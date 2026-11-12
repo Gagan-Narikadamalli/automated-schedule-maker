@@ -328,8 +328,19 @@ function buildGrid(
         Math.abs(DAILY_TIME_SLOTS.findIndex((slot) => slot.startTime === left.startTime) - eventRow) -
         Math.abs(DAILY_TIME_SLOTS.findIndex((slot) => slot.startTime === right.startTime) - eventRow)
       );
+    const explicitlyLinkedBreaks = assignments.filter((assignment) =>
+      assignment.startTime === clientEvent.startTime &&
+      assignment.assignmentType === "BREAK_NAP" &&
+      clientIdFromAssignment(assignment) === clientEvent.clientId
+    );
+    const breaksAtNapTime = assignments.filter((assignment) =>
+      assignment.startTime === clientEvent.startTime &&
+      assignment.assignmentType === "BREAK"
+    );
     const candidateStaffIds = [
       ...new Set([
+        ...explicitlyLinkedBreaks.map((assignment) => String(assignment.staffId)),
+        ...breaksAtNapTime.map((assignment) => String(assignment.staffId)),
         ...adjacentAssignments.map((assignment) => String(assignment.staffId)),
         ...nearestClientAssignments.map((assignment) => String(assignment.staffId)),
       ]),
