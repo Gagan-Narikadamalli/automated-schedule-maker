@@ -1682,7 +1682,7 @@ export function ScheduleGridEnhanced({
               {columns.map((column, columnIndex) => (
                 <th
                   key={column.id}
-                  className={`schedule-staff-heading ${column.temporary ? styles.scratchHeader : ""} ${columnIndex === staff.length ? styles.scratchDivider : ""}`}
+                  className={`schedule-staff-heading ${column.temporary ? styles.scratchHeader : ""} ${columnIndex === staff.length ? styles.scratchDivider : ""} ${manualMode && !column.temporary ? styles.draggableStaffHeader : ""} ${draggedStaffColumnId === column.id ? styles.draggingStaffHeader : ""}`}
                   title={column.temporary ? "Temporary scratch space. Scratch cells are not saved to MongoDB." : manualMode ? "Drag this therapist name to move the entire column. Available in Manual Mode." : undefined}
                   draggable={manualMode && !column.temporary && !saving}
                   onDragStart={(event) => {
