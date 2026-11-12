@@ -109,9 +109,13 @@ function roleBreakOrder(role: StaffRole): number {
     case "OTHER":
       return 2;
     case "OFFICE_MANAGER":
-      return 3;
+      return 2;
     case "BCBA":
+      return 3;
+    case "DIRECTOR":
       return 4;
+    case "OTHER":
+      return 5;
     default:
       return 5;
   }
