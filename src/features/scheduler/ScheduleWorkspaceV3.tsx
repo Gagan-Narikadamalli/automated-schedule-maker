@@ -1215,7 +1215,7 @@ export function ScheduleWorkspaceV3() {
             Minimal Fix
           </button>
           <button type="button" className="button button-secondary" disabled={working || loading} onClick={() => setShowCopyPanel((open) => !open)}>Copy Day</button>
-          <button type="button" className="button button-danger" disabled={working || loading || demoMode} onClick={() => void requestClearDay()} title="Delete every saved assignment and Unplaced record for the selected date.">Delete Day Schedule</button>
+          <button type="button" className="button button-warning" disabled={working || loading || demoMode} onClick={() => void requestClearDay()} title="Delete every saved assignment and Unplaced record for the selected date.">Delete Day Schedule</button>
         </div>
         <div className="toolbar-group">
           <button type="button" className={`button ${manualMode ? "button-warning" : "button-secondary"}`} disabled={working || loading || staff.length === 0} onClick={toggleManualMode}>Manual Mode: {manualMode ? "On" : "Off"}</button>
