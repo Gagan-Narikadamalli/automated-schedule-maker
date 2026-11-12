@@ -946,6 +946,42 @@ export function ScheduleWorkspaceV3() {
     }
   }
 
+  async function requestClearDay() {
+    if (demoMode) {
+      setStatusMessage("Clearing a saved clinic schedule is available only with live clinic data.");
+      return;
+    }
+    const confirmed = window.confirm(
+      `Completely delete the saved schedule for ${selectedDate}? This removes every schedule cell and every Unplaced record for this date. Staff shifts, attendance, call-outs, and saved nap/speech events will remain.`
+    );
+    if (!confirmed) return;
+
+    try {
+      setWorking(true);
+      setStatusMessage(`Clearing every saved schedule assignment for ${selectedDate}...`);
+      const response = await fetch("/api/schedule/clear-day", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ locationId, date: selectedDate }),
+      });
+      const data = await readJson<{
+        success?: boolean;
+        deletedAssignmentCount?: number;
+        deletedUnplacedCount?: number;
+        error?: string;
+      }>(response);
+      if (!response.ok) throw new Error(data.error || "The schedule could not be cleared.");
+      await loadSchedule();
+      setStatusMessage(
+        `Cleared ${data.deletedAssignmentCount ?? 0} schedule cell(s) and ${data.deletedUnplacedCount ?? 0} Unplaced record(s) for ${selectedDate}. The date is now empty and ready for a fresh generation.`
+      );
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "The schedule could not be cleared.");
+    } finally {
+      setWorking(false);
+    }
+  }
+
   async function requestAutoGenerate() {
     if (demoMode) {
       loadDemoSchedule();
@@ -1146,6 +1182,7 @@ export function ScheduleWorkspaceV3() {
             Minimal Fix
           </button>
           <button type="button" className="button button-secondary" disabled={working || loading} onClick={() => setShowCopyPanel((open) => !open)}>Copy Day</button>
+          <button type="button" className="button button-danger" disabled={working || loading || demoMode} onClick={() => void requestClearDay()} title="Delete every saved assignment and Unplaced record for the selected date.">Delete Day Schedule</button>
         </div>
         <div className="toolbar-group">
           <button type="button" className={`button ${manualMode ? "button-warning" : "button-secondary"}`} disabled={working || loading || staff.length === 0} onClick={toggleManualMode}>Manual Mode: {manualMode ? "On" : "Off"}</button>
