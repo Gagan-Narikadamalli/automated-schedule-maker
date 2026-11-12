@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import {
   forbiddenResponse,
@@ -133,7 +134,12 @@ export async function POST(request: Request) {
       workbookTraining.input
     );
 
-    const schedulerInput = historicalTraining.input;
+    const schedulerInput = {
+      ...historicalTraining.input,
+      // Vary equal-score staff choices on every explicit full-day generation.
+      // Hard constraints, preferred pairings, continuity, and role tiers remain stronger.
+      generationSeed: randomUUID(),
+    };
     const readiness = calculateSchedulerReadiness(
       schedulerInput,
       dayData.extendedRules
