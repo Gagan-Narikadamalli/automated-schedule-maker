@@ -10,7 +10,6 @@ type StaffRole =
   | "BT"
   | "RBT"
   | "INTERN"
-  | "BCBA"
   | "OFFICE_MANAGER"
   | "BCBA"
   | "DIRECTOR"
