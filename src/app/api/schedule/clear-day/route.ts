@@ -29,7 +29,7 @@ export async function DELETE(request: Request) {
     const locationId = body.locationId?.trim();
     const date = body.date?.trim();
 
-    if (!locationId || !date || !/^\\d{4}-\\d{2}-\\d{2}$/.test(date)) {
+    if (!locationId || !date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return NextResponse.json(
         { error: "A location and valid YYYY-MM-DD date are required." },
         { status: 400 }
