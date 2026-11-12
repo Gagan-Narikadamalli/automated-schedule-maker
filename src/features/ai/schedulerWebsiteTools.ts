@@ -871,7 +871,7 @@ export function createSchedulerWebsiteTools(context: SchedulerAiContext) {
 
     manage_scheduler_event: tool({
       description:
-        "Add or remove nap/speech scheduler events for a client. Supports a single selected date or a recurring weekday series. For removal, you may provide a session/series ID or identify the client/time so the tool can resolve the saved event.",
+        "Add or remove saved Nap/Speech events for a client. A Nap event defines a flexible time window; the scheduler selects exactly one 30-minute nap slot from that window and removes client 1:1 demand only for that slot. The paired therapist may take their break in that same slot as one combined BREAK_NAP cell linked to the client. A break alone never creates a nap. Supports one date or a recurring weekday series. For removal, provide a session/series ID or identify the client/time.",
       inputSchema: eventSchema,
       execute: async (input) => {
         if (input.action === "ADD") {
