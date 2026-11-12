@@ -828,7 +828,7 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     };
     window.addEventListener("scheduler:ai-generate", handleAiGenerateRequest);
     return () => window.removeEventListener("scheduler:ai-generate", handleAiGenerateRequest);
-  }, []);
+  }, [askScheduler]);
 
   async function saveFeedback(
     message: ChatMessage,
