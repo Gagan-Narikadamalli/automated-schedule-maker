@@ -314,7 +314,7 @@ export function createSchedulerWriteTools(context: SchedulerAiContext) {
   return {
     generate_schedule: tool({
       description:
-        "Generate the selected day or its Monday-Friday work week using the existing deterministic scheduler engine. Manual/locked assignments are preserved by the scheduler. Use when the user asks to generate, regenerate, auto-fill, build, or optimize the schedule.",
+        "Generate the selected day as a fresh full-day rebuild, or generate its Monday-Friday work week. The day run replaces all unlocked AUTO/TEMPLATE/COPIED assignments and recalculates every client block and staff break from current shifts, attendance, call-outs, saved Nap/Speech events, relationships, templates, and rules. Equal-score therapist choices can vary on each explicit generation. Manual/locked assignments remain protected. Use this for generate/regenerate/build/optimize; do not use Minimal Fix for a generation request.",
       inputSchema: generateSchema,
       execute: async ({ scope }) => {
         if (scope === "WORK_WEEK") {
@@ -440,7 +440,7 @@ export function createSchedulerWriteTools(context: SchedulerAiContext) {
 
     edit_schedule_cells: tool({
       description:
-        "Set, move, replace, or clear one or more 30-minute schedule cells on the selected date. Staff and clients may be referenced by IDs or human-readable names/codes. By default this refuses to alter locked/manual cells and refuses scheduler-rule conflicts. Only enable override flags when the user explicitly asked for that override.",
+        "Set, move, replace, or clear one or more 30-minute schedule cells on the selected date. Use BREAK_NAP for ONE combined therapist break taken during that client's saved 30-minute nap slot; include the nap client association. Do not create a separate BREAK plus NAP staff assignment for the same therapist/time. Staff and clients may be referenced by IDs or human-readable names/codes. By default this refuses to alter locked/manual cells and refuses scheduler-rule conflicts. Only enable override flags when the user explicitly asked for that override.",
       inputSchema: editCellsSchema,
       execute: async ({ changes, allowLockedOverride = false, allowRuleOverride = false }) => {
         if (!Array.isArray(changes) || changes.length === 0 || changes.length > 40) {
