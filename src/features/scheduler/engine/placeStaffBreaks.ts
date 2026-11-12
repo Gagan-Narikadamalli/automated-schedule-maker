@@ -270,10 +270,13 @@ function createBreakAssignment(
   return {
     id: `break-${staffMember.id}-${startTime}`,
     staffId: staffMember.id,
+    clientId: fixedEvent?.client.id,
     startTime,
-    assignmentType: "BREAK",
+    assignmentType: fixedEvent?.assignmentType ?? "BREAK",
     source: "AUTO",
-    locked: true,
+    // Automatic breaks are regenerated after coverage and must be replaceable
+    // on the next Auto Generate or Repair run.
+    locked: false,
     note: `Automatically reserved staff break.${eventNote}`,
   };
 }
