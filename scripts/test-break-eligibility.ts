@@ -179,13 +179,14 @@ function testNapBreakForRegularBTWinsOverEmptyGenericSlot() {
     schedulerRules: { ...SCHEDULER_RULES, preventSameStaffClientRepeatSameDay: false },
   });
   const btBreaks = result.assignments.filter(
-    (a) => a.staffId === "bt" && a.assignmentType === "BREAK"
+    (a) => a.staffId === "bt" && ["BREAK", "BREAK_NAP", "BREAK_SPEECH"].includes(a.assignmentType)
   );
   assert.equal(btBreaks.length, 1, "BT must get exactly one break");
-  assert.equal(btBreaks[0].clientId, undefined, "Automatic breaks must not encode a nap client");
+  assert.equal(btBreaks[0].assignmentType, "BREAK_NAP", "A break taken during the paired client's nap should be represented as a combined event");
+  assert.equal(btBreaks[0].clientId, "ZiBo", "The combined break must retain its linked nap client");
   assert.ok(
     ["12:00", "12:30"].includes(btBreaks[0].startTime),
-    "A nap window may still be the preferred time for the plain BREAK"
+    "The staff break should align with the client's nap window when possible"
   );
   assert.equal(result.assignments.filter(a => a.assignmentType === "CLIENT_1_TO_1" &&
     a.clientId === "ZiBo" && a.staffId === "bt").length, 3,
@@ -257,8 +258,10 @@ function testReliefSwapNextToNapIsPreferred() {
   const btBreak = result.assignments.find(
     (assignment) =>
       assignment.staffId === bt.id &&
-      assignment.assignmentType === "BREAK"
+      ["BREAK", "BREAK_NAP", "BREAK_SPEECH"].includes(assignment.assignmentType)
   );
+  assert.equal(btBreak?.assignmentType, "BREAK_NAP", "A break aligned with the nap must retain the combined event type");
+  assert.equal(btBreak?.clientId, napClient.id, "The combined break must be linked to the correct client");
   assert.equal(
     btBreak?.startTime,
     "12:30",
@@ -340,7 +343,7 @@ function testManagerIsPreferredReliefForBtLunch() {
     result.assignments.some(
       (assignment) =>
         assignment.staffId === bt.id &&
-        assignment.assignmentType === "BREAK" &&
+        ["BREAK", "BREAK_NAP", "BREAK_SPEECH"].includes(assignment.assignmentType) &&
         assignment.startTime === "12:00"
     ),
     "The original BT must receive the break after the manager takes over the client block."
@@ -371,11 +374,11 @@ function testClientNapCannotBeClaimedByTwoStaffBreaks() {
     schedulerRules:{...SCHEDULER_RULES, preventSameStaffClientRepeatSameDay:false},
   });
   const automaticBreaks = result.assignments.filter(
-    (a) => a.assignmentType === "BREAK"
+    (a) => ["BREAK", "BREAK_NAP", "BREAK_SPEECH"].includes(a.assignmentType)
   );
   assert.ok(
-    automaticBreaks.every((a) => !a.clientId),
-    "Automatic breaks must never claim a client nap"
+    automaticBreaks.filter((a) => a.assignmentType === "BREAK_NAP").length <= 1,
+    "At most one caregiver break may be combined with a client nap"
   );
   assert.equal(
     automaticBreaks.filter((a) =>
