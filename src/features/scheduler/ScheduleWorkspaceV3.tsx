@@ -1093,6 +1093,7 @@ export function ScheduleWorkspaceV3() {
         <div className="toolbar-group">
           <button type="button" className={`button ${manualMode ? "button-warning" : "button-secondary"}`} disabled={working || loading || staff.length === 0} onClick={toggleManualMode}>Manual Mode: {manualMode ? "On" : "Off"}</button>
           <button type="button" className="button button-secondary" disabled={working || loading || staff.length === 0} onClick={() => void requestGenerateWeek()}>Auto Generate Week</button>
+          <button type="button" className="button button-secondary" disabled={working || loading || staff.length === 0} onClick={() => window.dispatchEvent(new Event("scheduler:ai-generate"))} title="Ask Scheduler AI to generate the selected day's schedule using saved rules, templates, preferences, and availability.">AI Generate</button>
           <button type="button" className="button button-primary" disabled={working || loading || staff.length === 0} onClick={() => void requestAutoGenerate()}>{working ? "Working..." : "Auto Generate Day"}</button>
         </div>
       </section>
