@@ -49,7 +49,7 @@ const StaffSchema = new Schema(
     },
     role: {
       type: String,
-      enum: ["BT", "RBT", "INTERN", "BCBA", "OFFICE_MANAGER", "OTHER"],
+      enum: ["BT", "RBT", "INTERN", "OFFICE_MANAGER", "BCBA", "DIRECTOR", "OTHER"],
       required: true,
     },
     employeeType: {
