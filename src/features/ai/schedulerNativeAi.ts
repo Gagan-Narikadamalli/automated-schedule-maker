@@ -19,6 +19,7 @@ import type { SchedulerAiHistoryMessage } from "./types";
 
 export type NativeSchedulerIntent =
   | "GENERATE"
+  | "CLEAR_DAY"
   | "REPAIR"
   | "CALL_OUT"
   | "BREAK_EDIT"
@@ -81,6 +82,7 @@ export const NATIVE_SCHEDULER_SUPPORTED_TOOLS = [
   "get_unplaced_assignments",
   "check_schedule",
   "generate_schedule",
+  "clear_schedule_day",
   "repair_schedule",
   "copy_schedule_day",
   "record_call_out",
@@ -637,6 +639,18 @@ export function planNativeSchedulerAction(args: {
   }
 
   if (
+    /\b(?:delete|clear|remove|wipe)\b[\s\S]*\b(?:entire|whole|complete|all|today'?s|day'?s)\b[\s\S]*\b(?:schedule|calendar)\b|\b(?:delete|clear|remove|wipe)\s+(?:today'?s\s+)?(?:schedule|calendar)\b/i.test(raw)
+  ) {
+    return {
+      intent: "CLEAR_DAY",
+      toolName: "clear_schedule_day",
+      input: {},
+      confidence: 0.99,
+      explanation: "Delete the selected day's schedule and Unplaced records only.",
+    };
+  }
+
+  if (
     /\b(?:minimal\s+fix|repair\s+(?:the\s+)?schedule|fix\s+(?:the\s+)?schedule|cover\s+(?:the\s+)?uncovered|make\s+sure\s+all\s+clients?\s+(?:are\s+)?covered)\b/i.test(
       raw
     )
@@ -850,6 +864,7 @@ function summarizeNativeToolResult(
   if (
     [
       "GENERATE",
+      "CLEAR_DAY",
       "REPAIR",
       "CALL_OUT",
       "BREAK_EDIT",
