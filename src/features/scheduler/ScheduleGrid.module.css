@@ -317,3 +317,15 @@
     top: 142px;
   }
 }
+
+
+.draggableStaffHeader {
+  cursor: grab !important;
+  user-select: none;
+}
+
+.draggableStaffHeader:active,
+.draggingStaffHeader {
+  cursor: grabbing !important;
+  opacity: 0.72;
+}
