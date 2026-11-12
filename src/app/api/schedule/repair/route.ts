@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { auditFinalCoverage } from "@/features/scheduler/engine/auditFinalCoverage";
 import { getEndTimeForSlot } from "@/features/scheduler/engine/dateUtils";
 import { repairCoverageMinimally } from "@/features/scheduler/engine/generateSchedule";
+import { placeStaffBreaksAfterCoverage } from "@/features/scheduler/engine/placeStaffBreaks";
 import type { SchedulerAssignment } from "@/features/scheduler/engine/types";
 import { applyFixedNapSessions } from "@/features/scheduler/server/applyFixedNapSessions";
 import { applyHistoricalTraining } from "@/features/scheduler/server/applyHistoricalTraining";
@@ -179,7 +180,26 @@ export async function POST(request: Request) {
       // assignment. Uncovered demand belongs in the manager tray.
       {allowAutomaticOverrides:false, allowProtectedRelocation:false, allowBreakRelocation:false}
     );
-    const result = coverageResult;
+    // Coverage repair runs first. Then fill missing staff breaks using the
+    // same break planner as fresh generation, while preserving all valid saved
+    // assignments and avoiding protected client-block swaps.
+    const breakPlan = placeStaffBreaksAfterCoverage({
+      staff: schedulerInput.staff,
+      clients: schedulerInput.clients,
+      assignments: coverageResult.assignments,
+      referenceAssignments: schedulerInput.referenceAssignments,
+      callOutStaffIds: schedulerInput.callOutStaffIds,
+      rules: {
+        ...dayData.extendedRules,
+        historicalBreakPriority: schedulerInput.rules.historicalBreakPriority,
+      },
+      schedulerRules: schedulerInput.rules,
+      allowProtectedRelief: false,
+    });
+    const result = {
+      ...coverageResult,
+      assignments: breakPlan.assignments,
+    };
     const affectedSlots = invalidOriginals.map(item => ({staffId:item.staffId,startTime:item.startTime}));
 
     const originalAssignmentIds = new Set(
@@ -223,7 +243,7 @@ export async function POST(request: Request) {
       clientId: assignment.clientId || null,
       assignmentType: assignment.assignmentType,
       source: "AUTO",
-      locked: false,
+      locked: assignment.locked,
       manuallyOverridden: false,
       note:
         assignment.note ||
@@ -354,9 +374,9 @@ export async function POST(request: Request) {
         addedAssignmentCount: newAssignments.length,
         managerGapCount,
         automaticOverrideMode: repairMode === "COVERAGE",
-        reservedBreakCount: 0,
-        breakReliefSwapCount: 0,
-        unplacedBreakStaffIds: [],
+        reservedBreakCount: breakPlan.reservedBreaks.length,
+        breakReliefSwapCount: breakPlan.reliefSwapCount,
+        unplacedBreakStaffIds: breakPlan.unplacedBreakStaffIds,
         totalBreakCount,
         metrics: finalMetrics,
         uncoveredRequirements: finalCoverage.uncoveredRequirements,
@@ -383,9 +403,9 @@ export async function POST(request: Request) {
       addedAssignmentCount: newAssignments.length,
       managerGapCount,
       automaticOverrideMode: repairMode === "COVERAGE",
-      reservedBreakCount: 0,
-      breakReliefSwapCount: 0,
-      unplacedBreakStaffIds: [],
+      reservedBreakCount: breakPlan.reservedBreaks.length,
+      breakReliefSwapCount: breakPlan.reliefSwapCount,
+      unplacedBreakStaffIds: breakPlan.unplacedBreakStaffIds,
       totalBreakCount,
       fixedNapSessionsApplied: fixedNapApplication.sessionCount,
       fixedNapClientsApplied: fixedNapApplication.clientCount,
