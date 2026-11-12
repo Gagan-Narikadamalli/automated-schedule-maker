@@ -38,6 +38,14 @@ type PopulatedClient = {
   color?: string;
 };
 
+type ClientScheduleEvent = {
+  clientId: string;
+  clientCode: string;
+  clientColor: string;
+  startTime: string;
+  eventType: "NAP" | "SPEECH";
+};
+
 type ScheduleAssignment = {
   id: string;
   staffId: string;
@@ -69,6 +77,7 @@ type ScheduleResponse = {
   rosterStaff?: Array<{ id: string; name: string }>;
   clients?: Array<{ id: string; code: string; name: string }>;
   assignments?: ScheduleAssignment[];
+  clientEvents?: ClientScheduleEvent[];
   recentSavedScheduleDates?: string[];
   requiredClientSlots?: number;
   error?: string;
@@ -266,7 +275,11 @@ function assignmentToGridCell(assignment: ScheduleAssignment): DemoGridCell {
   }
 }
 
-function buildGrid(staff: ScheduleStaff[], assignments: ScheduleAssignment[]): DemoGridCell[][] {
+function buildGrid(
+  staff: ScheduleStaff[],
+  assignments: ScheduleAssignment[],
+  clientEvents: ClientScheduleEvent[] = []
+): DemoGridCell[][] {
   const staffIndexById = new Map(staff.map((staffMember, index) => [staffMember.id, index]));
   const timeIndexByStartTime = new Map(DAILY_TIME_SLOTS.map((slot, index) => [slot.startTime, index]));
 
@@ -284,6 +297,49 @@ function buildGrid(staff: ScheduleStaff[], assignments: ScheduleAssignment[]): D
     if (row === undefined || column === undefined) return;
     grid[row][column] = assignmentToGridCell(assignment);
   });
+
+  // Nap sessions are client events, not separate staff assignments. Show the
+  // event in the column of the therapist paired immediately before/after it.
+  // If that therapist is taking a break in the same slot, show one combined
+  // Break + Nap cell instead of creating duplicate coverage.
+  for (const clientEvent of clientEvents) {
+    if (clientEvent.eventType !== "NAP") continue;
+    const eventRow = timeIndexByStartTime.get(clientEvent.startTime);
+    if (eventRow === undefined) continue;
+
+    const adjacentAssignments = [eventRow - 1, eventRow + 1]
+      .filter((row) => row >= 0 && row < DAILY_TIME_SLOTS.length)
+      .flatMap((row) => assignments.filter((assignment) =>
+        assignment.startTime === DAILY_TIME_SLOTS[row].startTime &&
+        assignment.assignmentType === "CLIENT_1_TO_1" &&
+        clientIdFromAssignment(assignment) === clientEvent.clientId
+      ));
+    const pairedStaffId = adjacentAssignments[0]?.staffId;
+    const column = pairedStaffId ? staffIndexById.get(String(pairedStaffId)) : undefined;
+    if (column === undefined) continue;
+
+    const existingCell = grid[eventRow][column];
+    if (existingCell.assignmentType === "BREAK") {
+      grid[eventRow][column] = {
+        ...existingCell,
+        text: `Break + Nap · ${clientEvent.clientCode}`,
+        assignmentType: "BREAK_NAP",
+        clientId: clientEvent.clientId,
+        clientCode: clientEvent.clientCode,
+        color: "#FFF3D6",
+      };
+    } else if (existingCell.assignmentType === "EMPTY") {
+      grid[eventRow][column] = {
+        text: `Nap · ${clientEvent.clientCode}`,
+        assignmentType: "NAP",
+        clientId: clientEvent.clientId,
+        clientCode: clientEvent.clientCode,
+        color: clientEvent.clientColor || "#F4EFE3",
+        source: "AUTO",
+        locked: true,
+      };
+    }
+  }
 
   return grid;
 }
@@ -535,10 +591,11 @@ export function ScheduleWorkspaceV3() {
       if (!response.ok) throw new Error(data.error || "Schedule could not be loaded.");
       const nextStaff = data.staff ?? [];
       const nextAssignments = data.assignments ?? [];
+      const nextClientEvents = data.clientEvents ?? [];
       setStaff(nextStaff);
       setRosterStaff(data.rosterStaff ?? []);
       setClients(data.clients ?? []);
-      setInitialGrid(buildGrid(nextStaff, nextAssignments));
+      setInitialGrid(buildGrid(nextStaff, nextAssignments, nextClientEvents));
       setRequiredClientSlots(data.requiredClientSlots ?? 0);
       setGridVersion((current) => current + 1);
       await Promise.all([
