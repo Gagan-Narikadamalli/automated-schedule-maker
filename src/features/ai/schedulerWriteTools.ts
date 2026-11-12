@@ -2,6 +2,7 @@ import { jsonSchema, tool } from "./schedulerToolDefinition";
 
 import { PUT as updateScheduleBatch } from "@/app/api/schedule/batch/route";
 import { POST as copyScheduleDay } from "@/app/api/schedule/copy/route";
+import { DELETE as clearScheduleDay } from "@/app/api/schedule/clear-day/route";
 import { POST as generateScheduleDay } from "@/app/api/schedule/generate/route";
 import { POST as generateScheduleRange } from "@/app/api/schedule/generate-range/route";
 import { POST as repairScheduleDay } from "@/app/api/schedule/repair/route";
@@ -183,7 +184,7 @@ function getWorkWeek(dateText: string): { startDate: string; endDate: string } {
 
 async function invokeJson(
   handler: (request: Request) => Promise<Response>,
-  method: "POST" | "PUT" | "PATCH",
+  method: "POST" | "PUT" | "PATCH" | "DELETE",
   body: JsonRecord
 ): Promise<JsonRecord> {
   const response = await handler(
@@ -300,6 +301,7 @@ function assignmentIsProtected(record: JsonRecord | null | undefined): boolean {
 
 export const SCHEDULER_WRITE_TOOL_NAMES = new Set([
   "generate_schedule",
+  "clear_schedule_day",
   "repair_schedule",
   "copy_schedule_day",
   "record_call_out",
@@ -312,7 +314,7 @@ export function createSchedulerWriteTools(context: SchedulerAiContext) {
   return {
     generate_schedule: tool({
       description:
-        "Generate the selected day or its Monday-Friday work week using the existing deterministic scheduler engine. Manual/locked assignments are preserved by the scheduler. Use when the user asks to generate, regenerate, auto-fill, build, or optimize the schedule.",
+        "Generate the selected day as a fresh full-day rebuild, or generate its Monday-Friday work week. The day run replaces all unlocked AUTO/TEMPLATE/COPIED assignments and recalculates every client block and staff break from current shifts, attendance, call-outs, saved Nap/Speech events, relationships, templates, and rules. Equal-score therapist choices can vary on each explicit generation. Manual/locked assignments remain protected. Use this for generate/regenerate/build/optimize; do not use Minimal Fix for a generation request.",
       inputSchema: generateSchema,
       execute: async ({ scope }) => {
         if (scope === "WORK_WEEK") {
@@ -325,6 +327,14 @@ export function createSchedulerWriteTools(context: SchedulerAiContext) {
         }
         return invokeJson(generateScheduleDay, "POST", { locationId, date });
       },
+    }),
+
+    clear_schedule_day: tool({
+      description:
+        "Permanently clear the selected date's schedule: delete every saved schedule cell and every Unplaced record for that date. This does not delete staff/client profiles, shifts, attendance, call-outs, or saved nap/speech events. Use only when the user explicitly asks to delete, clear, or completely remove the entire day's schedule. This action is destructive and requires explicit user intent.",
+      inputSchema: noInputSchema,
+      execute: async () =>
+        invokeJson(clearScheduleDay, "DELETE", { locationId, date }),
     }),
 
     repair_schedule: tool({
@@ -430,7 +440,7 @@ export function createSchedulerWriteTools(context: SchedulerAiContext) {
 
     edit_schedule_cells: tool({
       description:
-        "Set, move, replace, or clear one or more 30-minute schedule cells on the selected date. Staff and clients may be referenced by IDs or human-readable names/codes. By default this refuses to alter locked/manual cells and refuses scheduler-rule conflicts. Only enable override flags when the user explicitly asked for that override.",
+        "Set, move, replace, or clear one or more 30-minute schedule cells on the selected date. Use BREAK_NAP for ONE combined therapist break taken during that client's saved 30-minute nap slot; include the nap client association. Do not create a separate BREAK plus NAP staff assignment for the same therapist/time. Staff and clients may be referenced by IDs or human-readable names/codes. By default this refuses to alter locked/manual cells and refuses scheduler-rule conflicts. Only enable override flags when the user explicitly asked for that override.",
       inputSchema: editCellsSchema,
       execute: async ({ changes, allowLockedOverride = false, allowRuleOverride = false }) => {
         if (!Array.isArray(changes) || changes.length === 0 || changes.length > 40) {

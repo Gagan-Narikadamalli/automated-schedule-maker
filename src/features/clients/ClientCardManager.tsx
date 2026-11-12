@@ -558,7 +558,17 @@ export function ClientCardManager() {
       return;
     }
 
-    const staffRelationships = pairingStaff.map((staffMember) => {
+    const existingClient = editingId
+      ? clients.find((client) => client.id === editingId)
+      : undefined;
+    const relationshipsByStaffId = new Map(
+      (existingClient?.staffRelationships ?? []).map((item) => [
+        item.staffId,
+        item.relationship,
+      ])
+    );
+    // Preserve relationships for staff outside the active BT/RBT/Intern roster.
+    for (const staffMember of pairingStaff) {
       let relationship: Relationship = "ALLOWED";
       if (form.preferredStaffIds.includes(staffMember.id)) {
         relationship = "PREFERRED";
@@ -566,8 +576,12 @@ export function ClientCardManager() {
       if (form.restrictedStaffIds.includes(staffMember.id)) {
         relationship = "HARD_RESTRICTION";
       }
-      return { staffId: staffMember.id, relationship };
-    });
+      relationshipsByStaffId.set(staffMember.id, relationship);
+    }
+
+    const staffRelationships = Array.from(relationshipsByStaffId.entries()).map(
+      ([staffId, relationship]) => ({ staffId, relationship })
+    );
 
     try {
       setSaveError("");

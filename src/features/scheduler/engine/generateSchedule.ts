@@ -836,18 +836,32 @@ function coverageRoleTier(staffMember: SchedulerStaff): number {
       return 1;
     case "OFFICE_MANAGER":
       return 2;
-    case "OTHER":
-      return 3;
     case "BCBA":
+      return 3;
+    case "DIRECTOR":
       return 4;
+    case "OTHER":
+      return 5;
     default:
       return 5;
   }
 }
 
+function seededStaffTieBreak(staffId: string, startTime: string, seed: string): number {
+  let hash = 2166136261;
+  const value = `${seed}|${startTime}|${staffId}`;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
 function compareStaffCandidates(
   left: { staffMember: SchedulerStaff; score: number },
-  right: { staffMember: SchedulerStaff; score: number }
+  right: { staffMember: SchedulerStaff; score: number },
+  startTime: string,
+  generationSeed: string
 ): number {
   const roleDifference =
     coverageRoleTier(left.staffMember) -
@@ -861,7 +875,9 @@ function compareStaffCandidates(
     return right.score - left.score;
   }
 
-  return left.staffMember.name.localeCompare(right.staffMember.name);
+  const leftTieBreak = seededStaffTieBreak(left.staffMember.id, startTime, generationSeed);
+  const rightTieBreak = seededStaffTieBreak(right.staffMember.id, startTime, generationSeed);
+  return leftTieBreak - rightTieBreak;
 }
 
 /**
@@ -1059,7 +1075,7 @@ function findCoverageFirstSingleSlotStaff(
         score: number;
       } => candidate !== null
     )
-    .sort(compareStaffCandidates);
+    .sort((left, right) => compareStaffCandidates(left, right, requirement.startTime, input.generationSeed ?? "stable"));
 
   return candidates[0]?.staffMember ?? null;
 }
@@ -1495,7 +1511,7 @@ function findBestSwap(
           score: number;
         } => candidate !== null
       )
-      .sort(compareStaffCandidates);
+      .sort((left, right) => compareStaffCandidates(left, right, requirement.startTime, input.generationSeed ?? "stable"));
 
     const bestReplacement = replacementCandidates[0];
 

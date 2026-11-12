@@ -57,6 +57,11 @@ const navigationGroups: NavigationGroup[] = [
         shortLabel: "CLI",
       },
       {
+        href: "/client-staff",
+        label: "Client–Staff Assignments",
+        shortLabel: "PAIR",
+      },
+      {
         href: "/teams",
         label: "Teams",
         shortLabel: "TEAM",

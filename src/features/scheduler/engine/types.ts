@@ -14,6 +14,7 @@ export type StaffRole =
   | "INTERN"
   | "OFFICE_MANAGER"
   | "BCBA"
+  | "DIRECTOR"
   | "OTHER";
 
 export type SchedulerStaff = {
@@ -138,6 +139,7 @@ export type SchedulerInput = {
   historicalPatterns?: HistoricalPatternScores;
   callOutStaffIds: string[];
   rules: SchedulerRules;
+  generationSeed?: string;
 };
 
 export type UncoveredRequirement = {

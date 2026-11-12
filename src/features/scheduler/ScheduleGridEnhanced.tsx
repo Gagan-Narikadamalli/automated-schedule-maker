@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -152,8 +153,15 @@ export function ScheduleGridEnhanced({
   onDisplacedAssignment,
   onMutations,
 }: ScheduleGridProps) {
-  const columns = useMemo<GridColumn[]>(() => [...staff, ...SCRATCH_COLUMNS], [staff]);
+  const [staffColumnOrder, setStaffColumnOrder] = useState<string[]>(() => staff.map((member) => member.id));
+  const columns = useMemo<GridColumn[]>(() => {
+    const staffById = new Map(staff.map((member) => [member.id, member]));
+    const orderedStaff = staffColumnOrder.map((staffId) => staffById.get(staffId)).filter((member): member is StaffColumn => Boolean(member));
+    const orderedIds = new Set(orderedStaff.map((member) => member.id));
+    return [...orderedStaff, ...staff.filter((member) => !orderedIds.has(member.id)), ...SCRATCH_COLUMNS];
+  }, [staff, staffColumnOrder]);
   const [grid, setGrid] = useState<DemoGridCell[][]>(() => addScratchColumns(initialGrid));
+  const [draggedStaffColumnId, setDraggedStaffColumnId] = useState<string | null>(null);
   const [selection, setSelection] = useState<Selection>({
     anchor: { row: 0, column: 0 },
     focus: { row: 0, column: 0 },
@@ -177,6 +185,49 @@ export function ScheduleGridEnhanced({
 
   const normalizedSelection = useMemo(() => normalizeSelection(selection), [selection]);
   const selectedCell = grid[selection.focus.row]?.[selection.focus.column];
+
+  useEffect(() => {
+    const currentStaffIds = new Set(staff.map((member) => member.id));
+    setStaffColumnOrder((currentOrder) => {
+      const retained = currentOrder.filter((staffId) => currentStaffIds.has(staffId));
+      const retainedIds = new Set(retained);
+      return [...retained, ...staff.map((member) => member.id).filter((staffId) => !retainedIds.has(staffId))];
+    });
+  }, [staff]);
+
+  useEffect(() => {
+    const gridWrapper = gridWrapperRef.current;
+    if (!gridWrapper) return;
+
+    const selectedElement = gridWrapper.querySelector<HTMLElement>(
+      '[data-grid-cell="' + selection.focus.row + ':' + selection.focus.column + '"]'
+    );
+    if (!selectedElement) return;
+
+    // Adjust only the schedule's own scroll container. scrollIntoView() can
+    // also move outer page containers and disturb the sticky time column.
+    const wrapperBounds = gridWrapper.getBoundingClientRect();
+    const cellBounds = selectedElement.getBoundingClientRect();
+    const timeColumn = gridWrapper.querySelector<HTMLElement>(".schedule-time-column");
+    const stickyTimeColumnWidth = timeColumn?.getBoundingClientRect().width ?? 0;
+    const stickyHeader = gridWrapper.querySelector<HTMLElement>(".schedule-grid thead");
+    const stickyHeaderHeight = stickyHeader?.getBoundingClientRect().height ?? 0;
+    const visibleLeftEdge = wrapperBounds.left + gridWrapper.clientLeft + stickyTimeColumnWidth;
+    const visibleRightEdge = wrapperBounds.right - gridWrapper.clientLeft;
+    const visibleTopEdge = wrapperBounds.top + gridWrapper.clientTop + stickyHeaderHeight;
+    const visibleBottomEdge = wrapperBounds.bottom - gridWrapper.clientTop;
+
+    let horizontalAdjustment = 0;
+    let verticalAdjustment = 0;
+    if (cellBounds.left < visibleLeftEdge) horizontalAdjustment = cellBounds.left - visibleLeftEdge;
+    else if (cellBounds.right > visibleRightEdge) horizontalAdjustment = cellBounds.right - visibleRightEdge;
+    if (cellBounds.top < visibleTopEdge) verticalAdjustment = cellBounds.top - visibleTopEdge;
+    else if (cellBounds.bottom > visibleBottomEdge) verticalAdjustment = cellBounds.bottom - visibleBottomEdge;
+
+    if (horizontalAdjustment || verticalAdjustment) {
+      gridWrapper.scrollBy({ left: horizontalAdjustment, top: verticalAdjustment, behavior: "auto" });
+    }
+  }, [selection.focus.row, selection.focus.column]);
 
   function focusGrid() {
     window.requestAnimationFrame(() => gridWrapperRef.current?.focus());
@@ -1404,6 +1455,31 @@ export function ScheduleGridEnhanced({
     }
   }
 
+  function reorderStaffColumn(sourceStaffId: string, targetStaffId: string) {
+    if (!manualMode || sourceStaffId === targetStaffId || saving) return;
+    const sourceColumn = columns.findIndex((column) => column.id === sourceStaffId);
+    const targetColumn = columns.findIndex((column) => column.id === targetStaffId);
+    if (sourceColumn < 0 || targetColumn < 0 || isScratchColumn(sourceColumn) || isScratchColumn(targetColumn)) return;
+
+    const nextOrder = columns.filter((column) => !column.temporary).map((column) => column.id);
+    const [movedStaffId] = nextOrder.splice(nextOrder.indexOf(sourceStaffId), 1);
+    nextOrder.splice(nextOrder.indexOf(targetStaffId), 0, movedStaffId);
+
+    // Move the entire therapist column, including every time slot, as one unit.
+    setGrid((currentGrid) => currentGrid.map((scheduleRow) => {
+      const staffCells = scheduleRow.slice(0, staff.length);
+      const scratchCells = scheduleRow.slice(staff.length);
+      const reorderedCells = nextOrder.map((staffId) => staffCells[columns.findIndex((column) => column.id === staffId)]);
+      return [...reorderedCells, ...scratchCells];
+    }));
+    setStaffColumnOrder(nextOrder);
+    setSelection((current) => ({
+      anchor: { ...current.anchor, column: nextOrder.indexOf(columns[current.anchor.column]?.id) >= 0 ? nextOrder.indexOf(columns[current.anchor.column].id) : current.anchor.column },
+      focus: { ...current.focus, column: nextOrder.indexOf(columns[current.focus.column]?.id) >= 0 ? nextOrder.indexOf(columns[current.focus.column].id) : current.focus.column },
+    }));
+    onConflict("Therapist column moved. All assignments stayed with that therapist; this display order is currently for this schedule view.");
+  }
+
   function handleGridKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (editingCell || saving) return;
 
@@ -1633,8 +1709,30 @@ export function ScheduleGridEnhanced({
               {columns.map((column, columnIndex) => (
                 <th
                   key={column.id}
-                  className={`schedule-staff-heading ${column.temporary ? styles.scratchHeader : ""} ${columnIndex === staff.length ? styles.scratchDivider : ""}`}
-                  title={column.temporary ? "Temporary scratch space. Scratch cells are not saved to MongoDB." : undefined}
+                  className={`schedule-staff-heading ${column.temporary ? styles.scratchHeader : ""} ${columnIndex === staff.length ? styles.scratchDivider : ""} ${manualMode && !column.temporary ? styles.draggableStaffHeader : ""} ${draggedStaffColumnId === column.id ? styles.draggingStaffHeader : ""}`}
+                  title={column.temporary ? "Temporary scratch space. Scratch cells are not saved to MongoDB." : manualMode ? "Drag this therapist name to move the entire column. Available in Manual Mode." : undefined}
+                  draggable={manualMode && !column.temporary && !saving}
+                  onDragStart={(event) => {
+                    if (!manualMode || column.temporary || saving) { event.preventDefault(); return; }
+                    setDraggedStaffColumnId(column.id);
+                    event.dataTransfer.effectAllowed = "move";
+                    event.dataTransfer.setData("text/plain", "staff-column:" + column.id);
+                  }}
+                  onDragOver={(event) => {
+                    if (manualMode && draggedStaffColumnId && draggedStaffColumnId !== column.id) {
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "move";
+                    }
+                  }}
+                  onDrop={(event) => {
+                    const sourceStaffId = draggedStaffColumnId || event.dataTransfer.getData("text/plain").replace(/^staff-column:/, "");
+                    if (manualMode && sourceStaffId && !column.temporary) {
+                      event.preventDefault();
+                      reorderStaffColumn(sourceStaffId, column.id);
+                    }
+                    setDraggedStaffColumnId(null);
+                  }}
+                  onDragEnd={() => setDraggedStaffColumnId(null)}
                   style={
                     column.temporary
                       ? undefined
@@ -1680,6 +1778,7 @@ export function ScheduleGridEnhanced({
                   return (
                     <td
                       key={`${timeSlot.startTime}-${column.id}`}
+                      data-grid-cell={`${rowIndex}:${columnIndex}`}
                       className={`${cellClassName(cell, selected)} ${scratchColumn ? styles.scratchCell : ""} ${columnIndex === staff.length ? styles.scratchDivider : ""} ${dragTarget ? "schedule-cell-drop-target" : ""}`}
                       style={{ backgroundColor: cell.color }}
                       draggable={

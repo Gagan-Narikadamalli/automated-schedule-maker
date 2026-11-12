@@ -160,8 +160,11 @@ export async function DELETE(_request: Request, context: RouteContext) {
 
     await Promise.all([
       Staff.updateMany(
-        { locationId, teamId: team._id },
-        { $set: { teamId: null } }
+        { locationId, $or: [{ teamId: team._id }, { teamIds: team._id }] },
+        {
+          $set: { teamId: null },
+          $pull: { teamIds: team._id },
+        }
       ),
       Client.updateMany(
         { locationId, teamId: team._id },

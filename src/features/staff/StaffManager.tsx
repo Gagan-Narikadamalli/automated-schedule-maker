@@ -10,8 +10,9 @@ type StaffRole =
   | "BT"
   | "RBT"
   | "INTERN"
-  | "BCBA"
   | "OFFICE_MANAGER"
+  | "BCBA"
+  | "DIRECTOR"
   | "OTHER";
 
 type LocationOption = {
@@ -592,8 +593,9 @@ export function StaffManager() {
               <option value="BT">BT</option>
               <option value="RBT">RBT</option>
               <option value="INTERN">Intern</option>
-              <option value="BCBA">BCBA</option>
               <option value="OFFICE_MANAGER">Office Manager</option>
+              <option value="BCBA">BCBA</option>
+              <option value="DIRECTOR">Director</option>
               <option value="OTHER">Other</option>
             </select>
           </label>

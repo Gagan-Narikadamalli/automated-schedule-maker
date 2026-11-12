@@ -812,6 +812,24 @@ export function ScheduleAssistant({ onScheduleChanged }: ScheduleAssistantProps)
     }
   }
 
+  useEffect(() => {
+    const handleAiGenerateRequest = () => {
+      const requestContext = getRequestContext();
+      if (!requestContext.locationId) {
+        setOpen(true);
+        setStatus("Choose a clinic location before generating a schedule with AI.");
+        return;
+      }
+      setOpen(true);
+      void askScheduler(
+        undefined,
+        `Generate the schedule for the selected date ${requestContext.date} at ${requestContext.locationName}. Use the saved templates, scheduling rules, staff and client availability, shared client-staff preferences, events, breaks, and call-outs. Generate or update the schedule using the approved scheduler tools. Then summarize coverage, remaining Unplaced assignments, uncovered time, and any warnings.`
+      );
+    };
+    window.addEventListener("scheduler:ai-generate", handleAiGenerateRequest);
+    return () => window.removeEventListener("scheduler:ai-generate", handleAiGenerateRequest);
+  }, [askScheduler]);
+
   async function saveFeedback(
     message: ChatMessage,
     accepted: boolean,

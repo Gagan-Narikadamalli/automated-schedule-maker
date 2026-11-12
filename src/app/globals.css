@@ -430,11 +430,12 @@ textarea:focus-visible {
 
 .schedule-grid th,
 .schedule-grid td {
-  height: 39px;
-  padding: 5px 8px;
+  height: 30px;
+  padding: 2px 6px;
   border: 0;
-  border-radius: 8px;
-  font-size: 12px;
+  border-radius: 7px;
+  font-size: 11px;
+  line-height: 1.15;
   white-space: nowrap;
 }
 
@@ -442,27 +443,40 @@ textarea:focus-visible {
   position: sticky;
   top: 0;
   z-index: 5;
-  min-width: 124px;
+  width: 96px;
+  min-width: 96px;
+  max-width: 96px;
+  overflow: hidden;
   background: linear-gradient(180deg, #dcecf8, #d1e5f2);
   color: #11365e;
   text-align: left;
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 900;
   box-shadow: inset 0 -1px 0 rgba(49, 111, 149, 0.1), 0 2px 7px rgba(36, 92, 126, 0.05);
 }
 
 .schedule-staff-heading {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
   font-weight: 900;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
 }
 
 .schedule-time-column {
   position: sticky;
   left: 0;
-  z-index: 4;
-  width: 126px;
-  min-width: 126px !important;
-  max-width: 126px;
+  left: 3px;
+  z-index: 9;
+  width: 150px;
+  min-width: 150px !important;
+  max-width: 150px;
+  isolation: isolate;
+  background-color: #eaf3f8;
+  background-clip: padding-box;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
   background: linear-gradient(90deg, #f4f9fc, #eaf3f8);
   color: #153650;
   text-align: left;
@@ -471,17 +485,20 @@ textarea:focus-visible {
 }
 
 .schedule-grid thead .schedule-time-column {
-  z-index: 8;
+  left: 3px;
+  z-index: 12;
   background: linear-gradient(180deg, #dbeaf5, #cedfeb);
 }
 
 .schedule-cell {
   position: relative;
-  width: 124px;
-  min-width: 124px;
-  max-width: 124px;
+  width: 96px;
+  min-width: 96px;
+  max-width: 96px;
+  overflow: hidden;
   background: #ffffff;
   color: #113247;
+  font-size: 10px;
   font-weight: 760;
   user-select: none;
   box-shadow:
@@ -512,6 +529,30 @@ textarea:focus-visible {
   text-align: center;
   font-weight: 900;
   box-shadow: inset 0 0 0 1px #f3d790;
+}
+
+.schedule-cell-nap {
+  background: linear-gradient(145deg, #f7f2e7, #e9dfc9) !important;
+  color: #65502c;
+  text-align: center;
+  font-weight: 850;
+  box-shadow: inset 0 0 0 1px #d8c7a5;
+}
+
+.schedule-cell-break-nap {
+  background: linear-gradient(135deg, #fff0c7 0%, #f5d88f 48%, #e8d8b5 52%, #f8f0df 100%) !important;
+  color: #684516;
+  text-align: center;
+  font-weight: 900;
+  box-shadow: inset 0 0 0 2px #d9b45f;
+}
+
+.schedule-cell-break-speech {
+  background: linear-gradient(135deg, #fff0c7 0%, #f5d88f 48%, #e8e1f8 52%, #eee9ff 100%) !important;
+  color: #59436f;
+  text-align: center;
+  font-weight: 900;
+  box-shadow: inset 0 0 0 2px #c8b7e8;
 }
 
 .schedule-cell-speech {

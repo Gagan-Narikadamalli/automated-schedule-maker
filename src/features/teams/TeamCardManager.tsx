@@ -23,6 +23,7 @@ type StaffRecord = {
   fullName: string;
   role: string;
   teamId: string | null;
+  teamIds?: string[];
   active: boolean;
 };
 
@@ -102,7 +103,7 @@ export function TeamCardManager() {
         return true;
       }
       const memberNames = [
-        ...activeStaff.filter((item) => item.teamId === team.id).map((item) => item.fullName),
+        ...activeStaff.filter((item) => (item.teamIds?.length ? item.teamIds : item.teamId ? [item.teamId] : []).includes(team.id)).map((item) => item.fullName),
         ...activeClients.filter((item) => item.teamId === team.id).map((item) => item.displayCode),
       ].join(" ");
       return `${team.name} ${memberNames}`.toLowerCase().includes(normalized);
@@ -189,7 +190,7 @@ export function TeamCardManager() {
     setTeamName(team.name);
     setTeamColor(team.color);
     setSelectedStaffIds(
-      activeStaff.filter((staffMember) => staffMember.teamId === team.id).map((staffMember) => staffMember.id)
+      activeStaff.filter((staffMember) => (staffMember.teamIds?.length ? staffMember.teamIds : staffMember.teamId ? [staffMember.teamId] : []).includes(team.id)).map((staffMember) => staffMember.id)
     );
     setSelectedClientIds(
       activeClients.filter((client) => client.teamId === team.id).map((client) => client.id)
@@ -209,11 +210,11 @@ export function TeamCardManager() {
     setter(current.includes(id) ? current.filter((value) => value !== id) : [...current, id]);
   }
 
-  async function updateStaffTeam(staffId: string, teamId: string | null) {
+  async function updateStaffTeams(staffId: string, teamIds: string[]) {
     const response = await fetch(`/api/staff/${staffId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ teamId }),
+      body: JSON.stringify({ teamIds }),
     });
     const data = (await response.json()) as { error?: string };
     if (!response.ok) {
@@ -239,10 +240,16 @@ export function TeamCardManager() {
     const operations: Promise<void>[] = [];
 
     for (const staffMember of activeStaff) {
-      const belongs = staffMember.teamId === teamId;
+      const currentTeamIds = staffMember.teamIds?.length
+        ? staffMember.teamIds
+        : staffMember.teamId ? [staffMember.teamId] : [];
+      const belongs = currentTeamIds.includes(teamId);
       const shouldBelong = desiredStaff.has(staffMember.id);
       if (belongs !== shouldBelong) {
-        operations.push(updateStaffTeam(staffMember.id, shouldBelong ? teamId : null));
+        const nextTeamIds = shouldBelong
+          ? [...currentTeamIds, teamId]
+          : currentTeamIds.filter((currentTeamId) => currentTeamId !== teamId);
+        operations.push(updateStaffTeams(staffMember.id, nextTeamIds));
       }
     }
 
@@ -315,7 +322,7 @@ export function TeamCardManager() {
       eyebrow: "DELETE TEAM",
       title: `Permanently delete ${team.name}?`,
       description:
-        "Staff and clients in this team will be moved to No team. Their profiles and schedules will remain.",
+        "Staff will be removed from this team only; any other team memberships will remain. Clients assigned to this team will become unassigned. Their profiles and schedules will remain.",
       actions: [
         {
           id: "delete",
@@ -381,7 +388,7 @@ export function TeamCardManager() {
           </div>
           <div className={cardStyles.summaryItem}>
             <span>Assigned staff</span>
-            <strong>{activeStaff.filter((item) => item.teamId).length}</strong>
+            <strong>{activeStaff.filter((item) => (item.teamIds?.length ? item.teamIds : item.teamId ? [item.teamId] : []).length > 0).length}</strong>
           </div>
           <div className={cardStyles.summaryItem}>
             <span>Assigned clients</span>
@@ -403,7 +410,7 @@ export function TeamCardManager() {
         ) : (
           <div className={cardStyles.grid}>
             {visibleTeams.map((team) => {
-              const teamStaff = activeStaff.filter((item) => item.teamId === team.id);
+              const teamStaff = activeStaff.filter((item) => (item.teamIds?.length ? item.teamIds : item.teamId ? [item.teamId] : []).includes(team.id));
               const teamClients = activeClients.filter((item) => item.teamId === team.id);
 
               return (

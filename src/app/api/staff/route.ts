@@ -16,7 +16,7 @@ type StaffRequest = {
   fullName?: string;
   startDate?: string;
   endDate?: string | null;
-  role?: "BT" | "RBT" | "INTERN" | "BCBA" | "OFFICE_MANAGER" | "OTHER";
+  role?: "BT" | "RBT" | "INTERN" | "BCBA" | "OFFICE_MANAGER" | "DIRECTOR" | "OTHER";
   employeeType?: "FULL_TIME" | "PART_TIME";
   teamId?: string | null;
   teamIds?: string[];

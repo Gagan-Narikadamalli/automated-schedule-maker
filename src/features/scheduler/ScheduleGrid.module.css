@@ -1,6 +1,6 @@
 .scrollWindow {
-  max-height: calc(100vh - 238px);
-  min-height: 440px;
+  max-height: calc(100vh - 205px);
+  min-height: 360px;
   overflow: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable both-edges;
@@ -179,8 +179,10 @@
 
 :global(.schedule-grid th),
 :global(.schedule-grid td) {
-  height: 33px;
-  padding: 3px 7px;
+  height: 28px;
+  padding: 2px 5px;
+  font-size: 11px;
+  line-height: 1.15;
   border-right-color: #aebdc5;
   border-bottom-color: #aebdc5;
 }
@@ -205,9 +207,15 @@
 }
 
 :global(.schedule-time-column) {
-  width: 185px !important;
-  min-width: 185px !important;
-  max-width: 185px !important;
+  left: 3px;
+  width: 150px !important;
+  min-width: 150px !important;
+  max-width: 150px !important;
+  z-index: 10;
+  isolation: isolate;
+  background-color: #eaf3f8;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: clip;
@@ -274,8 +282,8 @@
 
 @media (max-width: 900px) {
   .scrollWindow {
-    max-height: calc(100vh - 205px);
-    min-height: 360px;
+    max-height: calc(100vh - 180px);
+    min-height: 300px;
   }
 
   :global(.schedule-grid-tools) {
@@ -299,14 +307,15 @@
 
 @media (max-width: 600px) {
   .scrollWindow {
-    max-height: calc(100vh - 188px);
-    min-height: 320px;
+    max-height: calc(100vh - 165px);
+    min-height: 280px;
   }
 
   :global(.schedule-grid th),
   :global(.schedule-grid td) {
-    height: 31px;
-    font-size: 12px;
+    height: 27px;
+    font-size: 11px;
+    padding: 2px 4px;
   }
 
   :global(.schedule-grid-tools) {
@@ -316,4 +325,16 @@
   :global(.spreadsheet-help) {
     top: 142px;
   }
+}
+
+
+.draggableStaffHeader {
+  cursor: grab !important;
+  user-select: none;
+}
+
+.draggableStaffHeader:active,
+.draggingStaffHeader {
+  cursor: grabbing !important;
+  opacity: 0.72;
 }

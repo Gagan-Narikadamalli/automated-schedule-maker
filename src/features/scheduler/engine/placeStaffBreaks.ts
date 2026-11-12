@@ -106,12 +106,14 @@ function roleBreakOrder(role: StaffRole): number {
       return 0;
     case "INTERN":
       return 1;
-    case "OTHER":
-      return 2;
     case "OFFICE_MANAGER":
-      return 3;
+      return 2;
     case "BCBA":
+      return 3;
+    case "DIRECTOR":
       return 4;
+    case "OTHER":
+      return 5;
     default:
       return 5;
   }
@@ -125,8 +127,10 @@ function reliefRolePriority(role: StaffRole): number {
       return 1;
     case "INTERN":
       return 2;
-    case "OTHER":
+    case "DIRECTOR":
       return 3;
+    case "OTHER":
+      return 4;
     case "BT":
     case "RBT":
       return 4;
@@ -270,10 +274,13 @@ function createBreakAssignment(
   return {
     id: `break-${staffMember.id}-${startTime}`,
     staffId: staffMember.id,
+    clientId: fixedEvent?.client.id,
     startTime,
-    assignmentType: "BREAK",
+    assignmentType: fixedEvent?.assignmentType ?? "BREAK",
     source: "AUTO",
-    locked: true,
+    // Automatic breaks are regenerated after coverage and must be replaceable
+    // on the next Auto Generate or Repair run.
+    locked: false,
     note: `Automatically reserved staff break.${eventNote}`,
   };
 }
@@ -353,7 +360,7 @@ function findBestFreeBreaks(
           napLinkKey &&
           assignments.some(
             (assignment) =>
-              assignment.assignmentType === "BREAK" &&
+              isBreakAssignment(assignment) &&
               assignment.note?.includes(napLinkKey)
           )
         );

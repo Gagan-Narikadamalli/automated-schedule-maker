@@ -38,6 +38,14 @@ type PopulatedClient = {
   color?: string;
 };
 
+type ClientScheduleEvent = {
+  clientId: string;
+  clientCode: string;
+  clientColor: string;
+  startTime: string;
+  eventType: "NAP" | "SPEECH";
+};
+
 type ScheduleAssignment = {
   id: string;
   staffId: string;
@@ -69,6 +77,7 @@ type ScheduleResponse = {
   rosterStaff?: Array<{ id: string; name: string }>;
   clients?: Array<{ id: string; code: string; name: string }>;
   assignments?: ScheduleAssignment[];
+  clientEvents?: ClientScheduleEvent[];
   recentSavedScheduleDates?: string[];
   requiredClientSlots?: number;
   error?: string;
@@ -244,9 +253,9 @@ function assignmentToGridCell(assignment: ScheduleAssignment): DemoGridCell {
     case "BREAK":
       return { ...common, clientId: null, clientCode: null, text: "Break", assignmentType: "BREAK", color: "#FFFFFF" };
     case "BREAK_NAP":
-      return { ...common, text: clientCode ? `Break/Nap · ${clientCode}` : "Break/Nap", assignmentType: "BREAK_NAP", color: "#FFF3D6" };
+      return { ...common, text: clientCode ? `Break + Nap · ${clientCode}` : "Break + Nap", assignmentType: "BREAK_NAP", color: "#FFF3D6" };
     case "BREAK_SPEECH":
-      return { ...common, text: "Break/Speech", assignmentType: "BREAK_SPEECH", color: "#E4F1FA" };
+      return { ...common, text: clientCode ? `Break + Speech · ${clientCode}` : "Break + Speech", assignmentType: "BREAK_SPEECH", color: "#E4F1FA" };
     case "NAP":
       return { ...common, text: clientCode ? `${clientCode} Nap` : "Nap", assignmentType: "NAP", color: "#F4EFE3" };
     case "SPEECH":
@@ -266,7 +275,11 @@ function assignmentToGridCell(assignment: ScheduleAssignment): DemoGridCell {
   }
 }
 
-function buildGrid(staff: ScheduleStaff[], assignments: ScheduleAssignment[]): DemoGridCell[][] {
+function buildGrid(
+  staff: ScheduleStaff[],
+  assignments: ScheduleAssignment[],
+  clientEvents: ClientScheduleEvent[] = []
+): DemoGridCell[][] {
   const staffIndexById = new Map(staff.map((staffMember, index) => [staffMember.id, index]));
   const timeIndexByStartTime = new Map(DAILY_TIME_SLOTS.map((slot, index) => [slot.startTime, index]));
 
@@ -284,6 +297,92 @@ function buildGrid(staff: ScheduleStaff[], assignments: ScheduleAssignment[]): D
     if (row === undefined || column === undefined) return;
     grid[row][column] = assignmentToGridCell(assignment);
   });
+
+  // Nap sessions are client events, not separate staff assignments. Show the
+  // event in the column of the therapist paired immediately before/after it.
+  // If that therapist is taking a break in the same slot, show one combined
+  // Break + Nap cell instead of creating duplicate coverage.
+  for (const clientEvent of clientEvents) {
+    if (clientEvent.eventType !== "NAP") continue;
+    const eventRow = timeIndexByStartTime.get(clientEvent.startTime);
+    if (eventRow === undefined) continue;
+
+    const adjacentAssignments = [eventRow - 1, eventRow + 1]
+      .filter((row) => row >= 0 && row < DAILY_TIME_SLOTS.length)
+      .flatMap((row) => assignments.filter((assignment) =>
+        assignment.startTime === DAILY_TIME_SLOTS[row].startTime &&
+        assignment.assignmentType === "CLIENT_1_TO_1" &&
+        clientIdFromAssignment(assignment) === clientEvent.clientId
+      ));
+
+    // If a relief handoff or a short schedule segment means the client has no
+    // assignment in the immediately adjacent slot, use the nearest same-day
+    // pairing to keep the saved nap visible rather than leaving a misleading
+    // empty hole in the therapist grid.
+    const nearestClientAssignments = assignments
+      .filter((assignment) =>
+        assignment.assignmentType === "CLIENT_1_TO_1" &&
+        clientIdFromAssignment(assignment) === clientEvent.clientId
+      )
+      .sort((left, right) =>
+        Math.abs(DAILY_TIME_SLOTS.findIndex((slot) => slot.startTime === left.startTime) - eventRow) -
+        Math.abs(DAILY_TIME_SLOTS.findIndex((slot) => slot.startTime === right.startTime) - eventRow)
+      );
+    const explicitlyLinkedBreaks = assignments.filter((assignment) =>
+      assignment.startTime === clientEvent.startTime &&
+      assignment.assignmentType === "BREAK_NAP" &&
+      clientIdFromAssignment(assignment) === clientEvent.clientId
+    );
+    const candidateStaffIds = [
+      ...new Set([
+        ...explicitlyLinkedBreaks.map((assignment) => String(assignment.staffId)),
+        ...adjacentAssignments.map((assignment) => String(assignment.staffId)),
+        ...nearestClientAssignments.map((assignment) => String(assignment.staffId)),
+      ]),
+    ];
+    const column = candidateStaffIds
+      .map((staffId) => staffIndexById.get(staffId))
+      .find((candidateColumn) => {
+        if (candidateColumn === undefined) return false;
+        const candidateCell = grid[eventRow][candidateColumn];
+        if (["EMPTY", "BREAK", "NAP"].includes(candidateCell.assignmentType)) {
+          return true;
+        }
+        return candidateCell.assignmentType === "BREAK_NAP" &&
+          candidateCell.clientId === clientEvent.clientId;
+      });
+    if (column === undefined) continue;
+
+    const existingCell = grid[eventRow][column];
+    if (existingCell.assignmentType === "BREAK") {
+      grid[eventRow][column] = {
+        ...existingCell,
+        text: `Break + Nap · ${clientEvent.clientCode}`,
+        assignmentType: "BREAK_NAP",
+        clientId: clientEvent.clientId,
+        clientCode: clientEvent.clientCode,
+        color: "#FFF3D6",
+      };
+    } else if (existingCell.assignmentType === "BREAK_NAP") {
+      grid[eventRow][column] = {
+        ...existingCell,
+        text: `Break + Nap · ${clientEvent.clientCode}`,
+        clientId: clientEvent.clientId,
+        clientCode: clientEvent.clientCode,
+        color: "#FFF3D6",
+      };
+    } else if (existingCell.assignmentType === "EMPTY") {
+      grid[eventRow][column] = {
+        text: `Nap · ${clientEvent.clientCode}`,
+        assignmentType: "NAP",
+        clientId: clientEvent.clientId,
+        clientCode: clientEvent.clientCode,
+        color: clientEvent.clientColor || "#F4EFE3",
+        source: "AUTO",
+        locked: true,
+      };
+    }
+  }
 
   return grid;
 }
@@ -535,10 +634,11 @@ export function ScheduleWorkspaceV3() {
       if (!response.ok) throw new Error(data.error || "Schedule could not be loaded.");
       const nextStaff = data.staff ?? [];
       const nextAssignments = data.assignments ?? [];
+      const nextClientEvents = data.clientEvents ?? [];
       setStaff(nextStaff);
       setRosterStaff(data.rosterStaff ?? []);
       setClients(data.clients ?? []);
-      setInitialGrid(buildGrid(nextStaff, nextAssignments));
+      setInitialGrid(buildGrid(nextStaff, nextAssignments, nextClientEvents));
       setRequiredClientSlots(data.requiredClientSlots ?? 0);
       setGridVersion((current) => current + 1);
       await Promise.all([
@@ -889,6 +989,42 @@ export function ScheduleWorkspaceV3() {
     }
   }
 
+  async function requestClearDay() {
+    if (demoMode) {
+      setStatusMessage("Clearing a saved clinic schedule is available only with live clinic data.");
+      return;
+    }
+    const confirmed = window.confirm(
+      `Completely delete the saved schedule for ${selectedDate}? This removes every schedule cell and every Unplaced record for this date. Staff shifts, attendance, call-outs, and saved nap/speech events will remain.`
+    );
+    if (!confirmed) return;
+
+    try {
+      setWorking(true);
+      setStatusMessage(`Clearing every saved schedule assignment for ${selectedDate}...`);
+      const response = await fetch("/api/schedule/clear-day", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ locationId, date: selectedDate }),
+      });
+      const data = await readJson<{
+        success?: boolean;
+        deletedAssignmentCount?: number;
+        deletedUnplacedCount?: number;
+        error?: string;
+      }>(response);
+      if (!response.ok) throw new Error(data.error || "The schedule could not be cleared.");
+      await loadSchedule();
+      setStatusMessage(
+        `Cleared ${data.deletedAssignmentCount ?? 0} schedule cell(s) and ${data.deletedUnplacedCount ?? 0} Unplaced record(s) for ${selectedDate}. The date is now empty and ready for a fresh generation.`
+      );
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "The schedule could not be cleared.");
+    } finally {
+      setWorking(false);
+    }
+  }
+
   async function requestAutoGenerate() {
     if (demoMode) {
       loadDemoSchedule();
@@ -1089,10 +1225,12 @@ export function ScheduleWorkspaceV3() {
             Minimal Fix
           </button>
           <button type="button" className="button button-secondary" disabled={working || loading} onClick={() => setShowCopyPanel((open) => !open)}>Copy Day</button>
+          <button type="button" className="button button-warning" disabled={working || loading || demoMode} onClick={() => void requestClearDay()} title="Delete every saved assignment and Unplaced record for the selected date.">Delete Day Schedule</button>
         </div>
         <div className="toolbar-group">
           <button type="button" className={`button ${manualMode ? "button-warning" : "button-secondary"}`} disabled={working || loading || staff.length === 0} onClick={toggleManualMode}>Manual Mode: {manualMode ? "On" : "Off"}</button>
           <button type="button" className="button button-secondary" disabled={working || loading || staff.length === 0} onClick={() => void requestGenerateWeek()}>Auto Generate Week</button>
+          <button type="button" className="button button-secondary" disabled={working || loading || staff.length === 0} onClick={() => window.dispatchEvent(new Event("scheduler:ai-generate"))} title="Ask Scheduler AI to generate the selected day's schedule using saved rules, templates, preferences, and availability.">AI Generate</button>
           <button type="button" className="button button-primary" disabled={working || loading || staff.length === 0} onClick={() => void requestAutoGenerate()}>{working ? "Working..." : "Auto Generate Day"}</button>
         </div>
       </section>
