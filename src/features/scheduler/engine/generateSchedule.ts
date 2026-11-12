@@ -1511,7 +1511,7 @@ function findBestSwap(
           score: number;
         } => candidate !== null
       )
-      .sort(compareStaffCandidates);
+      .sort((left, right) => compareStaffCandidates(left, right, requirement.startTime, input.generationSeed ?? "stable"));
 
     const bestReplacement = replacementCandidates[0];
 
