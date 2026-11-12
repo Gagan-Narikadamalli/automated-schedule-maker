@@ -196,10 +196,37 @@ export function ScheduleGridEnhanced({
   }, [staff]);
 
   useEffect(() => {
-    const selectedElement = gridWrapperRef.current?.querySelector<HTMLElement>(
+    const gridWrapper = gridWrapperRef.current;
+    if (!gridWrapper) return;
+
+    const selectedElement = gridWrapper.querySelector<HTMLElement>(
       '[data-grid-cell="' + selection.focus.row + ':' + selection.focus.column + '"]'
     );
-    selectedElement?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "auto" });
+    if (!selectedElement) return;
+
+    // Adjust only the schedule's own scroll container. scrollIntoView() can
+    // also move outer page containers and disturb the sticky time column.
+    const wrapperBounds = gridWrapper.getBoundingClientRect();
+    const cellBounds = selectedElement.getBoundingClientRect();
+    const timeColumn = gridWrapper.querySelector<HTMLElement>(".schedule-time-column");
+    const stickyTimeColumnWidth = timeColumn?.getBoundingClientRect().width ?? 0;
+    const stickyHeader = gridWrapper.querySelector<HTMLElement>(".schedule-grid thead");
+    const stickyHeaderHeight = stickyHeader?.getBoundingClientRect().height ?? 0;
+    const visibleLeftEdge = wrapperBounds.left + gridWrapper.clientLeft + stickyTimeColumnWidth;
+    const visibleRightEdge = wrapperBounds.right - gridWrapper.clientLeft;
+    const visibleTopEdge = wrapperBounds.top + gridWrapper.clientTop + stickyHeaderHeight;
+    const visibleBottomEdge = wrapperBounds.bottom - gridWrapper.clientTop;
+
+    let horizontalAdjustment = 0;
+    let verticalAdjustment = 0;
+    if (cellBounds.left < visibleLeftEdge) horizontalAdjustment = cellBounds.left - visibleLeftEdge;
+    else if (cellBounds.right > visibleRightEdge) horizontalAdjustment = cellBounds.right - visibleRightEdge;
+    if (cellBounds.top < visibleTopEdge) verticalAdjustment = cellBounds.top - visibleTopEdge;
+    else if (cellBounds.bottom > visibleBottomEdge) verticalAdjustment = cellBounds.bottom - visibleBottomEdge;
+
+    if (horizontalAdjustment || verticalAdjustment) {
+      gridWrapper.scrollBy({ left: horizontalAdjustment, top: verticalAdjustment, behavior: "auto" });
+    }
   }, [selection.focus.row, selection.focus.column]);
 
   function focusGrid() {
