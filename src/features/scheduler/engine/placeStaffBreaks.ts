@@ -356,7 +356,7 @@ function findBestFreeBreaks(
           napLinkKey &&
           assignments.some(
             (assignment) =>
-              assignment.assignmentType === "BREAK" &&
+              isBreakAssignment(assignment) &&
               assignment.note?.includes(napLinkKey)
           )
         );
