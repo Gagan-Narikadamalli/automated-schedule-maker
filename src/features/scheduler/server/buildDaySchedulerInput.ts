@@ -550,6 +550,7 @@ function normalizeStaffRole(value: unknown): StaffRole {
     value === "INTERN" ||
     value === "OFFICE_MANAGER" ||
     value === "BCBA" ||
+    value === "DIRECTOR" ||
     value === "OTHER"
   ) {
     return value;
