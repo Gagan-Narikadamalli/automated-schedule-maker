@@ -28,6 +28,7 @@ type ScheduleStaff = StaffColumn & {
   role: string;
   teamId: string | null;
   availableSlots: string[];
+  onHold?: boolean;
 };
 
 type PopulatedClient = {
