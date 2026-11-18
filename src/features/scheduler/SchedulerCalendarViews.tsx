@@ -26,6 +26,7 @@ type ScheduleStaff = {
   id: string;
   name: string;
   color?: string;
+  onHold?: boolean;
 };
 
 type ScheduleAssignment = {
@@ -92,7 +93,7 @@ type ClientColumn = {
 type ClientCellResult = {
   text: string;
   detail: string;
-  kind: "coverage" | "nap" | "speech" | "uncovered";
+  kind: "coverage" | "nap" | "speech" | "uncovered" | "on-hold";
   staffColor?: string;
 };
 
@@ -385,6 +386,9 @@ function ClientScheduleView({
     const coverageName = coverage
       ? staffNameById.get(coverage.staffId) || "another staff member"
       : null;
+    const heldCoverage = coverage
+      ? staff.some((member) => member.id === coverage.staffId && member.onHold)
+      : false;
 
     const napBreak = matching.find((assignment) => assignment.assignmentType === "BREAK_NAP");
     const nap = matching.find((assignment) => assignment.assignmentType === "NAP");
@@ -431,6 +435,15 @@ function ClientScheduleView({
         text: "Speech",
         detail: "Scheduled 30-minute speech",
         kind: "speech",
+      };
+    }
+
+    if (coverage && heldCoverage) {
+      return {
+        text: "On hold · " + (coverageName || "Staff"),
+        detail: "Not counted as working coverage",
+        kind: "on-hold",
+        staffColor: "#9AA3AA",
       };
     }
 
