@@ -152,6 +152,13 @@ export async function PUT(request: Request) {
       locationId,
       active: true,
     });
+    const heldStaffRows = await Staff.find({
+      _id: { $in: staffIds },
+      locationId,
+      active: true,
+      onHold: true,
+    }).select("_id").lean();
+    const heldStaffIds = new Set(heldStaffRows.map((member) => String(member._id)));
 
     if (validStaffCount !== staffIds.length) {
       return NextResponse.json(
@@ -174,6 +181,15 @@ export async function PUT(request: Request) {
       if (change.assignmentType === "EMPTY") {
         resolvedClientByChange.set(index, null);
         continue;
+      }
+
+      if (heldStaffIds.has(change.staffId)) {
+        conflicts.push({
+          staffId: change.staffId,
+          startTime: change.startTime,
+          code: "STAFF_ON_HOLD",
+          message: "This staff member is on hold. Resume them before adding schedule assignments.",
+        });
       }
 
       if (
@@ -394,7 +410,7 @@ export async function PUT(request: Request) {
     }
 
     const nonOverridableConflicts = conflicts.filter((conflict) =>
-      ["CLIENT_NOT_FOUND", "CLIENT_NOT_ACTIVE", "INVALID_ASSIGNMENT", "NAP_CLIENT_REQUIRED", "NAP_CLIENT_DOUBLE_BOOKED", "DUPLICATE_BATCH_STAFF_SLOT", "BATCH_CLIENT_CONFLICT", "CLIENT_NAPPING"].includes(
+      ["CLIENT_NOT_FOUND", "CLIENT_NOT_ACTIVE", "INVALID_ASSIGNMENT", "NAP_CLIENT_REQUIRED", "NAP_CLIENT_DOUBLE_BOOKED", "DUPLICATE_BATCH_STAFF_SLOT", "BATCH_CLIENT_CONFLICT", "CLIENT_NAPPING", "STAFF_ON_HOLD"].includes(
         conflict.code
       )
     );
