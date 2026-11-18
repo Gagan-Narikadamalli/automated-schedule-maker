@@ -287,6 +287,13 @@ export async function PUT(request: Request) {
       );
     }
 
+    if (staffMember.onHold === true) {
+      return NextResponse.json(
+        { error: "This staff member is on hold and cannot receive schedule assignments until resumed." },
+        { status: 409 }
+      );
+    }
+
     if (clientId && !client) {
       return NextResponse.json(
         { error: "The selected client was not found." },
