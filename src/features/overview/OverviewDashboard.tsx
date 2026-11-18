@@ -16,6 +16,7 @@ type DailyMetric = {
   additionalLaborHours: number;
   staffPresent: number;
   staffAbsent: number;
+  staffOnHold: number;
   uncoveredHours: number;
 };
 
@@ -171,6 +172,7 @@ export function OverviewDashboard() {
       "Uncovered Client Hours",
       "Staff Present",
       "Staff Absent",
+      "Staff On Hold (Excluded)",
       "Uncovered Client Hours",
     ];
 
@@ -183,6 +185,7 @@ export function OverviewDashboard() {
       metric.additionalLaborHours,
       metric.staffPresent,
       metric.staffAbsent,
+      metric.staffOnHold,
       metric.uncoveredHours,
     ]);
 
@@ -322,6 +325,7 @@ export function OverviewDashboard() {
           <div className="metric-grid">
             <article className="metric-card"><span>Staff available</span><strong>{selectedDay.staffPresent}</strong></article>
             <article className="metric-card"><span>Staff absent</span><strong>{selectedDay.staffAbsent}</strong></article>
+            <article className="metric-card"><span>Staff on hold (excluded)</span><strong>{selectedDay.staffOnHold}</strong></article>
             <article className="metric-card"><span>Uncovered hours</span><strong>{selectedDay.uncoveredHours.toFixed(1)} h</strong></article>
             <article className="metric-card"><span>Coverage</span><strong>{dailyCoveragePercent.toFixed(1)}%</strong></article>
           </div>
@@ -370,6 +374,7 @@ export function OverviewDashboard() {
                 <th>Coverage gap</th>
                 <th>Staff present</th>
                 <th>Staff absent</th>
+                <th>On hold (excluded)</th>
                 <th>Uncovered</th>
               </tr>
             </thead>
@@ -384,12 +389,13 @@ export function OverviewDashboard() {
                   <td>{metric.additionalLaborHours.toFixed(1)} h</td>
                   <td>{metric.staffPresent}</td>
                   <td>{metric.staffAbsent}</td>
+                  <td>{metric.staffOnHold}</td>
                   <td>{metric.uncoveredHours.toFixed(1)} h</td>
                 </tr>
               ))}
               {!loading && !data?.dailyMetrics?.length && (
                 <tr>
-                  <td colSpan={9}>No metrics are available for this week.</td>
+                  <td colSpan={10}>No metrics are available for this week.</td>
                 </tr>
               )}
             </tbody>
