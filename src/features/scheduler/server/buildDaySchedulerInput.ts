@@ -917,7 +917,7 @@ export async function buildDaySchedulerInput(
     rawPreviousWeekdayAssignments,
     rawEarlierWeekAssignments,
   ] = await Promise.all([
-    Staff.find({ locationId, active: true })
+    Staff.find({ locationId, active: true, onHold: { $ne: true } })
       .sort({ fullName: 1 })
       .lean(),
     Client.find({ locationId, active: true })
