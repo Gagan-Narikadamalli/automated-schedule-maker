@@ -169,7 +169,7 @@ export function OverviewDashboard() {
       "Client Hours Needed",
       "Client Hours Covered",
       "Staff Client Hours Scheduled",
-      "Uncovered Client Hours",
+      "Coverage Gap",
       "Staff Present",
       "Staff Absent",
       "Staff On Hold (Excluded)",
@@ -292,6 +292,11 @@ export function OverviewDashboard() {
       </section>
 
       <section className="metric-grid">
+        <article className="metric-card">
+          <span>Staff on hold (excluded)</span>
+          <strong>{data?.dailyMetrics?.[0]?.staffOnHold ?? 0}</strong>
+          <small>Not included in working staff counts or hour calculations.</small>
+        </article>
         <article className="metric-card">
           <span>Client hours needed</span>
           <strong>{overviewValues.clientHoursNeeded.toFixed(1)}</strong>
