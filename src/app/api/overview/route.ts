@@ -70,16 +70,24 @@ export async function GET(request: Request) {
         ScheduleAssignment.find({ locationId, date }).lean()
       )
     );
-    const staffDocuments = await Staff.find({ locationId, active: true })
-      .select(
-        "fullName employeeType minimumWeeklyHours targetWeeklyHours maximumWeeklyHours"
-      )
-      .sort({ fullName: 1 })
-      .lean();
+    const [staffDocuments, heldStaffDocuments] = await Promise.all([
+      Staff.find({ locationId, active: true, onHold: { $ne: true } })
+        .select("fullName employeeType minimumWeeklyHours targetWeeklyHours maximumWeeklyHours")
+        .sort({ fullName: 1 })
+        .lean(),
+      Staff.find({ locationId, active: true, onHold: true })
+        .select("_id")
+        .lean(),
+    ]);
+    const heldStaffIds = new Set(
+      (heldStaffDocuments as unknown as PlainRecord[]).map((member) => String(member._id))
+    );
 
     const dailyMetrics = dates.map((date, index) => {
       const dayData = dayInputs[index];
-      const assignments = assignmentsByDate[index] as unknown as PlainRecord[];
+      const assignments = (assignmentsByDate[index] as unknown as PlainRecord[]).filter(
+        (assignment) => !heldStaffIds.has(String(assignment.staffId ?? ""))
+      );
       const slotHours = dayData.extendedRules.slotLengthMinutes / 60;
       const requirements = new Set(
         effectiveInputs[index].input.clients.flatMap((client) =>
@@ -116,7 +124,8 @@ export async function GET(request: Request) {
         staffPresent: dayData.staff.filter(
           (staffMember) => staffMember.availableSlots.length > 0
         ).length,
-        staffAbsent: dayData.input.callOutStaffIds.length,
+        staffAbsent: dayData.input.callOutStaffIds.filter((staffId) => !heldStaffIds.has(String(staffId))).length,
+        staffOnHold: heldStaffIds.size,
         uncoveredHours: uncoveredSlots * slotHours,
       };
     });
@@ -138,6 +147,7 @@ export async function GET(request: Request) {
         }
 
         const staffId = String(rawAssignment.staffId);
+        if (heldStaffIds.has(staffId)) continue;
         const key = `${staffId}:${String(rawAssignment.startTime)}`;
         if (seenStaffSlots.has(key)) continue;
         seenStaffSlots.add(key);
