@@ -1633,8 +1633,8 @@ export function ScheduleGridEnhanced({
               {columns.map((column, columnIndex) => (
                 <th
                   key={column.id}
-                  className={`schedule-staff-heading ${column.temporary ? styles.scratchHeader : ""} ${columnIndex === staff.length ? styles.scratchDivider : ""}`}
-                  title={column.temporary ? "Temporary scratch space. Scratch cells are not saved to MongoDB." : undefined}
+                  className={`schedule-staff-heading ${column.temporary ? styles.scratchHeader : ""} ${column.onHold ? styles.heldStaffHeader : ""} ${columnIndex === staff.length ? styles.scratchDivider : ""}`}
+                  title={column.temporary ? "Temporary scratch space. Scratch cells are not saved to MongoDB." : column.onHold ? "This employee is on hold and excluded from working totals." : undefined}
                   style={
                     column.temporary
                       ? undefined
@@ -1652,6 +1652,7 @@ export function ScheduleGridEnhanced({
                       />
                     ) : null}
                     {column.name}
+                    {column.onHold ? <small className={styles.heldStaffLabel}>ON HOLD</small> : null}
                   </span>
                 </th>
               ))}
@@ -1680,8 +1681,8 @@ export function ScheduleGridEnhanced({
                   return (
                     <td
                       key={`${timeSlot.startTime}-${column.id}`}
-                      className={`${cellClassName(cell, selected)} ${scratchColumn ? styles.scratchCell : ""} ${columnIndex === staff.length ? styles.scratchDivider : ""} ${dragTarget ? "schedule-cell-drop-target" : ""}`}
-                      style={{ backgroundColor: cell.color }}
+                      className={`${cellClassName(cell, selected)} ${scratchColumn ? styles.scratchCell : ""} ${column.onHold ? styles.heldStaffCell : ""} ${columnIndex === staff.length ? styles.scratchDivider : ""} ${dragTarget ? "schedule-cell-drop-target" : ""}`}
+                      style={{ backgroundColor: column.onHold ? "#E7EAED" : cell.color }}
                       draggable={
                         manualMode &&
                         !placementCell &&
