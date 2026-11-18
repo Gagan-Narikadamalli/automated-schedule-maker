@@ -540,3 +540,16 @@
     padding: 17px;
   }
 }
+
+
+.clientCell_on-hold {
+  background: linear-gradient(145deg, #eceff1, #dfe3e6);
+  border-color: #c6cdd2;
+  filter: grayscale(1);
+  opacity: 0.78;
+}
+
+.clientCell_on-hold strong,
+.clientCell_on-hold span {
+  color: #68737b;
+}
