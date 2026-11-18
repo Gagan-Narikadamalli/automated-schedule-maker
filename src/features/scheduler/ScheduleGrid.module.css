@@ -317,3 +317,28 @@
     top: 142px;
   }
 }
+
+
+.heldStaffHeader {
+  background: #e5e8eb !important;
+  color: #58636c !important;
+  box-shadow: inset 0 4px 0 #aab2b9 !important;
+  filter: grayscale(1);
+}
+
+.heldStaffLabel {
+  display: block;
+  margin-top: 3px;
+  color: #68737b;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.heldStaffCell {
+  background: #e7eaed !important;
+  color: #727b82 !important;
+  filter: grayscale(1);
+  opacity: 0.72;
+  pointer-events: none;
+}
