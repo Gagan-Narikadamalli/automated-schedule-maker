@@ -98,6 +98,11 @@ const StaffSchema = new Schema(
       type: Boolean,
       default: true,
     },
+    onHold: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
   },
   {
     timestamps: true,
