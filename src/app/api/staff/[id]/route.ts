@@ -39,6 +39,7 @@ type StaffUpdateRequest = {
     endTime: string;
   }>;
   active?: boolean;
+  onHold?: boolean;
 };
 
 type RouteContext = {
@@ -137,6 +138,10 @@ export async function PATCH(request: Request, context: RouteContext) {
       staffMember.active = body.active;
     }
 
+    if (body.onHold !== undefined) {
+      staffMember.onHold = body.onHold;
+    }
+
     if (
       staffMember.minimumWeeklyHours < 0 ||
       staffMember.targetWeeklyHours < staffMember.minimumWeeklyHours ||
@@ -162,9 +167,13 @@ export async function PATCH(request: Request, context: RouteContext) {
       entityType: "STAFF",
       entityId: String(staffMember._id),
       summary:
-        body.active === false
-          ? `Archived staff member ${staffMember.fullName}.`
-          : `Updated staff member ${staffMember.fullName}.`,
+        body.onHold === true
+          ? `Placed staff member ${staffMember.fullName} on hold.`
+          : body.onHold === false
+            ? `Resumed staff member ${staffMember.fullName}.`
+            : body.active === false
+              ? `Archived staff member ${staffMember.fullName}.`
+              : `Updated staff member ${staffMember.fullName}.`,
       before,
       after,
     });
