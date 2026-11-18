@@ -1219,6 +1219,10 @@ export function ScheduleWorkspaceV3() {
         <strong>{locationName}</strong>
         <span>{selectedDate}</span>
         <span>{requiredClientSlots} client blocks required</span>
+        <span>{staff.filter((staffMember) => !staffMember.onHold).length} working staff</span>
+        {staff.some((staffMember) => staffMember.onHold) && (
+          <span>{staff.filter((staffMember) => staffMember.onHold).length} on hold (excluded)</span>
+        )}
         <span>{manualMode ? "Manual override enabled" : "Auto-safe enabled"}</span>
         {fullDayCallOutStaffIds.length > 0 && (
           <span>
