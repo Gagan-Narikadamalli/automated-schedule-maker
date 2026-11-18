@@ -99,7 +99,7 @@ export async function GET(request: Request) {
     ] = await Promise.all([
       buildDaySchedulerInput(locationId, date),
       Staff.find({ locationId, active: true })
-        .select("fullName role color teamId shiftPatterns startDate endDate")
+        .select("fullName role color teamId shiftPatterns startDate endDate onHold")
         .sort({ fullName: 1 })
         .lean(),
       Client.find({ locationId, active: true })
@@ -167,15 +167,21 @@ export async function GET(request: Request) {
           const hasShiftToday = Array.isArray(staffMember.shiftPatterns) && staffMember.shiftPatterns.some(
             (pattern: PlainDatabaseRecord) => patternMatchesDate(pattern.days ?? [], date)
           );
-          return Boolean(schedulerMember && (schedulerMember.availableSlots.length > 0 || hasShiftToday));
+          const staffId = String(staffMember._id);
+          const hasSavedAssignment = plainAssignments.some((assignment) => String(assignment.staffId) === staffId);
+          const isOnHold = staffMember.onHold === true;
+          return isOnHold
+            ? hasShiftToday || hasSavedAssignment
+            : Boolean(schedulerMember && (schedulerMember.availableSlots.length > 0 || hasShiftToday));
         })
         .map((staffMember) => ({
           id: String(staffMember._id),
-          name: firstNameOnly(staffMember.fullName),
+          name: staffMember.onHold === true ? String(staffMember.fullName ?? "") : firstNameOnly(staffMember.fullName),
           role: String(staffMember.role ?? ""),
           color: String(staffMember.color ?? "#DCE9F8"),
           teamId: staffMember.teamId ? String(staffMember.teamId) : null,
-          availableSlots: availableSlotMap.get(String(staffMember._id)) ?? [],
+          onHold: staffMember.onHold === true,
+          availableSlots: staffMember.onHold === true ? [] : availableSlotMap.get(String(staffMember._id)) ?? [],
         })),
       assignments: plainAssignments.filter((assignment) => !assignment.clientId || assignment.assignmentType !== "CLIENT_1_TO_1" || absentClientIds.has(String(typeof assignment.clientId === "object" ? assignment.clientId._id : assignment.clientId))).map((assignment) => serializeAssignment(assignment)),
       clientEvents: effectiveClients.flatMap((client) => {
