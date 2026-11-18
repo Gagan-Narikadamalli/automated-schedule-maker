@@ -34,6 +34,7 @@ export type StaffColumn = {
   id: string;
   name: string;
   color: string;
+  onHold?: boolean;
 };
 
 export type CellPosition = {
