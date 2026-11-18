@@ -1012,8 +1012,11 @@ export async function buildDaySchedulerInput(
     clientAttendanceOverrides,
     date
   );
+  const schedulableStaffIds = new Set(staff.map((staffMember) => staffMember.id));
   const existingAssignments = mapExistingAssignments(
-    assignmentDocuments
+    assignmentDocuments.filter((assignment) =>
+      schedulableStaffIds.has(String(assignment.staffId))
+    )
   );
 
   const weekdayPreference = await WeekdayTemplatePreference.findOne({ locationId, dayOfWeek }).lean() as
