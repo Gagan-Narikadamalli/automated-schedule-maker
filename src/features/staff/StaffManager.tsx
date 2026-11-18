@@ -50,6 +50,7 @@ type StaffMember = {
   maximumWeeklyHours: number;
   shiftPatterns: ShiftPattern[];
   active: boolean;
+  onHold?: boolean;
 };
 
 type StaffForm = {
@@ -464,6 +465,30 @@ export function StaffManager() {
     setShiftDraft(createEmptyShiftPattern());
     setMessage(`Editing ${staffMember.fullName}.`);
     window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  async function setStaffHoldState(staffMember: StaffMember, onHold: boolean) {
+    try {
+      setSaving(true);
+      setMessage(onHold
+        ? `Placing ${staffMember.fullName} on hold...`
+        : `Resuming ${staffMember.fullName}...`);
+      const response = await fetch(`/api/staff/${staffMember.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ onHold }),
+      });
+      const data = await readJson<StaffResponse>(response);
+      if (!response.ok) throw new Error(data.error || "Staff hold status could not be changed.");
+      await refreshStaff();
+      setMessage(onHold
+        ? `${staffMember.fullName} is on hold and excluded from working totals.`
+        : `${staffMember.fullName} has been resumed and is included in working totals again.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Staff hold status could not be changed.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function setStaffActiveState(staffMember: StaffMember, active: boolean) {
@@ -892,7 +917,7 @@ export function StaffManager() {
                   </tr>
                 ) : (
                   staff.map((staffMember) => (
-                    <tr key={staffMember.id}>
+                    <tr key={staffMember.id} style={staffMember.onHold ? { backgroundColor: "#eef0f2", color: "#6b747c" } : undefined}>
                       <td>
                         <span
                           className="color-dot"
@@ -920,7 +945,7 @@ export function StaffManager() {
                       <td>
                         {staffMember.minimumWeeklyHours} / {staffMember.targetWeeklyHours} / {staffMember.maximumWeeklyHours}
                       </td>
-                      <td>{staffMember.active ? "Active" : "Archived"}</td>
+                      <td>{staffMember.active ? (staffMember.onHold ? "Active · On Hold" : "Active") : "Archived"}</td>
                       <td>
                         <div className="table-actions">
                           <button
@@ -930,6 +955,15 @@ export function StaffManager() {
                             onClick={() => editStaffMember(staffMember)}
                           >
                             Edit
+                          </button>
+
+                          <button
+                            type="button"
+                            className={staffMember.onHold ? "button button-primary button-small" : "button button-secondary button-small"}
+                            disabled={saving || !staffMember.active}
+                            onClick={() => void setStaffHoldState(staffMember, !staffMember.onHold)}
+                          >
+                            {staffMember.onHold ? "Resume" : "Hold"}
                           </button>
 
                           <button
